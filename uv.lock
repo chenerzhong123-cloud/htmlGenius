@@ -312,7 +312,7 @@ wheels = [
 ]
 
 [[package]]
-name = "htmleditor"
+name = "htmlgenius"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

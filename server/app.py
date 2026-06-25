@@ -10,7 +10,7 @@ from .models import AnnotationCreate, DocumentCreate, VersionCreate
 BASE = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("HTMLEDITOR_DB", BASE / "annotations.db"))
 
-app = FastAPI(title="htmleditor stage0")
+app = FastAPI(title="htmlGenius · stage0")
 storage.init_db(DB_PATH)
 
 

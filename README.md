@@ -1,4 +1,4 @@
-# htmleditor · 阶段 0(地基 + TextQuote 重定位保险栓)
+# htmlGenius · 阶段 0(地基 + TextQuote 重定位保险栓)
 
 HTML 批注与反馈回灌系统的阶段 0 原型。设计文档见 `docs/2026-06-25-html-annotation-feedback-loop-design.md`,实现计划见 `docs/2026-06-25-stage0-plan.md`。
 
