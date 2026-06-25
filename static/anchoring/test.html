@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>text-quote test</title></head>
+<body>
+  <div id="root">
+    <p id="p1">苹果是一种水果,味道甜美。</p>
+    <p id="p2">香蕉也是水果,味道不错。</p>
+    <p id="p3">重复词汇:水果 水果 水果。</p>
+  </div>
+  <script type="module">
+    import { describe, anchor } from "./text-quote.js";
+    window.__describe = describe;
+    window.__anchor = anchor;
+    window.__root = document.getElementById("root");
+    window.__p1 = document.getElementById("p1").firstChild;
+    window.__ready = true;
+  </script>
+</body>
+</html>
