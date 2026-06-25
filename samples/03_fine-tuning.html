@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Fine-tuning — AI 百科 #03</title>
+<style>* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #1d1d1f;
+  background: #f5f5f7;
+  max-width: 430px;
+  margin: 0 auto;
+}
+:root {
+  --blue: #0066cc;
+  --blue-dark: #2997ff;
+  --white: #ffffff;
+  --parchment: #f5f5f7;
+  --tile-1: #272729;
+  --tile-2: #2a2a2c;
+  --tile-3: #252527;
+  --pure-black: #000000;
+  --ink: #1d1d1f;
+  --ink-80: #333333;
+  --ink-48: #7a7a7a;
+  --dark-body: #ffffff;
+  --dark-muted: #cccccc;
+  --hairline: #e0e0e0;
+  --divider: rgba(0,0,0,0.04);
+  --divider-soft: rgba(0,0,0,0.08);
+  --dark-div: rgba(255,255,255,0.08);
+}
+.tile { padding: 48px 20px; }
+.t-w { background: var(--white); }
+.t-p { background: var(--parchment); }
+.t-d1 { background: var(--tile-1); color: var(--dark-body); }
+.t-d2 { background: var(--tile-2); color: var(--dark-body); }
+.t-d3 { background: var(--tile-3); color: var(--dark-body); }
+.in { max-width: 390px; margin: 0 auto; }
+.hero { text-align: center; }
+.hero-h {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.07;
+  letter-spacing: -0.28px;
+  color: var(--dark-body);
+}
+.hero-lead {
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 1.14;
+  letter-spacing: 0.196px;
+  color: var(--dark-muted);
+  margin-top: 12px;
+}
+.section-h {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.10;
+  letter-spacing: 0;
+  margin-bottom: 20px;
+}
+.section-h-center { text-align: center; }
+.t-d .section-h { color: var(--dark-body); }
+.section-lead {
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 1.14;
+  letter-spacing: 0.196px;
+  color: var(--ink-48);
+  margin-bottom: 32px;
+  text-align: center;
+}
+.t-d .section-lead { color: var(--dark-muted); }
+.body {
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+}
+.t-d .body { color: var(--dark-muted); }
+.body + .body { margin-top: 16px; }
+strong { font-weight: 600; }
+.hl { color: var(--blue); font-weight: 600; }
+.t-d .hl { color: var(--blue-dark); }
+.cap {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.43;
+  letter-spacing: -0.224px;
+  color: var(--ink-48);
+}
+.t-d .cap { color: var(--dark-muted); }
+.fine {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.0;
+  letter-spacing: -0.12px;
+  color: var(--ink-48);
+}
+.code {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 15px;
+  background: var(--white);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--blue);
+}
+.t-p .code { background: var(--white); }
+/* Dark trends */
+.tr-stack { display: flex; flex-direction: column; }
+.tr {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--dark-div);
+}
+.tr:first-child { padding-top: 0; }
+.tr:last-child { border-bottom: none; padding-bottom: 0; }
+.tr-num {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: -0.224px;
+  color: var(--blue-dark);
+  margin-bottom: 6px;
+}
+.tr-title {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.19;
+  letter-spacing: 0.231px;
+  color: var(--dark-body);
+  margin-bottom: 8px;
+}
+.tr-body {
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+  color: var(--dark-muted);
+}
+/* Steps */
+.st + .st { margin-top: 28px; }
+.st-num {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.07;
+  letter-spacing: -0.28px;
+  color: var(--blue);
+  opacity: 0.12;
+  margin-bottom: 8px;
+}
+.st-title {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.24;
+  letter-spacing: -0.374px;
+  margin-bottom: 6px;
+}
+.st-body {
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+  color: var(--ink-48);
+}
+/* Compare table */
+.card {
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  overflow: hidden;
+}
+.cmp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.cmp-table { width: 100%; border-collapse: collapse; }
+.cmp-table th {
+  font-size: 14px; font-weight: 600; letter-spacing: -0.224px;
+  padding: 14px 16px; text-align: center;
+  background: var(--parchment); color: var(--ink-48);
+  border-bottom: 1px solid var(--hairline);
+}
+.cmp-table th:first-child { text-align: left; }
+.cmp-table td {
+  font-size: 15px; font-weight: 400; line-height: 1.47;
+  letter-spacing: -0.374px; padding: 16px; text-align: center;
+  border-bottom: 1px solid var(--divider); color: var(--ink-80);
+}
+.cmp-table td:first-child { text-align: left; font-weight: 600; color: var(--ink); }
+.cmp-table tr:last-child td { border-bottom: none; }
+.cmp-note {
+  padding: 16px 20px; font-size: 14px; font-weight: 400;
+  line-height: 1.43; letter-spacing: -0.224px;
+  color: var(--ink-48); border-top: 1px solid var(--divider);
+}
+/* Tips */
+.tip-stack { display: flex; flex-direction: column; gap: 12px; }
+.tip {
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+}
+.tip-title {
+  font-size: 17px; font-weight: 600; letter-spacing: -0.374px; margin-bottom: 6px;
+}
+.tip-body {
+  font-size: 17px; font-weight: 400; line-height: 1.47;
+  letter-spacing: -0.374px; color: var(--ink-48);
+}
+/* Summary */
+.sum { text-align: center; }
+.sum-h {
+  font-size: 28px; font-weight: 600; line-height: 1.07;
+  letter-spacing: -0.28px; color: var(--dark-body);
+}
+.sum-h em { font-style: normal; color: var(--blue-dark); }
+.sum-sub {
+  font-size: 17px; font-weight: 600; line-height: 1.19;
+  letter-spacing: 0.231px; color: var(--dark-muted); margin-top: 12px;
+}
+/* Footer */
+.foot {
+  background: var(--tile-1);
+  padding: 16px 20px;
+  text-align: center;
+}
+.foot-text {
+  font-size: 12px; font-weight: 400; letter-spacing: -0.12px;
+  color: rgba(255,255,255,0.5); line-height: 1.0;
+}
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<section class="tile t-d1">
+  <div class="in hero">
+    <h1 class="hero-h">Fine-tuning</h1>
+    <p class="hero-lead">给 AI 开个“小灶”精准训练</p>
+  </div>
+</section>
+
+<!-- Definition -->
+<section class="tile t-p">
+  <div class="in">
+    <h2 class="section-h">它是什么？</h2>
+      <p class="body">Fine-tuning（微调）是在一个已经训练好的大模型基础上，用少量特定领域的数据再“调教”一轮，让它成为某个领域的专家。</p>
+      <p class="body">一个大厨可以把任何菜系都做得不错（基座模型），但如果让他去一家日料店专门做寿司三个月（微调），他就会成为寿司专家——Fine-tuning 就是 AI 的“专项进修”。</p>
+      <p class="body">因为通用模型什么都会但什么都不精。医疗 AI 需要读懂病历，法律 AI 需要理解法条——直接让通用模型上阵会出错，Fine-tuning 能精准解决这个问题。</p>
+  </div>
+</section>
+
+<!-- Trends -->
+<section class="tile t-d2">
+  <div class="in">
+    <h2 class="section-h section-h-center">为什么现在这么火？</h2>
+    <div class="tr-stack">
+        <div class="tr">
+          <p class="tr-num">01</p>
+          <h3 class="tr-title">企业定制化的核心手段</h3>
+          <p class="tr-body">2024-2025 年，企业不再满足于“接入一个通用 ChatGPT”，而是想要“自己的 AI”。Fine-tuning 是成本最低的定制化路径——不需要从头训练，几十条数据就能出效果。</p>
+        </div>
+        <div class="tr">
+          <p class="tr-num">02</p>
+          <h3 class="tr-title">DeepSeek V4 等模型的推动</h3>
+          <p class="tr-body">DeepSeek V3 等开源模型的发布让 Fine-tuning 的门槛大幅降低。以前只有大厂调得起，现在个人开发者也能在自己的 Mac 上微调一个 7B 模型。</p>
+        </div>
+        <div class="tr">
+          <p class="tr-num">03</p>
+          <h3 class="tr-title">“垂直 AI”的爆发</h3>
+          <p class="tr-body">医疗、法律、金融、教育等垂直领域对 AI 的需求爆炸增长。每个行业都想要自己的“专属模型”，而 Fine-tuning 是最直接的实现路径。</p>
+        </div>
+    </div>
+  </div>
+</section>
+
+<!-- Steps -->
+<section class="tile t-p">
+  <div class="in">
+    <h2 class="section-h section-h-center">核心原理</h2>
+      <div class="st">
+        <div class="st-num">01</div>
+        <h3 class="st-title">准备好“专项教材”</h3>
+        <p class="st-body">收集几百到几千条该领域的高质量数据——比如法律问答对、医学病历摘要——整理成 AI 能理解的问答格式。</p>
+      </div>
+      <div class="st">
+        <div class="st-num">02</div>
+        <h3 class="st-title">在基座模型上“补课”</h3>
+        <p class="st-body">不改变模型大部分参数，只对最后几层或特定参数进行小幅度更新。相当于“在大脑已经成型的基础上，补一部分新知识”。</p>
+      </div>
+      <div class="st">
+        <div class="st-num">03</div>
+        <h3 class="st-title">用 LoRA 等技术省算力</h3>
+        <p class="st-body">全量微调很贵。LoRA 等高效微调技术让微调成本降到原来的千分之一——普通人也能负担。</p>
+      </div>
+  </div>
+</section>
+
+<!-- Compare -->
+<section class="tile t-w">
+  <div class="in">
+    <h2 class="section-h">和 “从头训练 vs RAG” 有什么区别？</h2>
+    <div class="card">
+      <div class="cmp-scroll">
+        <table class="cmp-table">
+          <thead>
+            <tr><th></th><th>Fine-tuning</th><th>从头训练</th><th>RAG</th></tr>
+          </thead>
+          <tbody>
+        <tr><td>核心思路</td><td>调整已有模型</td><td>从零造模型</td><td>外挂知识库</td></tr>
+        <tr><td>典型场景</td><td>垂直领域定制</td><td>发布新模型</td><td>动态知识问答</td></tr>
+        <tr><td>通俗类比</td><td>让大厨学寿司</td><td>从切菜开始教</td><td>给厨师配食谱本</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="cmp-note">一句话总结差异 从头训练是“教一个新厨师做菜”，Fine-tuning 是“让一个老厨师精进一门菜系”。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Tips -->
+<section class="tile t-p">
+  <div class="in">
+    <h2 class="section-h">怎么用上它？</h2>
+    <div class="tip-stack">
+        <div class="tip">
+          <h3 class="tip-title">用 OpenAI 官方微调 API</h3>
+          <p class="tip-body">OpenAI 提供一键微调功能，上传几十条训练数据即可生成专属模型。不需要 GPU，不需要代码。</p>
+        </div>
+        <div class="tip">
+          <h3 class="tip-title">用开源工具自行微调</h3>
+          <p class="tip-body">Hugging Face + LoRA + 一台好显卡，就能在自己的电脑上微调开源模型（如 LLaMA、Qwen）。门槛比一年前低了十倍。</p>
+        </div>
+    </div>
+  </div>
+</section>
+
+<!-- Summary -->
+<section class="tile t-d3">
+  <div class="in sum">
+    <h2 class="sum-h">Fine-tuning 是 AI 的“研究生阶段”——通才学完，再精修一个拿手本领。</h2>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="foot">
+  <p class="foot-text">AI 百科卡片 · #03 Fine-tuning · 共 100 期</p>
+</footer>
+
+</body>
+</html>

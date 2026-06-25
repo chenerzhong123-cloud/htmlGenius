@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTML 批注与反馈回灌闭环 — 设计文档</title>
+<style>
+  :root {
+    --ink: #1f2328;
+    --ink-soft: #57606a;
+    --bg: #ffffff;
+    --bg-soft: #f6f8fa;
+    --bg-zebra: #fbfcfd;
+    --line: #d0d7de;
+    --line-soft: #e7ebef;
+    --accent: #0969da;
+    --code-bg: #eff1f3;
+    --quote-bar: #0969da;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-size: 16px;
+    line-height: 1.8;
+    color: var(--ink);
+    background: var(--bg);
+    margin: 0;
+    padding: 0;
+  }
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 48px 28px 96px;
+  }
+  .doc-header { margin-bottom: 8px; }
+  h1 {
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    margin: 0 0 16px;
+    color: var(--ink);
+  }
+  .meta {
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 18px;
+    color: var(--ink-soft);
+    font-size: 14px;
+    line-height: 1.9;
+  }
+  .meta strong { color: var(--ink); font-weight: 600; }
+  .toc {
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 22px 18px;
+    margin: 28px 0 8px;
+  }
+  .toc .toc-title {
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--ink-soft);
+    letter-spacing: 0.04em;
+    margin: 0 0 10px;
+    text-transform: uppercase;
+  }
+  .toc ol {
+    margin: 0;
+    padding-left: 22px;
+    columns: 2;
+    column-gap: 32px;
+    font-size: 14.5px;
+    line-height: 2;
+  }
+  h2 {
+    font-size: 22px;
+    font-weight: 650;
+    line-height: 1.35;
+    margin: 44px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+    color: var(--ink);
+    scroll-margin-top: 24px;
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 650;
+    line-height: 1.5;
+    margin: 26px 0 8px;
+    color: var(--ink);
+    scroll-margin-top: 24px;
+  }
+  p { margin: 14px 0; }
+  ul, ol { margin: 14px 0; padding-left: 24px; }
+  li { margin: 6px 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  strong { font-weight: 650; color: var(--ink); }
+  code {
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 6px;
+    color: #1f2328;
+    word-break: break-word;
+  }
+  pre {
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, "Liberation Mono", monospace;
+    background: var(--bg-soft);
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin: 16px 0;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.65;
+    color: #24292f;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    border-radius: 0;
+    font-size: inherit;
+    color: inherit;
+    word-break: normal;
+  }
+  pre.ascii { font-size: 12.5px; line-height: 1.5; }
+  .table-wrap { overflow-x: auto; margin: 18px 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14.5px;
+    line-height: 1.7;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 10px 13px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg-soft);
+    font-weight: 650;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  tbody tr:nth-child(even) { background: var(--bg-zebra); }
+  blockquote {
+    margin: 16px 0;
+    padding: 8px 16px;
+    border-left: 4px solid var(--quote-bar);
+    background: var(--bg-soft);
+    border-radius: 0 6px 6px 0;
+    color: var(--ink-soft);
+  }
+  blockquote p { margin: 4px 0; }
+  hr {
+    border: none;
+    border-top: 1px solid var(--line);
+    margin: 36px 0;
+  }
+  @media (max-width: 640px) {
+    .wrap { padding: 28px 18px 64px; }
+    h1 { font-size: 25px; }
+    h2 { font-size: 20px; }
+    .toc ol { columns: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="doc-header">
+    <h1>HTML 批注与反馈回灌闭环 — 设计文档</h1>
+    <div class="meta">
+      <div><strong>状态:</strong>Draft · <strong>日期:</strong>2026-06-25 · <strong>作者:</strong>与 Claude 协作</div>
+      <div><strong>关联场景:</strong><code>output/apple-static-mobile-100/</code>(100 篇 AI 科普卡片 HTML)、<code>lesson-learn-sharing.html</code>、<code>output/html-to-xhs-design.md</code></div>
+    </div>
+  </header>
+
+  <nav class="toc">
+    <p class="toc-title">目录</p>
+    <ol>
+      <li><a href="#s1">背景与动机</a></li>
+      <li><a href="#s2">目标与非目标</a></li>
+      <li><a href="#s3">核心洞察:骨架与血肉</a></li>
+      <li><a href="#s4">架构取向选择</a></li>
+      <li><a href="#s5">六个骨架决策(预留的实质)</a></li>
+      <li><a href="#s6">数据模型</a></li>
+      <li><a href="#s7">系统组件与分层</a></li>
+      <li><a href="#s8">核心数据流</a></li>
+      <li><a href="#s9">演进路径</a></li>
+      <li><a href="#s10">关键技术选型</a></li>
+      <li><a href="#s11">错误处理与边界情况</a></li>
+      <li><a href="#s12">测试策略</a></li>
+      <li><a href="#s13">风险与缓解</a></li>
+      <li><a href="#s14">已确认的决策</a></li>
+      <li><a href="#s15">待定项</a></li>
+    </ol>
+  </nav>
+
+  <hr>
+
+  <main>
+    <h2 id="s1">1. 背景与动机</h2>
+    <p>生成 HTML(而非 Markdown)正在成为内容生产的新主流:HTML 支持图文混排、自定义视觉,对人阅读友好。但 HTML 一旦生成,就暴露两个痛点:</p>
+    <ol>
+      <li><strong>反馈回灌断链</strong>:模型厂商(Claude/GPT)能让 HTML 在自家 CLI/应用会话内渲染并继续编辑,但普通用户生成的 HTML 离开会话后,想基于它做点评/优化,只能把要改的部分复制、编辑、再贴回会话——摩擦很大,闭环不成立。</li>
+      <li><strong>群组协同缺失</strong>:HTML 不像飞书/钉钉文档那样支持“多人在线划词评论”,难以在工作群里被共享和点评。</li>
+    </ol>
+    <p>本项目作者已在大量生成 HTML(百篇 AI 科普卡片、分享页),上述痛点是每天亲历的真实场景。本设计要做一个<strong>逐步演进</strong>的系统:从“个人批注 + 反馈回灌闭环”出发,最终具备“群组协同”与“任意 HTML 可嵌入”的能力。</p>
+
+    <h2 id="s2">2. 目标与非目标</h2>
+    <h3>目标</h3>
+    <ul>
+      <li><strong>G1 闭环</strong>:在生成的 HTML 上划词批注 → 结构化回灌到 AI 会话 → AI 重写 → 新版本 HTML → 批注自动重定位,跑通完整回路。</li>
+      <li><strong>G2 协同(后期)</strong>:HTML 链接分享到群组后,多人可像飞书文档那样实时划词点评。</li>
+      <li><strong>G3 可嵌入(后期)</strong>:批注能力可作为组件嵌入任意 HTML 页面。</li>
+      <li><strong>G4 演进友好</strong>:核心架构在第一天就预留好,使 A→B→C 是“换实现”而非“改设计”。</li>
+    </ul>
+    <h3>非目标(YAGNI,明确排除以防范围蔓延)</h3>
+    <ul>
+      <li><strong>不做富文本编辑器</strong>:只对 HTML 做“批注”,不改 HTML 内容本体;内容修改一律通过“回灌 → AI 重写 → 新版本”完成。</li>
+      <li><strong>不做版本 diff 可视化 UI</strong>:阶段 A 不做,后续视需要再加。</li>
+      <li><strong>不做多模态批注</strong>(图片/视频区域标注):阶段范围内只做文本选区批注。</li>
+      <li><strong>不自建 AI</strong>:回灌是“投递到已有的 AI 会话/API”,系统本身不托管模型推理。</li>
+    </ul>
+
+    <h2 id="s3">3. 核心洞察:骨架与血肉</h2>
+    <p>系统的能力可分两类:</p>
+    <ul>
+      <li><strong>骨架(Structure)</strong>:少数几个一旦第一天做错、后期推倒成本极高的设计决策。<strong>必须在阶段 0 立对</strong>——这就是“早期预留”。</li>
+      <li><strong>血肉(Flesh)</strong>:存储引擎、鉴权、实时同步、UI 等可随阶段替换升级的实现细节。</li>
+    </ul>
+    <p>本设计的核心,是把骨架在阶段 0 用最小代码立住,血肉按 A→B→C 逐步替换。</p>
+
+    <h2 id="s4">4. 架构取向选择</h2>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>取向</th><th>做法</th><th>代价</th><th>能否到 A/B/C</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>① Web Annotation + 非侵入 overlay(选定)</strong></td>
+          <td>批注用 W3C Web Annotation 标准定位,以浮层覆盖在 HTML 之上,不改 HTML 本体</td>
+          <td>selector 重定位存在边界情况,需专门处理</td>
+          <td>✅ 全部满足</td>
+        </tr>
+        <tr>
+          <td>② 侵入式内联标注</td>
+          <td>往 HTML 注入 <code>&lt;span&gt;</code> / <code>data-*</code></td>
+          <td>破坏 HTML 纯净度,与 AI 重写互相破坏,无法注释第三方页面</td>
+          <td>⚠️ 堵死 C</td>
+        </tr>
+        <tr>
+          <td>③ 寄生飞书/Notion 批注</td>
+          <td>HTML 转成飞书文档再用其评论</td>
+          <td>失去自定义视觉,回灌需另接一层,受制平台</td>
+          <td>⚠️ 堵死回灌闭环</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <p><strong>选定取向①</strong>:它是唯一让“早期预留”成立、且能同时满足 A/B/C 的取向。</p>
+
+    <h2 id="s5">5. 六个骨架决策(预留的实质)</h2>
+
+    <h3>S1. 批注定位采用 W3C Web Annotation 的 selector 组合</h3>
+    <p><strong>禁用</strong>字符 offset、禁用整页级评论。采用组合 selector:</p>
+    <ul>
+      <li><code>TextQuoteSelector</code>:<code>{ exact, prefix, suffix }</code>——按“选中文本 + 前后缀上下文”定位。<strong>核心特性:只要那段文字还在,就能在新版本里重新找到</strong>,这是跨版本重定位的命脉。</li>
+      <li><code>CssSelector</code>:定位所在节点,作为辅助锚点。</li>
+      <li><code>RangeSelector</code>:<code>{ startSelector, endSelector }</code>——当选区跨越多个块级元素时使用。</li>
+    </ul>
+    <blockquote><p>参考:<a href="https://www.w3.org/TR/annotation-model/">W3C Web Annotation Data Model</a></p></blockquote>
+
+    <h3>S2. 批注与 HTML 实例解耦</h3>
+    <p>每篇文档有稳定逻辑 <code>document_id</code> + <code>version</code>;批注挂在 <code>(document_id, selector)</code> 上,<strong>绝不绑 DOM 节点</strong>。AI 重写产出新 version 后,批注按 selector 在新 version 上重定位,不丢失。</p>
+
+    <h3>S3. 前端批注层为“非侵入 overlay”</h3>
+    <p>用 DOM Range + 浮层实现高亮与气泡,被注释的 HTML 保持结构纯净。这是 C 阶段能注释“任意 HTML”的前提,也避免与 AI 重写互相破坏。</p>
+
+    <h3>S4. 统一的批注 payload 协议</h3>
+    <p><strong>批注的数据结构就是回灌给 AI 的数据结构</strong>。第一天就把 schema 定死(见 §6),回灌只是“把 payload 投递到某个 sink”。这样 A(回灌自己会话)与 C(嵌入别人系统)共用同一套回灌逻辑。</p>
+
+    <h3>S5. 回灌走 sink 抽象(可插拔投递端)</h3>
+    <p>回灌 = 生成 payload + 选择 sink。sink 是可插拔的:<code>导出</code> / <code>注入本地 CLI</code> / <code>调 API 重写</code> / <code>飞书 Bot 推送</code>。新增 sink 不改动核心逻辑。</p>
+
+    <h3>S6. 存储 / 身份 / 权限只“留字段、缓实现”</h3>
+    <p>数据模型第一天就带 <code>owner_id</code>、<code>scope(private|group|public)</code>、<code>document_id</code>、<code>version</code>,即使第一版全部填默认值。实现先用 SQLite/JSON,接口封装好,到 B 换 Postgres + 实时同步不破上层。</p>
+
+    <h2 id="s6">6. 数据模型</h2>
+
+    <h3>6.1 批注(Annotation)</h3>
+<pre><code>{
+  "id": "ann_01j_...",            // 批注唯一 ID
+  "document_id": "doc_01_token",  // 所属文档(逻辑 ID,与版本无关)
+  "version": 3,                   // 创建时所基于的版本
+  "created_at": "2026-06-25T...",
+  "updated_at": "2026-06-25T...",
+  "author": { "id": "u_self", "name": "作者", "avatar": "..." },
+  "scope": "private",             // private | group | public
+  "status": "open",               // open | resolved | stale
+
+  "selector": {                   // W3C Web Annotation selector
+    "type": "TextQuoteSelector",
+    "exact": "Token 是模型处理文本的最小单位",
+    "prefix": "在 NLP 中,",
+    "suffix": "。它将..."
+  },
+
+  "quote": "Token 是模型处理文本的最小单位",  // 冗余存选中原文,便于回灌与审计
+
+  "body": {
+    "comment": "这里说'最小单位'容易和字符混淆,建议改成'基本单元'",
+    "action": "rewrite",          // rewrite | delete | question | none
+    "instruction": "将'最小单位'改为'基本单元',并补充一句和字符的区别"  // 可选,更具体的修改意图
+  }
+}</code></pre>
+    <blockquote><p>跨节点选区时,<code>selector</code> 改用 <code>RangeSelector</code>(内含起止两个 <code>TextQuoteSelector</code>)。</p></blockquote>
+
+    <h3>6.2 文档与版本(Document)</h3>
+<pre><code>{
+  "document_id": "doc_01_token",
+  "title": "Token — AI 百科 #01",
+  "current_version": 3,
+  "versions": [
+    { "version": 1, "html_path": ".../01_token.html",   "created_at": "...", "source": "ai-gen",     "parent": null },
+    { "version": 2, "html_path": ".../01_token_v2.html","created_at": "...", "source": "ai-rewrite", "parent": 1 },
+    { "version": 3, "html_path": ".../01_token_v3.html","created_at": "...", "source": "ai-rewrite", "parent": 2 }
+  ]
+}</code></pre>
+
+    <h3>6.3 回灌 payload(由批注组装,投递给 sink)</h3>
+<pre><code>{
+  "document_id": "doc_01_token",
+  "base_version": 3,
+  "items": [
+    {
+      "quote": "Token 是模型处理文本的最小单位",
+      "comment": "...",
+      "action": "rewrite",
+      "instruction": "...",
+      "context": "周边段落文本(给 AI 足够上下文)"
+    }
+    // ...多条批注聚合
+  ],
+  "sink": "export"               // export | cli | api | lark
+}</code></pre>
+
+    <h2 id="s7">7. 系统组件与分层</h2>
+<pre class="ascii">┌─────────────────────────────────────────────┐
+│  宿主 / 外壳(Host)                          │
+│  阶段A:本地 server  │ B:Web App(鉴权+实时) │ C:embeddable widget
+├─────────────────────────────────────────────┤
+│  回灌层(Sink)                               │
+│  payload 组装 → 投递:export / cli / api / lark
+├─────────────────────────────────────────────┤
+│  批注运行时(Annotation Runtime)            │
+│  非侵入 overlay:高亮渲染、选区捕获、批注气泡
+├─────────────────────────────────────────────┤
+│  定位引擎(Locator)            ★ 核心骨架    │
+│  selector ⇄ DOM Range 双向转换 + 跨版本重定位
+├─────────────────────────────────────────────┤
+│  存储层(Storage)                            │
+│  批注库 + 文档版本库;A:SQLite │ B:Postgres  │
+└─────────────────────────────────────────────┘</pre>
+    <p>各组件职责单一,通过明确接口通信,可独立理解与测试。</p>
+
+    <h2 id="s8">8. 核心数据流</h2>
+
+    <h3>8.1 创建批注</h3>
+    <p><code>用户选区</code> → Locator 由 DOM 选区生成 selector → Runtime 弹出批注气泡 → 用户填 comment / action / instruction → Storage 写入批注 payload。</p>
+
+    <h3>8.2 渲染高亮(含跨版本重定位)</h3>
+    <p><code>加载某 version HTML</code> → Storage 取该 document_id 全部批注 → Locator 对每条 selector 在<strong>当前 version</strong> 上计算 DOM Range → Runtime 渲染高亮。</p>
+    <ul>
+      <li><strong>重定位失败</strong>的批注:标记 <code>status: stale</code>,UI 提示“此批注在新版本中无法定位,请确认”,<strong>不删除</strong>。</li>
+    </ul>
+
+    <h3>8.3 回灌与重写</h3>
+    <p><code>用户点击“回灌”</code> → Sink 层把选中批注组装成 payload → 投递到目标 sink(阶段 A:导出)→ 用户在 AI 会话中粘贴 → AI 产出新 HTML → 用户保存为<strong>新 version</strong> 入库 → 回到 8.2,批注在新 version 上重定位。</p>
+
+    <h2 id="s9">9. 演进路径</h2>
+
+    <h3>阶段 0 — 地基验证(预计 1–2 天)</h3>
+    <p><strong>目标</strong>:用最小代码立住 6 个骨架决策,验证核心可行性。</p>
+    <p><strong>交付</strong>:</p>
+    <ul>
+      <li>批注/文档/版本的数据 schema(§6)落地。</li>
+      <li>Locator 原型:能在一篇真实 <code>apple-static</code> HTML 上,把 DOM 选区转成 <code>TextQuoteSelector</code>,并存回。</li>
+      <li>重定位验证脚本:加载批注 → 手动改动 HTML(模拟 AI 局部重写)→ 重载 → 批注仍能高亮。</li>
+    </ul>
+    <p><strong>退出标准</strong>:<strong>在一篇真实 HTML 上</strong>,选词 → 存 → 改 HTML → 重载,批注重定位成功。这一步是“保险栓”,验证 TextQuote 在作者真实内容上确实有效后才往下走。</p>
+
+    <h3>阶段 A — 个人闭环(预计 1–2 周)</h3>
+    <p><strong>目标</strong>:跑通 G1 完整闭环。</p>
+    <p><strong>交付</strong>:</p>
+    <ul>
+      <li>在阶段 0 骨架上加:多批注管理、payload 编辑(comment/action/instruction)、Runtime 完整 overlay、第一批 sink。</li>
+      <li>第一批 sink:<code>导出结构化 prompt</code>(一键复制,你在 Claude Code 里 <code>Cmd+V</code> 粘贴)。<strong>阶段 A 不做 CLI 自动注入,也不做自建网页对话框</strong>——二者均列为阶段 A 之后的演进项,待导出 sink 用顺后再评估。</li>
+      <li>版本管理:AI 重写产出新 version,保留历史。</li>
+    </ul>
+    <p><strong>退出标准</strong>:在 100 篇 AI 科普卡片上实际使用,「批注 → 回灌 → AI 重写 → 新 version → 批注重定位」跑通;stale 批注有清晰提示。</p>
+
+    <h3>阶段 B — 群组协同(预计 1–2 月)</h3>
+    <p><strong>目标</strong>:实现 G2。</p>
+    <p><strong>交付</strong>:</p>
+    <ul>
+      <li>存储换 Postgres + 实时通道(WebSocket 或 Yjs CRDT)。</li>
+      <li>鉴权:飞书 OAuth + 群组 scope;批注线程、@提及。</li>
+      <li>分享:HTML 链接发到飞书群,点开即可多人划词点评。</li>
+    </ul>
+    <p><strong>退出标准</strong>:2 人以上同时批注实时可见,权限生效,体验对标飞书文档评论。<strong>因骨架早已对齐,此阶段主要是“换实现”而非“改设计”。</strong></p>
+
+    <h3>阶段 C — 通用嵌入(预计 2–3 月+)</h3>
+    <p><strong>目标</strong>:实现 G3。</p>
+    <p><strong>交付</strong>:</p>
+    <ul>
+      <li>注释层打包为可嵌入 widget(<code>&lt;script src&gt;</code>),注释任意页面。</li>
+      <li>回灌 sink 暴开放 API,供外部接入自有 AI。</li>
+      <li>多租户与权限模型完整化。</li>
+    </ul>
+    <p><strong>退出标准</strong>:widget 能在第三方页面批注;sink API 可被外部调用。</p>
+
+    <h2 id="s10">10. 关键技术选型(建议,实现计划阶段可调)</h2>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>组件</th><th>阶段 A 建议</th><th>备选 / 演进</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>后端</td><td>Python + FastAPI(与现有 <code>approach-*.py</code>/Playwright 栈一致)</td><td>—</td></tr>
+        <tr><td>定位/overlay</td><td><strong>借用 Hypothesis client 的 text-quote anchoring 算法</strong>(业界最成熟、边界处理最全),overlay/气泡 UI 自研</td><td>自研 Locator 作为长期可控兜底</td></tr>
+        <tr><td>存储</td><td>SQLite</td><td>Postgres(阶段 B)</td></tr>
+        <tr><td>实时</td><td>手动刷新 / 轮询</td><td>WebSocket / Yjs(阶段 B)</td></tr>
+        <tr><td>回灌 sink</td><td><strong>导出 prompt</strong>(一键复制)</td><td>CLI 自动注入、网页对话框、API 自动重写、飞书 Bot(后续演进)</td></tr>
+        <tr><td>前端</td><td>Vanilla JS overlay</td><td>—</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <blockquote><p>选型原则:Locator 是系统命脉,<strong>采用经过大规模验证的 Hypothesis text-quote anchoring 算法</strong>以最大化重定位鲁棒性、降低边界踩坑风险;overlay/气泡 UI 自研以便后续 B/C 深度定制。其余选型保持与作者现有技术栈一致。</p></blockquote>
+
+    <h2 id="s11">11. 错误处理与边界情况</h2>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>场景</th><th>处理</th></tr></thead>
+      <tbody>
+        <tr><td>TextQuote 重定位失败(文字被改/删除)</td><td>批注标记 <code>stale</code>,提示用户,<strong>不删除</strong>;可手动重新定位或确认失效</td></tr>
+        <tr><td>选区跨越多个块级元素</td><td>使用 <code>RangeSelector</code>(起止两个 TextQuoteSelector)兜底</td></tr>
+        <tr><td>AI 大段重写导致多批注失效</td><td>失效批注集中提示;未来可加“语义重定位”(embedding 检索最近段落)作为增强</td></tr>
+        <tr><td>overlay 在复杂 CSS 下高亮错位(Apple 风格深色 tile、固定宽度)</td><td>阶段 0 优先在真实卡片上验证 overlay 精度</td></tr>
+        <tr><td>阶段 B 并发编辑冲突</td><td>批注以创建为准(append-only 优先);编辑冲突给出 last-write-wins + 提示</td></tr>
+        <tr><td>回灌后 AI 未产出合法 HTML</td><td>新 version 入库前做基本校验;失败则不入库,保留旧 version</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h2 id="s12">12. 测试策略</h2>
+    <ul>
+      <li><strong>Locator 单元测试(重点)</strong>:<code>TextQuoteSelector</code> 在多种 HTML 结构(嵌套节点、跨节点选区、重复文本、有 prefix/suffix 消歧)下的生成与重定位正确性。</li>
+      <li><strong>重定位鲁棒性测试</strong>:模拟 AI 局部重写(改字、加段、删段),断言哪些 selector 仍可定位、哪些正确转为 stale。</li>
+      <li><strong>真实内容集成基座</strong>:以 <code>apple-static-mobile-100/</code> 的 100 篇卡片作为集成测试与手动验收的数据集。</li>
+      <li><strong>闭环端到端测试(阶段 A)</strong>:批注 → 回灌 payload → (mock AI 重写)→ 新 version → 重定位,自动化跑通。</li>
+    </ul>
+
+    <h2 id="s13">13. 风险与缓解</h2>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>风险</th><th>影响</th><th>缓解</th></tr></thead>
+      <tbody>
+        <tr><td>TextQuote 在“大段重写”下失效</td><td>重定位丢失,闭环体验下降</td><td>鼓励 AI 局部改写 + stale 机制兜底;后续加语义重定位</td></tr>
+        <tr><td>复杂 CSS 下 overlay 高亮不准</td><td>视觉体验差</td><td>阶段 0 在真实卡片上验证;必要时约束 HTML 结构或用节点级锚点辅助</td></tr>
+        <tr><td>回灌自动化的演进依赖外部能力</td><td>未来若做 CLI 自动注入 / 网页对话框,依赖 Claude Code 能力或自建对话后端</td><td>阶段 A 先用导出 sink 验证闭环价值;自动化列为后续演进,不进阶段 A 范围</td></tr>
+        <tr><td>范围蔓延(想做编辑器/diff UI)</td><td>延误</td><td>§2 非目标明确排除,严格按阶段推进</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h2 id="s14">14. 已确认的决策(本次拍板)</h2>
+    <ul>
+      <li><strong>回灌形态:人驱动,阶段 A 用导出 sink</strong>。批注组装成结构化 prompt,一键复制,你在 Claude Code 会话里 <code>Cmd+V</code> 粘贴,由你继续与 AI 对话完成修改。<strong>阶段 A 不做 CLI 自动注入、不做自建网页对话框</strong>——二者列为阶段 A 之后的演进项;sink 抽象同时为“机驱动(自动重写)”和后续自动化预留。</li>
+      <li><strong>版本治理:保留新版本 + 历史</strong>。AI 重写产出新 version,历史版本保留,批注跨版本重定位。</li>
+      <li><strong>部署起点:本地起步</strong>。阶段 0/A 纯本地(本地 server + 浏览器),阶段 B 再上阿里云。</li>
+      <li><strong>Locator:借用 Hypothesis anchoring 算法</strong>。正式定位引擎采用 Hypothesis client 的 text-quote anchoring(业界最成熟、边界处理最全),最大化重定位鲁棒性;overlay/气泡 UI 自研,以便后续 B/C 深度定制。</li>
+    </ul>
+
+    <h2 id="s15">15. 待定项</h2>
+    <p>进入实现计划前已无阻塞项。以下为“进入实现后再细化”的非阻塞问题,不影响开工:</p>
+    <ul>
+      <li>导出 sink 的 prompt 模板具体措辞(实现时定,可快速迭代)。</li>
+      <li>Hypothesis anchoring 的具体引入方式(直接抽取其模块 vs vendor 一份精简实现)——实现计划阶段确定。</li>
+    </ul>
+  </main>
+
+</div>
+</body>
+</html>

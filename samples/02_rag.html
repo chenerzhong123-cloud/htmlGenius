@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>RAG — AI 百科 #02</title>
+<style>* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #1d1d1f;
+  background: #f5f5f7;
+  max-width: 430px;
+  margin: 0 auto;
+}
+:root {
+  --blue: #0066cc;
+  --blue-dark: #2997ff;
+  --white: #ffffff;
+  --parchment: #f5f5f7;
+  --tile-1: #272729;
+  --tile-2: #2a2a2c;
+  --tile-3: #252527;
+  --pure-black: #000000;
+  --ink: #1d1d1f;
+  --ink-80: #333333;
+  --ink-48: #7a7a7a;
+  --dark-body: #ffffff;
+  --dark-muted: #cccccc;
+  --hairline: #e0e0e0;
+  --divider: rgba(0,0,0,0.04);
+  --divider-soft: rgba(0,0,0,0.08);
+  --dark-div: rgba(255,255,255,0.08);
+}
+.tile { padding: 48px 20px; }
+.t-w { background: var(--white); }
+.t-p { background: var(--parchment); }
+.t-d1 { background: var(--tile-1); color: var(--dark-body); }
+.t-d2 { background: var(--tile-2); color: var(--dark-body); }
+.t-d3 { background: var(--tile-3); color: var(--dark-body); }
+.in { max-width: 390px; margin: 0 auto; }
+.hero { text-align: center; }
+.hero-h {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.07;
+  letter-spacing: -0.28px;
+  color: var(--dark-body);
+}
+.hero-lead {
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 1.14;
+  letter-spacing: 0.196px;
+  color: var(--dark-muted);
+  margin-top: 12px;
+}
+.section-h {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.10;
+  letter-spacing: 0;
+  margin-bottom: 20px;
+}
+.section-h-center { text-align: center; }
+.t-d .section-h { color: var(--dark-body); }
+.section-lead {
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 1.14;
+  letter-spacing: 0.196px;
+  color: var(--ink-48);
+  margin-bottom: 32px;
+  text-align: center;
+}
+.t-d .section-lead { color: var(--dark-muted); }
+.body {
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+}
+.t-d .body { color: var(--dark-muted); }
+.body + .body { margin-top: 16px; }
+strong { font-weight: 600; }
+.hl { color: var(--blue); font-weight: 600; }
+.t-d .hl { color: var(--blue-dark); }
+.cap {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.43;
+  letter-spacing: -0.224px;
+  color: var(--ink-48);
+}
+.t-d .cap { color: var(--dark-muted); }
+.fine {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.0;
+  letter-spacing: -0.12px;
+  color: var(--ink-48);
+}
+.code {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 15px;
+  background: var(--white);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--blue);
+}
+.t-p .code { background: var(--white); }
+/* Dark trends */
+.tr-stack { display: flex; flex-direction: column; }
+.tr {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--dark-div);
+}
+.tr:first-child { padding-top: 0; }
+.tr:last-child { border-bottom: none; padding-bottom: 0; }
+.tr-num {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: -0.224px;
+  color: var(--blue-dark);
+  margin-bottom: 6px;
+}
+.tr-title {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.19;
+  letter-spacing: 0.231px;
+  color: var(--dark-body);
+  margin-bottom: 8px;
+}
+.tr-body {
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+  color: var(--dark-muted);
+}
+/* Steps */
+.st + .st { margin-top: 28px; }
+.st-num {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.07;
+  letter-spacing: -0.28px;
+  color: var(--blue);
+  opacity: 0.12;
+  margin-bottom: 8px;
+}
+.st-title {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.24;
+  letter-spacing: -0.374px;
+  margin-bottom: 6px;
+}
+.st-body {
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+  color: var(--ink-48);
+}
+/* Compare table */
+.card {
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  overflow: hidden;
+}
+.cmp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.cmp-table { width: 100%; border-collapse: collapse; }
+.cmp-table th {
+  font-size: 14px; font-weight: 600; letter-spacing: -0.224px;
+  padding: 14px 16px; text-align: center;
+  background: var(--parchment); color: var(--ink-48);
+  border-bottom: 1px solid var(--hairline);
+}
+.cmp-table th:first-child { text-align: left; }
+.cmp-table td {
+  font-size: 15px; font-weight: 400; line-height: 1.47;
+  letter-spacing: -0.374px; padding: 16px; text-align: center;
+  border-bottom: 1px solid var(--divider); color: var(--ink-80);
+}
+.cmp-table td:first-child { text-align: left; font-weight: 600; color: var(--ink); }
+.cmp-table tr:last-child td { border-bottom: none; }
+.cmp-note {
+  padding: 16px 20px; font-size: 14px; font-weight: 400;
+  line-height: 1.43; letter-spacing: -0.224px;
+  color: var(--ink-48); border-top: 1px solid var(--divider);
+}
+/* Tips */
+.tip-stack { display: flex; flex-direction: column; gap: 12px; }
+.tip {
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+}
+.tip-title {
+  font-size: 17px; font-weight: 600; letter-spacing: -0.374px; margin-bottom: 6px;
+}
+.tip-body {
+  font-size: 17px; font-weight: 400; line-height: 1.47;
+  letter-spacing: -0.374px; color: var(--ink-48);
+}
+/* Summary */
+.sum { text-align: center; }
+.sum-h {
+  font-size: 28px; font-weight: 600; line-height: 1.07;
+  letter-spacing: -0.28px; color: var(--dark-body);
+}
+.sum-h em { font-style: normal; color: var(--blue-dark); }
+.sum-sub {
+  font-size: 17px; font-weight: 600; line-height: 1.19;
+  letter-spacing: 0.231px; color: var(--dark-muted); margin-top: 12px;
+}
+/* Footer */
+.foot {
+  background: var(--tile-1);
+  padding: 16px 20px;
+  text-align: center;
+}
+.foot-text {
+  font-size: 12px; font-weight: 400; letter-spacing: -0.12px;
+  color: rgba(255,255,255,0.5); line-height: 1.0;
+}
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<section class="tile t-d1">
+  <div class="in hero">
+    <h1 class="hero-h">RAG</h1>
+    <p class="hero-lead">让 AI 学会“查资料”再回答</p>
+  </div>
+</section>
+
+<!-- Definition -->
+<section class="tile t-p">
+  <div class="in">
+    <h2 class="section-h">它是什么？</h2>
+      <p class="body">RAG（检索增强生成）是一种让大模型在回答问题前先“翻书查资料”的技术——不靠死记硬背，而是现用现查。</p>
+      <p class="body">想象你要写一篇关于“量子计算”的报告。你可以纯凭记忆写（容易出错），也可以边写边翻维基百科（准确靠谱）。RAG 就是给 AI 配了一个“实时翻书助手”。</p>
+      <p class="body">因为大模型的知识有截止日期，而且会“编造答案”（幻觉）。RAG 让 AI 基于最新资料回答，大幅减少了胡说八道的概率，也解决了知识更新问题。</p>
+  </div>
+</section>
+
+<!-- Trends -->
+<section class="tile t-d2">
+  <div class="in">
+    <h2 class="section-h section-h-center">为什么现在这么火？</h2>
+    <div class="tr-stack">
+        <div class="tr">
+          <p class="tr-num">01</p>
+          <h3 class="tr-title">企业落地的刚需</h3>
+          <p class="tr-body">2024-2025 年，企业发现直接让大模型回答内部问题会胡编，但接上公司内部的文档库、知识库后效果立竿见影。RAG 成了“AI 落地第一站”。</p>
+        </div>
+        <div class="tr">
+          <p class="tr-num">02</p>
+          <h3 class="tr-title">DeepSeek 等产品的推动</h3>
+          <p class="tr-body">DeepSeek 的联网搜索、飞书智能助手、企业微信 AI 等产品背后都是 RAG 在起作用。用户感知到“AI 能查资料了”，但不知道这背后有一整套检索增强的技术栈。</p>
+        </div>
+        <div class="tr">
+          <p class="tr-num">03</p>
+          <h3 class="tr-title">从玩具到工具的转折</h3>
+          <p class="tr-body">没有 RAG 的 AI 像一个博学但健忘的顾问；有了 RAG 的 AI 像一个随时能查阅最新资料的助理——这是从“好玩”到“能用”的质变。</p>
+        </div>
+    </div>
+  </div>
+</section>
+
+<!-- Steps -->
+<section class="tile t-p">
+  <div class="in">
+    <h2 class="section-h section-h-center">核心原理</h2>
+      <div class="st">
+        <div class="st-num">01</div>
+        <h3 class="st-title">把知识库“切成小块”</h3>
+        <p class="st-body">将你的文档库（PDF、网页、数据库）用 Chunking 技术切成小段落，每一段生成一个向量存入向量数据库。</p>
+      </div>
+      <div class="st">
+        <div class="st-num">02</div>
+        <h3 class="st-title">用户提问时“检索”</h3>
+        <p class="st-body">用户提问时，把问题也转成向量，在向量数据库中找出最相关的几个文本块——这就是“增强检索”。</p>
+      </div>
+      <div class="st">
+        <div class="st-num">03</div>
+        <h3 class="st-title">拼接后“生成”</h3>
+        <p class="st-body">把检索到的相关文本块和用户问题拼在一起，作为 Prompt 送给大模型。模型基于这些“参考资料”生成答案，而非纯凭记忆。</p>
+      </div>
+  </div>
+</section>
+
+<!-- Compare -->
+<section class="tile t-w">
+  <div class="in">
+    <h2 class="section-h">和 “纯 LLM 问答” 有什么区别？</h2>
+    <div class="card">
+      <div class="cmp-scroll">
+        <table class="cmp-table">
+          <thead>
+            <tr><th></th><th>RAG</th><th>纯 LLM 问答</th></tr>
+          </thead>
+          <tbody>
+        <tr><td>核心思路</td><td>查资料再回答</td><td>凭训练记忆回答</td></tr>
+        <tr><td>典型场景</td><td>企业知识库问答</td><td>通用闲聊</td></tr>
+        <tr><td>通俗类比</td><td>开卷考试</td><td>闭卷考试</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="cmp-note">一句话总结差异 纯 LLM 是“闭卷考试”，RAG 是“开卷考试”——有了参考资料，答案自然更准。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Tips -->
+<section class="tile t-p">
+  <div class="in">
+    <h2 class="section-h">怎么用上它？</h2>
+    <div class="tip-stack">
+        <div class="tip">
+          <h3 class="tip-title">用 LangChain 或 LlamaIndex</h3>
+          <p class="tip-body">这两个是 RAG 最主流的开源框架，几行 Python 代码就能把你的本地文档接上 ChatGPT。</p>
+        </div>
+        <div class="tip">
+          <h3 class="tip-title">直接用支持联网的产品</h3>
+          <p class="tip-body">DeepSeek、Kimi、豆包等国产 AI 助手已内置联网搜索功能，本质就是 RAG。你不需要写代码，打开“联网搜索”开关就能体验。</p>
+        </div>
+    </div>
+  </div>
+</section>
+
+<!-- Summary -->
+<section class="tile t-d3">
+  <div class="in sum">
+    <h2 class="sum-h">RAG 就是 AI 的“开卷考试”——查完资料再回答，自然比瞎猜靠谱。</h2>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="foot">
+  <p class="foot-text">AI 百科卡片 · #02 RAG · 共 100 期</p>
+</footer>
+
+</body>
+</html>
