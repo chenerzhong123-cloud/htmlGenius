@@ -13,6 +13,16 @@ DB_PATH = Path(os.environ.get("HTMLEDITOR_DB", BASE / "annotations.db"))
 app = FastAPI(title="htmleditor stage0")
 storage.init_db(DB_PATH)
 
+
+@app.middleware("http")
+async def no_cache_static(request, call_next):
+    """开发期:静态文档不缓存,确保改 HTML 后 reload 拿到最新版(重定位/stale 验证依赖此)。"""
+    response = await call_next(request)
+    if request.url.path.startswith(("/samples", "/docs", "/static")):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 app.mount("/samples", StaticFiles(directory=BASE / "samples"), name="samples")
 app.mount("/docs", StaticFiles(directory=BASE / "docs"), name="docs")
