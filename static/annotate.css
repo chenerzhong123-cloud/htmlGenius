@@ -1,0 +1,9 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, system-ui, "PingFang SC", sans-serif; }
+#bar {
+  height: 40px; display: flex; align-items: center; gap: 16px;
+  padding: 0 16px; background: #1f2328; color: #fff; font-size: 14px;
+}
+#status { opacity: 0.8; }
+#doc-frame { width: 100%; height: calc(100vh - 40px); border: 0; background: #fff; }
+/* 高亮在 iframe 内,样式需注入 iframe;见 annotate.js 的 injectStyle */
