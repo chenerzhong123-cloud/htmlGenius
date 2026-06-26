@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import storage
@@ -46,9 +46,35 @@ def create_document(payload: DocumentCreate):
 @app.post("/api/documents/{document_id}/versions")
 def add_version(document_id: str, payload: VersionCreate):
     try:
-        return storage.add_version(document_id, payload)
+        result = storage.add_version(document_id, payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="document not found")
+    storage.enforce_window(document_id, keep=20)  # v0.2:滚动窗口
+    return result
+
+
+@app.get("/api/documents/{document_id}/versions")
+def list_versions(document_id: str):
+    return {"items": storage.list_versions(document_id)}
+
+
+@app.get("/api/documents/{document_id}/versions/{version}")
+def get_version_html(document_id: str, version: int):
+    html = storage.get_version_html(document_id, version)
+    if html is None:
+        raise HTTPException(status_code=404, detail="version not found")
+    return Response(content=html, media_type="text/html")
+
+
+@app.delete("/api/documents/{document_id}/versions/{version}")
+def delete_version(document_id: str, version: int):
+    try:
+        deleted = storage.delete_version(document_id, version)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="cannot delete current version")
+    if not deleted:
+        raise HTTPException(status_code=404, detail="version not found")
+    return {"ok": True}
 
 
 @app.get("/api/documents/{document_id}")

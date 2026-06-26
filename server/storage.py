@@ -16,7 +16,8 @@ def _now() -> str:
 
 
 def _connect() -> sqlite3.Connection:
-    c = sqlite3.connect(_DB)
+    # isolation_level=None: autocommit;多语句原子操作自行 BEGIN/COMMIT(v0.2 高频写需事务)
+    c = sqlite3.connect(_DB, isolation_level=None)
     c.row_factory = sqlite3.Row
     return c
 
@@ -25,39 +26,45 @@ def init_db(path: Path) -> None:
     global _DB
     _DB = str(path)
     c = _connect()
-    c.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS documents (
-            document_id TEXT PRIMARY KEY,
-            title TEXT,
-            current_version INTEGER
-        );
-        CREATE TABLE IF NOT EXISTS versions (
-            document_id TEXT,
-            version INTEGER,
-            html_path TEXT,
-            created_at TEXT,
-            source TEXT,
-            parent INTEGER,
-            PRIMARY KEY (document_id, version)
-        );
-        CREATE TABLE IF NOT EXISTS annotations (
-            id TEXT PRIMARY KEY,
-            document_id TEXT,
-            version INTEGER,
-            created_at TEXT,
-            updated_at TEXT,
-            author TEXT,
-            scope TEXT,
-            status TEXT,
-            selector TEXT,
-            quote TEXT,
-            body TEXT
-        );
-        """
-    )
-    c.commit()
-    c.close()
+    try:
+        c.execute("PRAGMA journal_mode=WAL")  # v0.2: 并发写不锁死
+        c.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS documents (
+                document_id TEXT PRIMARY KEY,
+                title TEXT,
+                current_version INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS versions (
+                document_id TEXT,
+                version INTEGER,
+                html_path TEXT,
+                created_at TEXT,
+                source TEXT,
+                parent INTEGER,
+                PRIMARY KEY (document_id, version)
+            );
+            CREATE TABLE IF NOT EXISTS annotations (
+                id TEXT PRIMARY KEY,
+                document_id TEXT,
+                version INTEGER,
+                created_at TEXT,
+                updated_at TEXT,
+                author TEXT,
+                scope TEXT,
+                status TEXT,
+                selector TEXT,
+                quote TEXT,
+                body TEXT
+            );
+            """
+        )
+        # v0.2 迁移:versions 加 html_content 列(若旧库缺)
+        cols = {row["name"] for row in c.execute("PRAGMA table_info(versions)")}
+        if "html_content" not in cols:
+            c.execute("ALTER TABLE versions ADD COLUMN html_content TEXT")
+    finally:
+        c.close()
 
 
 def register_document(payload: DocumentCreate) -> dict | None:
@@ -67,33 +74,134 @@ def register_document(payload: DocumentCreate) -> dict | None:
             "INSERT OR IGNORE INTO documents(document_id, title, current_version) VALUES(?,?,0)",
             (payload.document_id, payload.title),
         )
-        c.commit()
     finally:
         c.close()
     return get_document(payload.document_id)
 
 
 def add_version(document_id: str, payload: VersionCreate) -> dict:
+    """单事务:读 current + 写 versions(含 html_content)+ 更新 documents。"""
     c = _connect()
     try:
-        row = c.execute(
-            "SELECT current_version FROM documents WHERE document_id=?", (document_id,)
-        ).fetchone()
-        if row is None:
-            raise KeyError(f"document not found: {document_id}")
-        v = (row["current_version"] or 0) + 1
-        c.execute(
-            "INSERT INTO versions VALUES(?,?,?,?,?,?)",
-            (document_id, v, payload.html_path, _now(), payload.source, payload.parent),
-        )
-        c.execute(
-            "UPDATE documents SET current_version=? WHERE document_id=?",
-            (v, document_id),
-        )
-        c.commit()
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            row = c.execute(
+                "SELECT current_version FROM documents WHERE document_id=?", (document_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"document not found: {document_id}")
+            v = (row["current_version"] or 0) + 1
+            c.execute(
+                "INSERT INTO versions (document_id, version, html_path, created_at, source, parent, html_content) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (document_id, v, payload.html_path, _now(), payload.source, payload.parent, payload.html_content),
+            )
+            c.execute(
+                "UPDATE documents SET current_version=? WHERE document_id=?",
+                (v, document_id),
+            )
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
     finally:
         c.close()
     return {"document_id": document_id, "version": v}
+
+
+def list_versions(document_id: str) -> list[dict]:
+    c = _connect()
+    try:
+        rows = c.execute(
+            "SELECT document_id, version, html_path, created_at, source, parent "
+            "FROM versions WHERE document_id=? ORDER BY version",
+            (document_id,),
+        ).fetchall()
+    finally:
+        c.close()
+    return [dict(r) for r in rows]
+
+
+def get_version_html(document_id: str, version: int) -> str | None:
+    c = _connect()
+    try:
+        r = c.execute(
+            "SELECT html_content FROM versions WHERE document_id=? AND version=?",
+            (document_id, version),
+        ).fetchone()
+    finally:
+        c.close()
+    return r["html_content"] if r else None
+
+
+def _current_version(c: sqlite3.Connection, document_id: str) -> int | None:
+    row = c.execute(
+        "SELECT current_version FROM documents WHERE document_id=?", (document_id,)
+    ).fetchone()
+    return row["current_version"] if row else None
+
+
+def enforce_window(document_id: str, keep: int = 20) -> list[int]:
+    """保留最近 keep 个版本,删更早的;删前把挂在被删版本上的批注 version 更新到 current。"""
+    c = _connect()
+    deleted: list[int] = []
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            current = _current_version(c, document_id)
+            if current is None:
+                c.execute("ROLLBACK")
+                return []
+            rows = c.execute(
+                "SELECT version FROM versions WHERE document_id=? ORDER BY version DESC",
+                (document_id,),
+            ).fetchall()
+            for r in rows[keep:]:
+                v = r["version"]
+                if current is not None:
+                    c.execute(
+                        "UPDATE annotations SET version=? WHERE document_id=? AND version=?",
+                        (current, document_id, v),
+                    )
+                c.execute(
+                    "DELETE FROM versions WHERE document_id=? AND version=?",
+                    (document_id, v),
+                )
+                deleted.append(v)
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+    finally:
+        c.close()
+    return deleted
+
+
+def delete_version(document_id: str, version: int) -> bool:
+    """删某版本;批注引用该版本则更新到 current。不允许删 current。"""
+    c = _connect()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            current = _current_version(c, document_id)
+            if current == version:
+                raise ValueError("cannot delete current version")
+            if current is not None:
+                c.execute(
+                    "UPDATE annotations SET version=? WHERE document_id=? AND version=?",
+                    (current, document_id, version),
+                )
+            cur = c.execute(
+                "DELETE FROM versions WHERE document_id=? AND version=?",
+                (document_id, version),
+            )
+            c.execute("COMMIT")
+            return cur.rowcount > 0
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+    finally:
+        c.close()
 
 
 def save_annotation(payload: AnnotationCreate) -> dict:
@@ -116,7 +224,6 @@ def save_annotation(payload: AnnotationCreate) -> dict:
                 json.dumps(body, ensure_ascii=False),
             ),
         )
-        c.commit()
     finally:
         c.close()
     return get_annotation(aid)  # type: ignore[return-value]
@@ -135,7 +242,6 @@ def delete_annotation(aid: str) -> bool:
     c = _connect()
     try:
         cur = c.execute("DELETE FROM annotations WHERE id=?", (aid,))
-        c.commit()
         deleted = cur.rowcount > 0
     finally:
         c.close()
@@ -163,7 +269,8 @@ def get_document(document_id: str) -> dict | None:
         if d is None:
             return None
         vs = c.execute(
-            "SELECT * FROM versions WHERE document_id=? ORDER BY version",
+            "SELECT document_id, version, html_path, created_at, source, parent "
+            "FROM versions WHERE document_id=? ORDER BY version",
             (document_id,),
         ).fetchall()
     finally:

@@ -42,7 +42,8 @@ class Annotation(BaseModel):
 
 
 class VersionCreate(BaseModel):
-    html_path: str
+    html_path: str = ""
+    html_content: str = ""
     source: str = "ai-gen"
     parent: Optional[int] = None
 
