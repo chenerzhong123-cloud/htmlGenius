@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html><body>
+<iframe id="t" srcdoc="<html><head><style>x{color:red}</style></head><body><p>hello</p></body></html>"></iframe>
+<script type="module">
+  import { initEditor } from "./editor.js";
+  const f = document.getElementById("t");
+  const setup = () => {
+    const doc = f.contentDocument;
+    if (!doc || !doc.body || doc.readyState === "loading") { setTimeout(setup, 50); return; }
+    initEditor(doc, f.contentWindow);
+    doc.addEventListener("dom-changed", () => { window.__domChanged = true; });
+    window.__check = () => ({
+      bodyEditable: doc.body.contentEditable,
+      styleEditable: doc.querySelector("style").getAttribute("contenteditable"),
+    });
+    window.__doc = doc;
+    window.__ready = true;
+  };
+  setup();
+</script>
+</body></html>
