@@ -35,6 +35,9 @@ archiveToggle.addEventListener("click", () => {
   archiveToggle.classList.toggle("expanded", show);
 });
 
+const exportBtn = document.getElementById("export-btn");
+if (exportBtn) exportBtn.addEventListener("click", exportToClipboard);
+
 frame.src = docPath;
 frame.addEventListener("load", init);
 
@@ -91,6 +94,7 @@ async function init() {
   iInput = iDoc.getElementById("ann-input");
 
   window.__describe = describe; // 供 e2e 测试
+  window.__buildPrompt = buildPrompt;
   window.__frame = frame;
 
   iFloat.addEventListener("mousedown", (e) => e.preventDefault());
@@ -107,20 +111,19 @@ async function init() {
   await loadAnnotations();
 }
 
-/** iframe 与 sidebar-scroll 双向同步滚动 */
+/** iframe 与 sidebar-scroll 双向同步滚动(rAF 节流,避免高频 reflow 卡顿) */
+let syncRAF = 0;
 function setupScrollSync() {
-  iWin.addEventListener("scroll", () => {
-    if (syncing) return;
-    syncing = true;
-    sidebarScroll.scrollTop = iWin.scrollY;
-    syncing = false;
-  });
-  sidebarScroll.addEventListener("scroll", () => {
-    if (syncing) return;
-    syncing = true;
-    iWin.scrollTo({ top: sidebarScroll.scrollTop });
-    syncing = false;
-  });
+  const schedule = (fn) => {
+    if (syncRAF || syncing) return;
+    syncRAF = requestAnimationFrame(() => {
+      syncRAF = 0;
+      syncing = true;
+      try { fn(); } finally { syncing = false; }
+    });
+  };
+  iWin.addEventListener("scroll", () => schedule(() => { sidebarScroll.scrollTop = iWin.scrollY; }));
+  sidebarScroll.addEventListener("scroll", () => schedule(() => { iWin.scrollTo({ top: sidebarScroll.scrollTop }); }));
 }
 
 function currentRange() {
@@ -186,6 +189,44 @@ async function saveAnnotation(payload) {
 async function deleteAnnotation(aid) {
   await fetch(`${API}/annotations/${aid}`, { method: "DELETE" });
   await loadAnnotations();
+}
+
+/** 导出 sink:把批注组装成结构化 prompt,复制到剪贴板(回灌 CLI) */
+async function exportToClipboard() {
+  const r = await fetch(`${API}/annotations?document_id=${encodeURIComponent(docId)}`);
+  const data = await r.json();
+  const items = data.items || [];
+  if (items.length === 0) { alert("暂无批注可回灌"); return; }
+  const prompt = buildPrompt(items);
+  try {
+    await navigator.clipboard.writeText(prompt);
+    if (exportBtn) {
+      const old = exportBtn.textContent;
+      exportBtn.textContent = "已复制 ✓";
+      setTimeout(() => { exportBtn.textContent = old; }, 1500);
+    }
+  } catch (e) {
+    console.error("clipboard failed", e);
+    const w = window.open("", "_blank");
+    if (w) {
+      w.document.title = "回灌 prompt";
+      w.document.body.style.whiteSpace = "pre-wrap";
+      w.document.body.style.fontFamily = "monospace";
+      w.document.body.textContent = prompt;
+    } else {
+      alert("复制失败,请手动复制:\n\n" + prompt);
+    }
+  }
+}
+
+function buildPrompt(items) {
+  const lines = items.map((a, i) => {
+    const q = a.quote || a.selector?.exact || "";
+    const c = a.body?.comment || "(无)";
+    const action = a.body?.action || "rewrite";
+    return `【批注${i + 1}】动作:${action}\n原文:"${q}"\n评论:${c}`;
+  });
+  return `请基于以下批注逐条修改文档「${docId}」,处理完后输出完整的新版 HTML:\n\n${lines.join("\n\n")}`;
 }
 
 async function loadAnnotations() {

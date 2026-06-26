@@ -110,3 +110,24 @@ def test_archive_on_stale(server, page):
         assert page.locator("#sidebar-list .card").count() == 0
     finally:
         sample.write_text(backup, encoding="utf-8")
+
+
+def test_export_prompt_format(server, page):
+    _open(server, page, "01_token")
+    _select_first_text(page)
+    page.wait_for_timeout(200)
+    _click_float_button(page, "ann-btn")
+    page.evaluate(
+        """() => document.getElementById('doc-frame').contentDocument.getElementById('ann-input').value = '请把这段改简洁'"""
+    )
+    _click_float_button(page, "ann-submit")
+    page.wait_for_timeout(600)
+    prompt = page.evaluate(
+        """async () => {
+            const r = await fetch('/api/annotations?document_id=01_token');
+            const data = await r.json();
+            return window.__buildPrompt(data.items);
+        }"""
+    )
+    assert "请基于以下批注" in prompt
+    assert "请把这段改简洁" in prompt
