@@ -72,6 +72,6 @@ def test_relocate_goes_stale_when_text_removed(server, page):
             """
         )
         assert result["marks"] == 0
-        assert "stale 1" in result["status"]
+        assert "已归档 1" in result["status"]
     finally:
         sample.write_text(backup, encoding="utf-8")  # 恢复样本

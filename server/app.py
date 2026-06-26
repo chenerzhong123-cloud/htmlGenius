@@ -67,3 +67,11 @@ def create_annotation(payload: AnnotationCreate):
 @app.get("/api/annotations")
 def list_annotations(document_id: str):
     return {"items": storage.list_annotations(document_id)}
+
+
+@app.delete("/api/annotations/{aid}")
+def delete_annotation(aid: str):
+    deleted = storage.delete_annotation(aid)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="annotation not found")
+    return {"ok": True}

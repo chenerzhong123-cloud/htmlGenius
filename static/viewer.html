@@ -3,15 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>批注查看器</title>
+  <title>htmlGenius 批注查看器</title>
   <link rel="stylesheet" href="/static/annotate.css">
 </head>
 <body>
   <div id="bar">
     <span id="doc-title"></span>
     <span id="status"></span>
+    <button id="toggle-sidebar" title="折叠/展开侧边栏">侧栏</button>
   </div>
-  <iframe id="doc-frame"></iframe>
+  <div id="main">
+    <div id="doc-wrap">
+      <iframe id="doc-frame"></iframe>
+    </div>
+    <aside id="sidebar">
+      <div class="sb-section">
+        <div class="sb-header">批注 <span id="count-main"></span></div>
+        <div id="sidebar-list"></div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-header" id="archive-toggle">已归档 <span id="count-archive"></span></div>
+        <div id="sidebar-archive" hidden></div>
+      </div>
+    </aside>
+  </div>
   <script type="module" src="/static/annotate.js"></script>
 </body>
 </html>

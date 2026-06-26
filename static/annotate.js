@@ -2,52 +2,159 @@ import { describe, anchor } from "./anchoring/text-quote.js";
 
 const params = new URLSearchParams(location.search);
 const docId = params.get("doc") || "01_token";
-const docPath =
-  docId === "spec"
-    ? "/docs/2026-06-25-html-annotation-feedback-loop-design.html"
-    : `/samples/${docId}.html`;
+const docPath = docId === "spec"
+  ? "/docs/2026-06-25-html-annotation-feedback-loop-design.html"
+  : `/samples/${docId}.html`;
 
 const API = "/api";
 const frame = document.getElementById("doc-frame");
 const statusEl = document.getElementById("status");
 document.getElementById("doc-title").textContent = `文档:${docId}`;
 
+const sidebar = document.getElementById("sidebar");
+const listEl = document.getElementById("sidebar-list");
+const archiveEl = document.getElementById("sidebar-archive");
+const countMain = document.getElementById("count-main");
+const countArchive = document.getElementById("count-archive");
+const toggleBtn = document.getElementById("toggle-sidebar");
+const archiveToggle = document.getElementById("archive-toggle");
+
+let userToggled = false;
+let lastSelector = null;
+const marksById = new Map(); // annId -> mark element(iframe 内)
+
+toggleBtn.addEventListener("click", () => {
+  userToggled = true;
+  sidebar.classList.toggle("collapsed");
+});
+archiveToggle.addEventListener("click", () => {
+  const show = archiveEl.hidden;
+  archiveEl.hidden = !show;
+  archiveToggle.classList.toggle("expanded", show);
+});
+
 frame.src = docPath;
 frame.addEventListener("load", init);
 
-/** 给 iframe 注入高亮样式(非侵入:不改目标 HTML 文件) */
+/** 注入 iframe 内的高亮样式 + 悬浮批注浮层 */
 function injectStyle(doc) {
   const style = doc.createElement("style");
-  style.textContent = `mark[data-ann]{background:#fff3a0;border-radius:2px;cursor:help;}`;
+  style.textContent = `
+    mark[data-ann]{ background:#fff3a0; border-radius:2px; cursor:pointer; }
+    mark[data-ann].flash{ background:#fbbf24; }
+    #ann-float{
+      position:absolute; z-index:999999; display:none;
+      background:#1f2328; color:#fff; border-radius:8px; padding:6px;
+      box-shadow:0 4px 12px rgba(0,0,0,.25); font-size:13px;
+    }
+    #ann-float.show{ display:block; }
+    #ann-btn{ background:transparent; color:#fff; border:0; cursor:pointer; padding:4px 12px; border-radius:5px; font-size:13px; font-weight:500; }
+    #ann-btn:hover{ background:#374151; }
+    #ann-editor{ display:none; }
+    #ann-editor.show{ display:block; }
+    #ann-editor textarea{ width:240px; height:64px; font-size:13px; padding:6px; border:0; border-radius:5px; resize:none; box-sizing:border-box; }
+    #ann-editor .row{ display:flex; gap:6px; justify-content:flex-end; margin-top:6px; }
+    #ann-editor button{ border:0; border-radius:5px; padding:4px 12px; cursor:pointer; font-size:12px; font-weight:500; }
+    #ann-submit{ background:#0969da; color:#fff; }
+    #ann-cancel{ background:#4b5563; color:#fff; }
+  `;
   doc.head.appendChild(style);
+
+  const f = doc.createElement("div");
+  f.id = "ann-float";
+  f.innerHTML = `
+    <button id="ann-btn">批注</button>
+    <div id="ann-editor">
+      <textarea id="ann-input" placeholder="写下评论…"></textarea>
+      <div class="row">
+        <button id="ann-cancel">取消</button>
+        <button id="ann-submit">提交</button>
+      </div>
+    </div>
+  `;
+  doc.body.appendChild(f);
 }
+
+let iDoc, iRoot, iFloat, iBtn, iEditor, iInput;
 
 async function init() {
-  const doc = frame.contentDocument;
-  if (!doc) return;
-  injectStyle(doc);
-  doc.body.addEventListener("mouseup", onSelect);
-  window.__describe = describe; // 暴露给端到端测试用
+  iDoc = frame.contentDocument;
+  if (!iDoc) return;
+  iRoot = iDoc.body;
+  injectStyle(iDoc);
+  iFloat = iDoc.getElementById("ann-float");
+  iBtn = iDoc.getElementById("ann-btn");
+  iEditor = iDoc.getElementById("ann-editor");
+  iInput = iDoc.getElementById("ann-input");
+
+  window.__describe = describe; // 供 e2e 测试
   window.__frame = frame;
-  await loadAnnotations(doc.body);
+
+  // 浮层内 mousedown 不清空选区(否则点按钮就丢选区)
+  iFloat.addEventListener("mousedown", (e) => e.preventDefault());
+
+  iDoc.addEventListener("selectionchange", onSelectionChange);
+  iBtn.addEventListener("click", () => {
+    iBtn.style.display = "none";
+    iEditor.classList.add("show");
+    iInput.focus();
+  });
+  iDoc.getElementById("ann-cancel").addEventListener("click", hideFloat);
+  iDoc.getElementById("ann-submit").addEventListener("click", submitFromFloat);
+
+  await loadAnnotations();
 }
 
-async function onSelect() {
-  const doc = frame.contentDocument;
-  const sel = doc.getSelection();
-  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-  const range = sel.getRangeAt(0);
-  const selector = describe(range, doc.body);
-  if (!selector || !selector.exact) return;
-  const comment = window.prompt("批注内容(可选):") || "";
+function currentRange() {
+  const s = iDoc.getSelection();
+  if (!s || s.isCollapsed || s.rangeCount === 0) return null;
+  const r = s.getRangeAt(0);
+  if (!r.toString().trim()) return null;
+  return r;
+}
+
+function onSelectionChange() {
+  // 正在编辑(浮层输入框展开)时不隐藏,避免点按钮的瞬间被清空选区触发
+  if (iEditor && iEditor.classList.contains("show")) return;
+  const r = currentRange();
+  if (!r) { hideFloat(); lastSelector = null; return; }
+  const selector = describe(r, iRoot);
+  if (!selector || !selector.exact) { hideFloat(); return; }
+  lastSelector = selector;
+
+  const rect = r.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) { hideFloat(); return; }
+  const above = rect.top > 50;
+  iFloat.style.left = `${rect.left + rect.width / 2}px`;
+  iFloat.style.top = above ? `${rect.top - 8}px` : `${rect.bottom + 8}px`;
+  iFloat.style.transform = above ? "translate(-50%, -100%)" : "translate(-50%, 0)";
+  iFloat.classList.add("show");
+  iBtn.style.display = "";
+  iEditor.classList.remove("show");
+  iInput.value = "";
+}
+
+function hideFloat() {
+  if (!iFloat) return;
+  iFloat.classList.remove("show");
+  iEditor.classList.remove("show");
+  iBtn.style.display = "";
+  if (iInput) iInput.value = "";
+}
+
+async function submitFromFloat() {
+  if (!lastSelector || !lastSelector.exact) return;
+  const comment = iInput.value.trim();
   await saveAnnotation({
     document_id: docId,
-    selector,
-    quote: selector.exact,
+    selector: lastSelector,
+    quote: lastSelector.exact,
     body: { comment, action: "rewrite", instruction: "" },
   });
-  sel.removeAllRanges();
-  await loadAnnotations(doc.body);
+  hideFloat();
+  lastSelector = null;
+  iDoc.getSelection().removeAllRanges();
+  await loadAnnotations();
 }
 
 async function saveAnnotation(payload) {
@@ -59,41 +166,129 @@ async function saveAnnotation(payload) {
   return r.json();
 }
 
-/** 清除旧高亮,重新按 selector 定位渲染 */
-async function loadAnnotations(root) {
-  const doc = root.ownerDocument;
-  doc.querySelectorAll("mark[data-ann]").forEach((m) => {
-    const parent = m.parentNode;
-    while (m.firstChild) parent.insertBefore(m.firstChild, m);
-    parent.removeChild(m);
+async function deleteAnnotation(aid) {
+  await fetch(`${API}/annotations/${aid}`, { method: "DELETE" });
+  await loadAnnotations();
+}
+
+async function loadAnnotations() {
+  marksById.clear();
+  iDoc.querySelectorAll("mark[data-ann]").forEach((m) => {
+    const p = m.parentNode;
+    while (m.firstChild) p.insertBefore(m.firstChild, m);
+    p.removeChild(m);
   });
-  root.normalize();
+  iRoot.normalize();
 
   const r = await fetch(`${API}/annotations?document_id=${encodeURIComponent(docId)}`);
   const data = await r.json();
-  let opened = 0;
-  let stale = 0;
+
+  const main = [];
+  const archive = [];
   for (const ann of data.items) {
-    const range = anchor(ann.selector, root);
+    const range = anchor(ann.selector, iRoot);
     if (range) {
-      highlight(doc, range, ann);
-      opened++;
+      const mark = highlight(range, ann);
+      marksById.set(ann.id, mark);
+      main.push(ann);
     } else {
-      stale++;
+      archive.push(ann);
     }
   }
-  statusEl.textContent = `已定位 ${opened} 条 · stale ${stale} 条`;
+
+  main.sort((a, b) => topOf(a.id) - topOf(b.id));
+
+  renderCards(listEl, main, false);
+  renderCards(archiveEl, archive, true);
+
+  countMain.textContent = main.length ? `(${main.length})` : "";
+  countArchive.textContent = archive.length ? `(${archive.length})` : "";
+  statusEl.textContent = `批注 ${main.length} 条 · 已归档 ${archive.length} 条`;
+
+  if (!userToggled) {
+    sidebar.classList.toggle("collapsed", main.length + archive.length === 0);
+  }
 }
 
-function highlight(doc, range, ann) {
-  const mark = doc.createElement("mark");
+function topOf(annId) {
+  const m = marksById.get(annId);
+  if (!m) return 0;
+  let y = 0;
+  let cur = m;
+  while (cur && cur !== iRoot) {
+    y += cur.offsetTop || 0;
+    cur = cur.offsetParent;
+  }
+  return y;
+}
+
+function highlight(range, ann) {
+  const mark = iDoc.createElement("mark");
   mark.dataset.ann = ann.id;
-  mark.title = ann.body?.comment || "(无评论)";
+  mark.addEventListener("click", () => activateCard(ann.id));
   try {
     range.surroundContents(mark);
   } catch (e) {
-    // 选区边界不整(跨节点)surroundContents 会抛错:fallback 提取再包裹
     mark.appendChild(range.extractContents());
     range.insertNode(mark);
   }
+  return mark;
+}
+
+function renderCards(container, items, isArchive) {
+  container.innerHTML = "";
+  if (items.length === 0) {
+    if (!isArchive) container.innerHTML = `<div class="empty">选中正文文字 → 点「批注」</div>`;
+    return;
+  }
+  for (const ann of items) {
+    const card = document.createElement("div");
+    card.className = "card" + (isArchive ? " archive" : "");
+    card.dataset.ann = ann.id;
+    const quote = (ann.quote || "").slice(0, 80);
+    const comment = ann.body?.comment || "(无评论)";
+    const badge = isArchive ? "无法定位" : (ann.body?.action || "");
+    card.innerHTML = `
+      <div class="quote">${escapeHtml(quote)}</div>
+      <div class="comment">${escapeHtml(comment)}</div>
+      <div class="meta">
+        <span class="badge">${escapeHtml(badge)}</span>
+        <button class="del">删除</button>
+      </div>
+    `;
+    if (!isArchive) {
+      card.addEventListener("click", (e) => {
+        if (e.target.classList.contains("del")) return;
+        scrollToAnn(ann.id);
+      });
+    }
+    card.querySelector(".del").addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteAnnotation(ann.id);
+    });
+    container.appendChild(card);
+  }
+}
+
+function scrollToAnn(annId) {
+  const mark = marksById.get(annId);
+  if (!mark) return;
+  mark.scrollIntoView({ behavior: "smooth", block: "center" });
+  mark.classList.add("flash");
+  setTimeout(() => mark.classList.remove("flash"), 1200);
+}
+
+function activateCard(annId) {
+  document.querySelectorAll(".card").forEach((c) => c.classList.remove("active"));
+  const card = document.querySelector(`.card[data-ann="${annId}"]`);
+  if (card) {
+    card.classList.add("active");
+    card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[c]);
 }

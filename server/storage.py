@@ -131,6 +131,17 @@ def get_annotation(aid: str) -> dict | None:
     return _row_to_ann(r) if r else None
 
 
+def delete_annotation(aid: str) -> bool:
+    c = _connect()
+    try:
+        cur = c.execute("DELETE FROM annotations WHERE id=?", (aid,))
+        c.commit()
+        deleted = cur.rowcount > 0
+    finally:
+        c.close()
+    return deleted
+
+
 def list_annotations(document_id: str) -> list[dict]:
     c = _connect()
     try:
