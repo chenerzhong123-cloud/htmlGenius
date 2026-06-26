@@ -22,8 +22,9 @@ const archiveToggle = document.getElementById("archive-toggle");
 let userToggled = false;
 let lastSelector = null;
 let iWin = null;
-let syncing = false;
-const marksById = new Map(); // annId -> mark element(iframe 内)
+let posRAF = 0;
+const rangesById = new Map();    // annId -> Range(iframe 内,DOM 不动)
+const overlaysById = new Map();  // annId -> [.ann-hl 矩形 div]
 
 toggleBtn.addEventListener("click", () => {
   userToggled = true;
@@ -41,17 +42,13 @@ if (exportBtn) exportBtn.addEventListener("click", exportToClipboard);
 frame.src = docPath;
 frame.addEventListener("load", init);
 
-/** 注入 iframe 内的高亮样式 + 悬浮批注浮层 */
+/** 注入 iframe 内的 overlay 高亮样式 + 悬浮批注浮层 */
 function injectStyle(doc) {
   const style = doc.createElement("style");
   style.textContent = `
-    mark[data-ann]{ background:#fff3a0; border-radius:2px; cursor:pointer; }
-    mark[data-ann].flash{ background:#fbbf24; }
-    #ann-float{
-      position:absolute; z-index:999999; display:none;
-      background:#1f2328; color:#fff; border-radius:8px; padding:6px;
-      box-shadow:0 4px 12px rgba(0,0,0,.25); font-size:13px;
-    }
+    .ann-hl{ position:absolute; background:rgba(255,243,160,0.55); border-radius:2px; pointer-events:none; z-index:1; }
+    .ann-hl.flash{ background:rgba(251,191,36,0.75); }
+    #ann-float{ position:absolute; z-index:999999; display:none; background:#1f2328; color:#fff; border-radius:8px; padding:6px; box-shadow:0 4px 12px rgba(0,0,0,.25); font-size:13px; }
     #ann-float.show{ display:block; }
     #ann-btn{ background:transparent; color:#fff; border:0; cursor:pointer; padding:4px 12px; border-radius:5px; font-size:13px; font-weight:500; }
     #ann-btn:hover{ background:#374151; }
@@ -107,23 +104,15 @@ async function init() {
   iDoc.getElementById("ann-cancel").addEventListener("click", hideFloat);
   iDoc.getElementById("ann-submit").addEventListener("click", submitFromFloat);
 
-  setupScrollSync();
+  // iframe 滚动/缩放 → rAF 更新卡片 transform(侧栏不滚动,避免双滚动卡顿)
+  iWin.addEventListener("scroll", scheduleUpdate);
+  iWin.addEventListener("resize", scheduleUpdate);
   await loadAnnotations();
 }
 
-/** iframe 与 sidebar-scroll 双向同步滚动(rAF 节流,避免高频 reflow 卡顿) */
-let syncRAF = 0;
-function setupScrollSync() {
-  const schedule = (fn) => {
-    if (syncRAF || syncing) return;
-    syncRAF = requestAnimationFrame(() => {
-      syncRAF = 0;
-      syncing = true;
-      try { fn(); } finally { syncing = false; }
-    });
-  };
-  iWin.addEventListener("scroll", () => schedule(() => { sidebarScroll.scrollTop = iWin.scrollY; }));
-  sidebarScroll.addEventListener("scroll", () => schedule(() => { iWin.scrollTo({ top: sidebarScroll.scrollTop }); }));
+function scheduleUpdate() {
+  if (posRAF) return;
+  posRAF = requestAnimationFrame(() => { posRAF = 0; updatePositions(); });
 }
 
 function currentRange() {
@@ -197,6 +186,7 @@ async function exportToClipboard() {
   const data = await r.json();
   const items = data.items || [];
   if (items.length === 0) { alert("暂无批注可回灌"); return; }
+  for (const a of items) a._section = sectionOf(a.id);
   const prompt = buildPrompt(items);
   try {
     await navigator.clipboard.writeText(prompt);
@@ -221,22 +211,49 @@ async function exportToClipboard() {
 
 function buildPrompt(items) {
   const lines = items.map((a, i) => {
-    const q = a.quote || a.selector?.exact || "";
-    const c = a.body?.comment || "(无)";
+    const sel = a.selector || {};
+    const exact = sel.exact || a.quote || "";
+    const prefix = (sel.prefix || "").trim();
+    const suffix = (sel.suffix || "").trim();
+    const section = a._section ? `〔章节:${a._section}〕 ` : "";
+    const loc = (prefix || suffix)
+      ? `定位:${prefix ? `前文「${prefix}」 ` : ""}【原文】「${exact}」${suffix ? ` 后文「${suffix}」` : ""}`
+      : `定位:【原文】「${exact}」(无前后文,请按原文唯一定位)`;
     const action = a.body?.action || "rewrite";
-    return `【批注${i + 1}】动作:${action}\n原文:"${q}"\n评论:${c}`;
+    const instr = (a.body?.instruction || "").trim() || a.body?.comment || "(无)";
+    return `==批注 ${i + 1} / ${items.length}== ${section}\n动作:${action}\n${loc}\n指令:${instr}`;
   });
-  return `请基于以下批注逐条修改文档「${docId}」,处理完后输出完整的新版 HTML:\n\n${lines.join("\n\n")}`;
+  return `你是一名 HTML 编辑执行器。下面给出文档《${docId}》的 ${items.length} 条批注,请严格逐条执行修改,并输出完整的新版 HTML(从 <!DOCTYPE html> 到 </html>,不要省略、不要用 diff)。
+
+执行规则:
+1. 每条【定位】由「前文 + 原文 + 后文」三段联合匹配,定位到唯一一处;若文档有多处同名片段,只改定位匹配到的那一处,其余保持不变。
+2. 按 action 处理:rewrite=按指令改写该处;delete=删除该处(保留所在块级结构);question=不改正文,仅在文末「待确认问题」清单列出。
+3. 只改批注命中的位置,不得改动其他段落的文字、结构、样式、链接。
+4. 保留原文档 DOCTYPE、head、CSS、script 与整体结构,仅替换被命中的文本。
+5. 全部处理完后,先输出一行「==已处理 ${items.length} 条批注==」,再输出完整 HTML。
+
+${lines.join("\n\n")}`;
+}
+
+/** 章节锚点(B 兜底):批注所在最近 h1/h2/h3 标题文本(用于极短/重复原文消歧) */
+function sectionOf(annId) {
+  const range = rangesById.get(annId);
+  if (!range) return "";
+  let el = range.commonAncestorContainer;
+  if (el.nodeType === 3) el = el.parentNode;
+  while (el && el !== iRoot) {
+    if (el.tagName && /^H[1-3]$/.test(el.tagName)) return (el.textContent || "").trim();
+    const h = el.querySelector ? el.querySelector("h1,h2,h3") : null;
+    if (h) return (h.textContent || "").trim();
+    el = el.parentElement;
+  }
+  return "";
 }
 
 async function loadAnnotations() {
-  marksById.clear();
-  iDoc.querySelectorAll("mark[data-ann]").forEach((m) => {
-    const p = m.parentNode;
-    while (m.firstChild) p.insertBefore(m.firstChild, m);
-    p.removeChild(m);
-  });
-  iRoot.normalize();
+  rangesById.clear();
+  iDoc.querySelectorAll(".ann-hl").forEach((d) => d.remove());
+  overlaysById.clear();
 
   const r = await fetch(`${API}/annotations?document_id=${encodeURIComponent(docId)}`);
   const data = await r.json();
@@ -246,8 +263,8 @@ async function loadAnnotations() {
   for (const ann of data.items) {
     const range = anchor(ann.selector, iRoot);
     if (range) {
-      const mark = highlight(range, ann);
-      marksById.set(ann.id, mark);
+      rangesById.set(ann.id, range);
+      overlaysById.set(ann.id, highlightOverlay(range, ann));
       main.push(ann);
     } else {
       archive.push(ann);
@@ -263,39 +280,56 @@ async function loadAnnotations() {
   if (!userToggled) {
     sidebar.classList.toggle("collapsed", main.length + archive.length === 0);
   }
+  updatePositions();
 }
 
-/** mark 在 iframe 文档中的纵向位置(相对文档顶) */
-function markDocY(annId) {
-  const m = marksById.get(annId);
-  if (!m) return 0;
-  const r = m.getBoundingClientRect();
-  return r.top + (iWin ? iWin.scrollY : 0);
-}
-
-/** 主卡片:绝对锚定到对应高亮的 Y,重叠时向下避让 */
-function renderMainCards(items) {
-  listEl.innerHTML = "";
-  const docH = Math.max(iDoc.documentElement.scrollHeight, iRoot.scrollHeight);
-  listEl.style.height = docH + "px";
-
-  if (items.length === 0) {
-    listEl.innerHTML = `<div class="empty" style="position:absolute;top:8px;left:0;right:0;">选中正文文字 → 点「批注」</div>`;
-    return;
+/** overlay 高亮:用矩形覆盖 range 的所有 rect(文档坐标,不随滚动变),完全不碰原文 DOM */
+function highlightOverlay(range, ann) {
+  const rects = range.getClientRects();
+  const sy = iWin.scrollY, sx = iWin.scrollX;
+  const divs = [];
+  for (const r of rects) {
+    const div = iDoc.createElement("div");
+    div.className = "ann-hl";
+    div.dataset.ann = ann.id;
+    div.style.left = (r.left + sx) + "px";
+    div.style.top = (r.top + sy) + "px";
+    div.style.width = r.width + "px";
+    div.style.height = r.height + "px";
+    iRoot.appendChild(div);
+    divs.push(div);
   }
+  return divs;
+}
 
-  const withY = items.map((ann) => ({ ann, y: markDocY(ann.id) }));
-  withY.sort((a, b) => a.y - b.y);
+/** range 在 iframe viewport 的顶部 Y(随滚动变) */
+function rangeViewportY(annId) {
+  const range = rangesById.get(annId);
+  if (!range) return -9999;
+  const rects = range.getClientRects();
+  if (!rects.length) return -9999;
+  return rects[0].top;
+}
+
+/** 每帧:卡片 transform 跟随 range viewport Y + 重叠避让 + 视口外隐藏 */
+function updatePositions() {
+  const cards = [...listEl.querySelectorAll(".card:not(.archive)")];
+  const data = cards
+    .map((c) => ({ c, y: rangeViewportY(c.dataset.ann) }))
+    .filter((d) => d.y > -9000);
+  data.sort((a, b) => a.y - b.y);
 
   const GAP = 6;
   let prevBottom = -Infinity;
-  for (const { ann, y } of withY) {
-    const card = createCardEl(ann, false);
-    listEl.appendChild(card);
-    let top = Math.max(0, y);
+  const viewH = sidebarScroll.clientHeight;
+  for (const { c, y } of data) {
+    let top = y;
     if (top < prevBottom + GAP) top = prevBottom + GAP;
-    card.style.top = top + "px";
-    prevBottom = top + card.offsetHeight;
+    c.style.transform = `translateY(${top}px)`;
+    const h = c.offsetHeight || 80;
+    c.style.opacity = (top + h < -20 || top > viewH + 20) ? "0" : "1";
+    c.style.pointerEvents = (top + h < -20 || top > viewH + 20) ? "none" : "auto";
+    prevBottom = top + h;
   }
 }
 
@@ -327,47 +361,41 @@ function createCardEl(ann, isArchive) {
   return card;
 }
 
+function renderMainCards(items) {
+  listEl.innerHTML = "";
+  if (items.length === 0) {
+    listEl.innerHTML = `<div class="empty" style="position:absolute;top:8px;left:0;right:0;">选中正文文字 → 点「批注」</div>`;
+    return;
+  }
+  const sorted = [...items].sort((a, b) => rangeViewportY(a.id) - rangeViewportY(b.id));
+  for (const ann of sorted) listEl.appendChild(createCardEl(ann, false));
+}
+
 function renderCards(container, items, isArchive) {
   container.innerHTML = "";
-  for (const ann of items) {
-    container.appendChild(createCardEl(ann, isArchive));
-  }
+  for (const ann of items) container.appendChild(createCardEl(ann, isArchive));
 }
 
 function scrollToAnn(annId) {
-  const mark = marksById.get(annId);
-  if (!mark) return;
-  syncing = true;
-  mark.scrollIntoView({ behavior: "smooth", block: "center" });
-  const markY = markDocY(annId);
-  sidebarScroll.scrollTo({ top: Math.max(0, markY - sidebarScroll.clientHeight / 2), behavior: "smooth" });
-  setTimeout(() => { syncing = false; }, 700);
-  mark.classList.add("flash");
-  setTimeout(() => mark.classList.remove("flash"), 1200);
+  const range = rangesById.get(annId);
+  if (!range) return;
+  const top = range.getBoundingClientRect().top + iWin.scrollY - iWin.innerHeight / 2;
+  iWin.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  // flash overlay
+  const divs = overlaysById.get(annId) || [];
+  divs.forEach((d) => d.classList.add("flash"));
+  setTimeout(() => divs.forEach((d) => d.classList.remove("flash")), 1200);
+  // smooth 滚动期间持续更新卡片位置
+  let n = 0;
+  const tick = () => { updatePositions(); if (n++ < 60) requestAnimationFrame(tick); };
+  tick();
+  activateCard(annId);
 }
 
 function activateCard(annId) {
   document.querySelectorAll(".card").forEach((c) => c.classList.remove("active"));
   const card = document.querySelector(`.card[data-ann="${annId}"]`);
-  if (card) {
-    card.classList.add("active");
-    syncing = true;
-    card.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    setTimeout(() => { syncing = false; }, 500);
-  }
-}
-
-function highlight(range, ann) {
-  const mark = iDoc.createElement("mark");
-  mark.dataset.ann = ann.id;
-  mark.addEventListener("click", () => activateCard(ann.id));
-  try {
-    range.surroundContents(mark);
-  } catch (e) {
-    mark.appendChild(range.extractContents());
-    range.insertNode(mark);
-  }
-  return mark;
+  if (card) card.classList.add("active");
 }
 
 function escapeHtml(s) {

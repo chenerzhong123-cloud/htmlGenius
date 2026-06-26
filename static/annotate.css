@@ -25,8 +25,8 @@ body {
   background: #fafbfc; display: flex; flex-direction: column;
 }
 #sidebar.collapsed { width: 0; border-left: 0; overflow: hidden; }
-#sidebar-scroll { flex: 1; overflow-y: auto; position: relative; }
-#sidebar-list { position: relative; width: 100%; }
+#sidebar-scroll { flex: 1; overflow: hidden; position: relative; }
+#sidebar-list { position: relative; width: 100%; height: 100%; }
 
 #archive-section {
   flex-shrink: 0; border-top: 1px solid #e5e7eb; padding: 8px 12px;
@@ -42,12 +42,13 @@ body {
 #archive-toggle::before { content: "▸ "; }
 #archive-toggle.expanded::before { content: "▾ "; }
 
-/* 主卡片:绝对定位,Y 锚定到对应高亮 */
+/* 主卡片:top:0,transform 跟随高亮 viewport Y(GPU 合成) */
 .card {
-  position: absolute; left: 8px; right: 8px;
+  position: absolute; top: 0; left: 8px; right: 8px;
   background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
   padding: 8px 10px; font-size: 13px; cursor: pointer;
   box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  will-change: transform;
 }
 /* 归档卡片:普通流,在 archive-section 内 */
 #sidebar-archive .card { position: relative; margin-bottom: 6px; }

@@ -39,11 +39,11 @@ def test_relocate_survives_when_text_kept(server, page):
     quote = _annotate_first_text(server, page, "01_token")
     assert quote  # 存到了
 
-    # reload:文字未变,批注应重定位成功 → iframe 内出现 mark[data-ann]
+    # reload:文字未变,批注应重定位成功 → iframe 内出现 .ann-hl
     page.reload()
     page.wait_for_function("window.__frame !== undefined", timeout=10000)
     count = page.evaluate(
-        "() => document.getElementById('doc-frame').contentDocument.querySelectorAll('mark[data-ann]').length"
+        "() => document.getElementById('doc-frame').contentDocument.querySelectorAll('.ann-hl').length"
     )
     assert count >= 1
 
@@ -65,7 +65,7 @@ def test_relocate_goes_stale_when_text_removed(server, page):
             () => {
                 const doc = document.getElementById('doc-frame').contentDocument;
                 return {
-                    marks: doc.querySelectorAll('mark[data-ann]').length,
+                    marks: doc.querySelectorAll('.ann-hl').length,
                     status: document.getElementById('status').textContent
                 };
             }

@@ -60,7 +60,7 @@ def test_sidebar_shows_annotation_after_submit(server, page):
     page.wait_for_timeout(600)
     cards = page.locator("#sidebar-list .card").count()
     marks = page.evaluate(
-        "() => document.getElementById('doc-frame').contentDocument.querySelectorAll('mark[data-ann]').length"
+        "() => document.getElementById('doc-frame').contentDocument.querySelectorAll('.ann-hl').length"
     )
     assert cards >= 1
     assert marks >= 1
@@ -129,5 +129,52 @@ def test_export_prompt_format(server, page):
             return window.__buildPrompt(data.items);
         }"""
     )
-    assert "请基于以下批注" in prompt
+    assert "HTML 编辑执行器" in prompt
+    assert "定位:" in prompt
     assert "请把这段改简洁" in prompt
+
+
+def test_overlay_does_not_mutate_dom(server, page):
+    """② 验证:overlay 高亮不破坏原文 DOM(无 mark 注入、TOC 结构不变)"""
+    _open(server, page, "spec")
+    before = page.evaluate("""() => {
+        const doc = document.getElementById('doc-frame').contentDocument;
+        const ol = doc.querySelector('.toc ol') || doc.querySelector('ol');
+        return {
+            liCount: ol ? ol.querySelectorAll('li').length : -1,
+            markCount: doc.querySelectorAll('mark').length,
+        };
+    }""")
+    _select_first_text(page)
+    page.wait_for_timeout(200)
+    _click_float_button(page, "ann-btn")
+    page.evaluate("() => document.getElementById('doc-frame').contentDocument.getElementById('ann-input').value = 't'")
+    _click_float_button(page, "ann-submit")
+    page.wait_for_timeout(600)
+    after = page.evaluate("""() => {
+        const doc = document.getElementById('doc-frame').contentDocument;
+        const ol = doc.querySelector('.toc ol') || doc.querySelector('ol');
+        return {
+            liCount: ol ? ol.querySelectorAll('li').length : -1,
+            markCount: doc.querySelectorAll('mark').length,
+            hlCount: doc.querySelectorAll('.ann-hl').length,
+        };
+    }""")
+    assert before["liCount"] == after["liCount"], f"TOC li 数变了:{before['liCount']}→{after['liCount']}"
+    assert after["markCount"] == 0, "原文出现 <mark>(overlay 不应注入 mark)"
+    assert after["hlCount"] >= 1
+
+
+def test_card_transform_follows_scroll(server, page):
+    """① 验证:卡片 transform 随 iframe 滚动而更新"""
+    _open(server, page, "01_token")
+    _select_first_text(page)
+    page.wait_for_timeout(200)
+    _click_float_button(page, "ann-btn")
+    _click_float_button(page, "ann-submit")
+    page.wait_for_timeout(600)
+    t1 = page.evaluate("() => { const c = document.querySelector('#sidebar-list .card'); return c ? c.style.transform : ''; }")
+    page.evaluate("() => document.getElementById('doc-frame').contentWindow.scrollTo(0, 300)")
+    page.wait_for_timeout(400)
+    t2 = page.evaluate("() => { const c = document.querySelector('#sidebar-list .card'); return c ? c.style.transform : ''; }")
+    assert t1 and t2 and t1 != t2, f"卡片 transform 应随滚动变化:{t1}→{t2}"
