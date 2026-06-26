@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html><body>
+<iframe id="test-frame" srcdoc="<html><head><style>.a{color:red}</style></head><body><p>real-content</p><div data-htmlgenius-injected='true'>injected-overlay</div></body></html>"></iframe>
+<script type="module">
+  import { serializeDoc } from "./serialize.js";
+  window.__serialize = serializeDoc;
+  window.__ready = true;
+</script>
+</body></html>

@@ -62,6 +62,7 @@ function injectStyle(doc) {
     #ann-submit{ background:#0969da; color:#fff; }
     #ann-cancel{ background:#4b5563; color:#fff; }
   `;
+  style.dataset.htmlgeniusInjected = "true";
   doc.head.appendChild(style);
 
   const f = doc.createElement("div");
@@ -76,6 +77,7 @@ function injectStyle(doc) {
       </div>
     </div>
   `;
+  f.dataset.htmlgeniusInjected = "true";
   doc.body.appendChild(f);
 }
 
@@ -295,6 +297,7 @@ function highlightOverlay(range, ann) {
     const div = iDoc.createElement("div");
     div.className = "ann-hl";
     div.dataset.ann = ann.id;
+    div.dataset.htmlgeniusInjected = "true";
     div.style.left = (r.left + sx) + "px";
     div.style.top = (r.top + sy) + "px";
     div.style.width = r.width + "px";
