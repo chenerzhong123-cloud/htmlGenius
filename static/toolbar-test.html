@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html><body>
+<iframe id="t" srcdoc="<html><head><style>p{display:block}</style></head><body><p id='p1'>hello world</p></body></html>"></iframe>
+<script type="module">
+  import { initToolbar, applyAction } from "./selection-toolbar.js";
+  const f = document.getElementById("t");
+  const setup = () => {
+    const doc = f.contentDocument;
+    if (!doc || !doc.body || doc.readyState === "loading") { setTimeout(setup, 50); return; }
+    doc.body.contentEditable = "true";
+    initToolbar(doc, f.contentWindow);
+    window.__apply = (act, v) => {
+      const p = doc.getElementById("p1");
+      const r = doc.createRange(); r.selectNodeContents(p);
+      const s = doc.getSelection(); s.removeAllRanges(); s.addRange(r);
+      applyAction(doc, act, v);
+    };
+    window.__styleOf = () => doc.defaultView.getComputedStyle(doc.getElementById("p1")).color;
+    window.__alignOf = () => doc.defaultView.getComputedStyle(doc.getElementById("p1")).textAlign;
+    window.__ready = true;
+  };
+  setup();
+</script>
+</body></html>
