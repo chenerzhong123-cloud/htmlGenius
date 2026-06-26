@@ -12,15 +12,17 @@ const statusEl = document.getElementById("status");
 document.getElementById("doc-title").textContent = `文档:${docId}`;
 
 const sidebar = document.getElementById("sidebar");
+const sidebarScroll = document.getElementById("sidebar-scroll");
 const listEl = document.getElementById("sidebar-list");
 const archiveEl = document.getElementById("sidebar-archive");
-const countMain = document.getElementById("count-main");
 const countArchive = document.getElementById("count-archive");
 const toggleBtn = document.getElementById("toggle-sidebar");
 const archiveToggle = document.getElementById("archive-toggle");
 
 let userToggled = false;
 let lastSelector = null;
+let iWin = null;
+let syncing = false;
 const marksById = new Map(); // annId -> mark element(iframe 内)
 
 toggleBtn.addEventListener("click", () => {
@@ -79,6 +81,7 @@ let iDoc, iRoot, iFloat, iBtn, iEditor, iInput;
 
 async function init() {
   iDoc = frame.contentDocument;
+  iWin = frame.contentWindow;
   if (!iDoc) return;
   iRoot = iDoc.body;
   injectStyle(iDoc);
@@ -90,9 +93,7 @@ async function init() {
   window.__describe = describe; // 供 e2e 测试
   window.__frame = frame;
 
-  // 浮层内 mousedown 不清空选区(否则点按钮就丢选区)
   iFloat.addEventListener("mousedown", (e) => e.preventDefault());
-
   iDoc.addEventListener("selectionchange", onSelectionChange);
   iBtn.addEventListener("click", () => {
     iBtn.style.display = "none";
@@ -102,7 +103,24 @@ async function init() {
   iDoc.getElementById("ann-cancel").addEventListener("click", hideFloat);
   iDoc.getElementById("ann-submit").addEventListener("click", submitFromFloat);
 
+  setupScrollSync();
   await loadAnnotations();
+}
+
+/** iframe 与 sidebar-scroll 双向同步滚动 */
+function setupScrollSync() {
+  iWin.addEventListener("scroll", () => {
+    if (syncing) return;
+    syncing = true;
+    sidebarScroll.scrollTop = iWin.scrollY;
+    syncing = false;
+  });
+  sidebarScroll.addEventListener("scroll", () => {
+    if (syncing) return;
+    syncing = true;
+    iWin.scrollTo({ top: sidebarScroll.scrollTop });
+    syncing = false;
+  });
 }
 
 function currentRange() {
@@ -114,7 +132,6 @@ function currentRange() {
 }
 
 function onSelectionChange() {
-  // 正在编辑(浮层输入框展开)时不隐藏,避免点按钮的瞬间被清空选区触发
   if (iEditor && iEditor.classList.contains("show")) return;
   const r = currentRange();
   if (!r) { hideFloat(); lastSelector = null; return; }
@@ -196,12 +213,9 @@ async function loadAnnotations() {
     }
   }
 
-  main.sort((a, b) => topOf(a.id) - topOf(b.id));
-
-  renderCards(listEl, main, false);
+  renderMainCards(main);
   renderCards(archiveEl, archive, true);
 
-  countMain.textContent = main.length ? `(${main.length})` : "";
   countArchive.textContent = archive.length ? `(${archive.length})` : "";
   statusEl.textContent = `批注 ${main.length} 条 · 已归档 ${archive.length} 条`;
 
@@ -210,16 +224,96 @@ async function loadAnnotations() {
   }
 }
 
-function topOf(annId) {
+/** mark 在 iframe 文档中的纵向位置(相对文档顶) */
+function markDocY(annId) {
   const m = marksById.get(annId);
   if (!m) return 0;
-  let y = 0;
-  let cur = m;
-  while (cur && cur !== iRoot) {
-    y += cur.offsetTop || 0;
-    cur = cur.offsetParent;
+  const r = m.getBoundingClientRect();
+  return r.top + (iWin ? iWin.scrollY : 0);
+}
+
+/** 主卡片:绝对锚定到对应高亮的 Y,重叠时向下避让 */
+function renderMainCards(items) {
+  listEl.innerHTML = "";
+  const docH = Math.max(iDoc.documentElement.scrollHeight, iRoot.scrollHeight);
+  listEl.style.height = docH + "px";
+
+  if (items.length === 0) {
+    listEl.innerHTML = `<div class="empty" style="position:absolute;top:8px;left:0;right:0;">选中正文文字 → 点「批注」</div>`;
+    return;
   }
-  return y;
+
+  const withY = items.map((ann) => ({ ann, y: markDocY(ann.id) }));
+  withY.sort((a, b) => a.y - b.y);
+
+  const GAP = 6;
+  let prevBottom = -Infinity;
+  for (const { ann, y } of withY) {
+    const card = createCardEl(ann, false);
+    listEl.appendChild(card);
+    let top = Math.max(0, y);
+    if (top < prevBottom + GAP) top = prevBottom + GAP;
+    card.style.top = top + "px";
+    prevBottom = top + card.offsetHeight;
+  }
+}
+
+function createCardEl(ann, isArchive) {
+  const card = document.createElement("div");
+  card.className = "card" + (isArchive ? " archive" : "");
+  card.dataset.ann = ann.id;
+  const quote = (ann.quote || "").slice(0, 80);
+  const comment = ann.body?.comment || "(无评论)";
+  const badge = isArchive ? "无法定位" : (ann.body?.action || "");
+  card.innerHTML = `
+    <div class="quote">${escapeHtml(quote)}</div>
+    <div class="comment">${escapeHtml(comment)}</div>
+    <div class="meta">
+      <span class="badge">${escapeHtml(badge)}</span>
+      <button class="del">删除</button>
+    </div>
+  `;
+  if (!isArchive) {
+    card.addEventListener("click", (e) => {
+      if (e.target.classList.contains("del")) return;
+      scrollToAnn(ann.id);
+    });
+  }
+  card.querySelector(".del").addEventListener("click", (e) => {
+    e.stopPropagation();
+    deleteAnnotation(ann.id);
+  });
+  return card;
+}
+
+function renderCards(container, items, isArchive) {
+  container.innerHTML = "";
+  for (const ann of items) {
+    container.appendChild(createCardEl(ann, isArchive));
+  }
+}
+
+function scrollToAnn(annId) {
+  const mark = marksById.get(annId);
+  if (!mark) return;
+  syncing = true;
+  mark.scrollIntoView({ behavior: "smooth", block: "center" });
+  const markY = markDocY(annId);
+  sidebarScroll.scrollTo({ top: Math.max(0, markY - sidebarScroll.clientHeight / 2), behavior: "smooth" });
+  setTimeout(() => { syncing = false; }, 700);
+  mark.classList.add("flash");
+  setTimeout(() => mark.classList.remove("flash"), 1200);
+}
+
+function activateCard(annId) {
+  document.querySelectorAll(".card").forEach((c) => c.classList.remove("active"));
+  const card = document.querySelector(`.card[data-ann="${annId}"]`);
+  if (card) {
+    card.classList.add("active");
+    syncing = true;
+    card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setTimeout(() => { syncing = false; }, 500);
+  }
 }
 
 function highlight(range, ann) {
@@ -233,58 +327,6 @@ function highlight(range, ann) {
     range.insertNode(mark);
   }
   return mark;
-}
-
-function renderCards(container, items, isArchive) {
-  container.innerHTML = "";
-  if (items.length === 0) {
-    if (!isArchive) container.innerHTML = `<div class="empty">选中正文文字 → 点「批注」</div>`;
-    return;
-  }
-  for (const ann of items) {
-    const card = document.createElement("div");
-    card.className = "card" + (isArchive ? " archive" : "");
-    card.dataset.ann = ann.id;
-    const quote = (ann.quote || "").slice(0, 80);
-    const comment = ann.body?.comment || "(无评论)";
-    const badge = isArchive ? "无法定位" : (ann.body?.action || "");
-    card.innerHTML = `
-      <div class="quote">${escapeHtml(quote)}</div>
-      <div class="comment">${escapeHtml(comment)}</div>
-      <div class="meta">
-        <span class="badge">${escapeHtml(badge)}</span>
-        <button class="del">删除</button>
-      </div>
-    `;
-    if (!isArchive) {
-      card.addEventListener("click", (e) => {
-        if (e.target.classList.contains("del")) return;
-        scrollToAnn(ann.id);
-      });
-    }
-    card.querySelector(".del").addEventListener("click", (e) => {
-      e.stopPropagation();
-      deleteAnnotation(ann.id);
-    });
-    container.appendChild(card);
-  }
-}
-
-function scrollToAnn(annId) {
-  const mark = marksById.get(annId);
-  if (!mark) return;
-  mark.scrollIntoView({ behavior: "smooth", block: "center" });
-  mark.classList.add("flash");
-  setTimeout(() => mark.classList.remove("flash"), 1200);
-}
-
-function activateCard(annId) {
-  document.querySelectorAll(".card").forEach((c) => c.classList.remove("active"));
-  const card = document.querySelector(`.card[data-ann="${annId}"]`);
-  if (card) {
-    card.classList.add("active");
-    card.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
 }
 
 function escapeHtml(s) {
