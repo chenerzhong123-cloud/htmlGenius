@@ -23,8 +23,10 @@ let userToggled = false;
 let lastSelector = null;
 let iWin = null;
 let posRAF = 0;
+let viewHCached = 0;
 const rangesById = new Map();    // annId -> Range(iframe 内,DOM 不动)
 const overlaysById = new Map();  // annId -> [.ann-hl 矩形 div]
+const cardsById = new Map();     // annId -> { card, baseY, height }
 
 toggleBtn.addEventListener("click", () => {
   userToggled = true;
@@ -105,8 +107,9 @@ async function init() {
   iDoc.getElementById("ann-submit").addEventListener("click", submitFromFloat);
 
   // iframe 滚动/缩放 → rAF 更新卡片 transform(侧栏不滚动,避免双滚动卡顿)
+  viewHCached = sidebarScroll.clientHeight;
   iWin.addEventListener("scroll", scheduleUpdate);
-  iWin.addEventListener("resize", scheduleUpdate);
+  iWin.addEventListener("resize", () => { viewHCached = sidebarScroll.clientHeight; scheduleUpdate(); });
   await loadAnnotations();
 }
 
@@ -311,25 +314,26 @@ function rangeViewportY(annId) {
   return rects[0].top;
 }
 
-/** 每帧:卡片 transform 跟随 range viewport Y + 重叠避让 + 视口外隐藏 */
-function updatePositions() {
-  const cards = [...listEl.querySelectorAll(".card:not(.archive)")];
-  const data = cards
-    .map((c) => ({ c, y: rangeViewportY(c.dataset.ann) }))
-    .filter((d) => d.y > -9000);
-  data.sort((a, b) => a.y - b.y);
+/** range 在 iframe 文档中的顶部 Y(相对文档顶,固定——renderMainCards 一次性算 baseY 用) */
+function markDocY(annId) {
+  const range = rangesById.get(annId);
+  if (!range) return 0;
+  const r = range.getBoundingClientRect();
+  return r.top + (iWin ? iWin.scrollY : 0);
+}
 
-  const GAP = 6;
-  let prevBottom = -Infinity;
-  const viewH = sidebarScroll.clientHeight;
-  for (const { c, y } of data) {
-    let top = y;
-    if (top < prevBottom + GAP) top = prevBottom + GAP;
-    c.style.transform = `translateY(${top}px)`;
-    const h = c.offsetHeight || 80;
-    c.style.opacity = (top + h < -20 || top > viewH + 20) ? "0" : "1";
-    c.style.pointerEvents = (top + h < -20 || top > viewH + 20) ? "none" : "auto";
-    prevBottom = top + h;
+/** 每帧:只读 scrollY + 设 transform/opacity(用缓存 baseY/height/viewH,不读布局属性,避免 reflow) */
+function updatePositions() {
+  const sy = iWin.scrollY;
+  for (const [, info] of cardsById) {
+    const vy = info.baseY - sy;
+    info.card.style.transform = `translateY(${vy}px)`;
+    const out = (vy + info.height < -20 || vy > viewHCached + 20);
+    if (out) {
+      if (info.card.style.opacity !== "0") { info.card.style.opacity = "0"; info.card.style.pointerEvents = "none"; }
+    } else if (info.card.style.opacity !== "1") {
+      info.card.style.opacity = "1"; info.card.style.pointerEvents = "auto";
+    }
   }
 }
 
@@ -363,12 +367,26 @@ function createCardEl(ann, isArchive) {
 
 function renderMainCards(items) {
   listEl.innerHTML = "";
+  cardsById.clear();
   if (items.length === 0) {
     listEl.innerHTML = `<div class="empty" style="position:absolute;top:8px;left:0;right:0;">选中正文文字 → 点「批注」</div>`;
     return;
   }
-  const sorted = [...items].sort((a, b) => rangeViewportY(a.id) - rangeViewportY(b.id));
-  for (const ann of sorted) listEl.appendChild(createCardEl(ann, false));
+  // 一次性:按文档 Y 排序 + 重叠避让算 baseY + 缓存高度(避免每帧读布局属性)
+  const sorted = [...items].sort((a, b) => markDocY(a.id) - markDocY(b.id));
+  const GAP = 6;
+  let prevBottom = -Infinity;
+  for (const ann of sorted) {
+    const card = createCardEl(ann, false);
+    listEl.appendChild(card);
+    const docY = markDocY(ann.id);
+    const h = card.offsetHeight;
+    let baseY = Math.max(0, docY);
+    if (baseY < prevBottom + GAP) baseY = prevBottom + GAP;
+    card.style.transform = `translateY(${baseY}px)`;
+    cardsById.set(ann.id, { card, baseY, height: h });
+    prevBottom = baseY + h;
+  }
 }
 
 function renderCards(container, items, isArchive) {
