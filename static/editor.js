@@ -24,22 +24,31 @@ export function initEditor(iDoc, iWin) {
     el.setAttribute("tabindex", "-1");
   });
 
-  // 粘贴:仅纯文本(防外部 style/class/script 污染结构)
+  // 粘贴:借鉴 Quill clipboard 模块——保留安全格式(DOMPurify 清洗),非纯文本
   body.addEventListener("paste", (e) => {
     e.preventDefault();
-    const text = ((e.clipboardData || {}).getData || (() => "")).call(e.clipboardData, "text/plain") || "";
+    const cd = e.clipboardData || {};
+    const html = cd.getData("text/html") || "";
+    const text = cd.getData("text/plain") || "";
     const sel = iDoc.getSelection();
-    if (sel && sel.rangeCount) {
-      const range = sel.getRangeAt(0);
-      range.deleteContents();
+    if (!sel || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    if (html && window.DOMPurify) {
+      const clean = window.DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+      range.insertNode(range.createContextualFragment(clean));
+    } else {
       range.insertNode(iDoc.createTextNode(text));
-      range.collapse(false);
     }
+    range.collapse(false);
   });
 
-  // input → emit dom-changed(供 annotate 触发 re-anchor)
+  // input → emit dom-changed + 借鉴 Lexical 合并连续输入为一步 undo(debounce 1s push)
+  let undoDebounce = 0;
   body.addEventListener("input", () => {
     iDoc.dispatchEvent(new iWin.Event("dom-changed", { bubbles: true }));
+    clearTimeout(undoDebounce);
+    undoDebounce = setTimeout(() => pushUndo(iDoc), 1000);
   });
   // Ctrl+Shift+Z 撤销(避开浏览器原生 Ctrl+Z 的字符级 undo)
   iDoc.addEventListener("keydown", (e) => {
