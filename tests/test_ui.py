@@ -1,3 +1,4 @@
+import json
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -9,7 +10,7 @@ def _open(server, page, doc):
 
 
 def _select_first_text(page, length=8):
-    """在 iframe 内选中第一段≥10字文本,触发 selectionchange,返回选中文本。"""
+    """在 iframe 内选中第一段≥10字文本,触发 selectionchange。"""
     return page.evaluate(
         """
         (len) => {
@@ -33,31 +34,35 @@ def _select_first_text(page, length=8):
     )
 
 
-def _click_float_button(page, btn_id):
+def _annotate(page, comment="c"):
+    """合并后的批注流程:mock iframe prompt → 选中 → 点 toolbar 的 Comment 按钮 → 批注入库"""
     page.evaluate(
-        """(id) => document.getElementById('doc-frame').contentDocument.getElementById(id).click()""",
-        btn_id,
+        f"""() => {{ try {{ document.getElementById('doc-frame').contentWindow.prompt = () => {json.dumps(comment)}; }} catch(e) {{}} }}"""
     )
+    _select_first_text(page)
+    page.wait_for_timeout(200)
+    page.evaluate(
+        """() => {
+            const b = document.getElementById('doc-frame').contentDocument.querySelector('#hg-toolbar button[data-act="comment"]');
+            if (b) b.click();
+        }"""
+    )
+    page.wait_for_timeout(700)
 
 
-def test_floating_button_appears_on_selection(server, page):
+def test_toolbar_shows_on_selection(server, page):
     _open(server, page, "01_token")
     _select_first_text(page)
     page.wait_for_timeout(200)
     shown = page.evaluate(
-        "() => document.getElementById('doc-frame').contentDocument.getElementById('ann-float').classList.contains('show')"
+        "() => document.getElementById('doc-frame').contentDocument.getElementById('hg-toolbar').classList.contains('show')"
     )
     assert shown
 
 
-def test_sidebar_shows_annotation_after_submit(server, page):
+def test_sidebar_shows_annotation(server, page):
     _open(server, page, "01_token")
-    _select_first_text(page)
-    page.wait_for_timeout(200)
-    _click_float_button(page, "ann-btn")
-    page.wait_for_timeout(100)
-    _click_float_button(page, "ann-submit")
-    page.wait_for_timeout(600)
+    _annotate(page)
     cards = page.locator("#sidebar-list .card").count()
     marks = page.evaluate(
         "() => document.getElementById('doc-frame').contentDocument.querySelectorAll('.ann-hl').length"
@@ -70,14 +75,9 @@ def test_delete_via_sidebar(server, page):
     _open(server, page, "02_rag")
     page.wait_for_timeout(400)
     before = page.locator("#sidebar-list .card").count()
-    _select_first_text(page)
-    page.wait_for_timeout(200)
-    _click_float_button(page, "ann-btn")
-    _click_float_button(page, "ann-submit")
-    page.wait_for_timeout(600)
+    _annotate(page)
     after_add = page.locator("#sidebar-list .card").count()
     assert after_add == before + 1
-
     page.locator("#sidebar-list .card .del").first.click()
     page.wait_for_timeout(600)
     after_del = page.locator("#sidebar-list .card").count()
@@ -89,20 +89,12 @@ def test_archive_on_stale(server, page):
     backup = sample.read_text(encoding="utf-8")
     try:
         _open(server, page, "03_fine-tuning")
-        _select_first_text(page)
-        page.wait_for_timeout(200)
-        _click_float_button(page, "ann-btn")
-        _click_float_button(page, "ann-submit")
-        page.wait_for_timeout(600)
-        quote = page.evaluate(
-            "() => document.querySelector('#sidebar-list .card .quote')?.textContent?.trim() || ''"
-        )
+        _annotate(page)
+        quote = page.evaluate("() => document.querySelector('#sidebar-list .card .quote')?.textContent?.trim() || ''")
         assert quote, "未取到批注 quote"
-
         altered = backup.replace(quote, "占位改写文字ZZZQQ")
         assert altered != backup, "替换未生效"
         sample.write_text(altered)
-
         page.reload()
         page.wait_for_function("window.__frame !== undefined", timeout=10000)
         page.wait_for_timeout(800)
@@ -114,14 +106,7 @@ def test_archive_on_stale(server, page):
 
 def test_export_prompt_format(server, page):
     _open(server, page, "01_token")
-    _select_first_text(page)
-    page.wait_for_timeout(200)
-    _click_float_button(page, "ann-btn")
-    page.evaluate(
-        """() => document.getElementById('doc-frame').contentDocument.getElementById('ann-input').value = '请把这段改简洁'"""
-    )
-    _click_float_button(page, "ann-submit")
-    page.wait_for_timeout(600)
+    _annotate(page, "请把这段改简洁")
     prompt = page.evaluate(
         """async () => {
             const r = await fetch('/api/annotations?document_id=01_token');
@@ -135,30 +120,17 @@ def test_export_prompt_format(server, page):
 
 
 def test_overlay_does_not_mutate_dom(server, page):
-    """② 验证:overlay 高亮不破坏原文 DOM(无 mark 注入、TOC 结构不变)"""
     _open(server, page, "spec")
     before = page.evaluate("""() => {
         const doc = document.getElementById('doc-frame').contentDocument;
         const ol = doc.querySelector('.toc ol') || doc.querySelector('ol');
-        return {
-            liCount: ol ? ol.querySelectorAll('li').length : -1,
-            markCount: doc.querySelectorAll('mark').length,
-        };
+        return { liCount: ol ? ol.querySelectorAll('li').length : -1, markCount: doc.querySelectorAll('mark').length };
     }""")
-    _select_first_text(page)
-    page.wait_for_timeout(200)
-    _click_float_button(page, "ann-btn")
-    page.evaluate("() => document.getElementById('doc-frame').contentDocument.getElementById('ann-input').value = 't'")
-    _click_float_button(page, "ann-submit")
-    page.wait_for_timeout(600)
+    _annotate(page, "t")
     after = page.evaluate("""() => {
         const doc = document.getElementById('doc-frame').contentDocument;
         const ol = doc.querySelector('.toc ol') || doc.querySelector('ol');
-        return {
-            liCount: ol ? ol.querySelectorAll('li').length : -1,
-            markCount: doc.querySelectorAll('mark').length,
-            hlCount: doc.querySelectorAll('.ann-hl').length,
-        };
+        return { liCount: ol ? ol.querySelectorAll('li').length : -1, markCount: doc.querySelectorAll('mark').length, hlCount: doc.querySelectorAll('.ann-hl').length };
     }""")
     assert before["liCount"] == after["liCount"], f"TOC li 数变了:{before['liCount']}→{after['liCount']}"
     assert after["markCount"] == 0, "原文出现 <mark>(overlay 不应注入 mark)"
@@ -166,13 +138,8 @@ def test_overlay_does_not_mutate_dom(server, page):
 
 
 def test_card_transform_follows_scroll(server, page):
-    """① 验证:卡片 transform 随 iframe 滚动而更新"""
     _open(server, page, "01_token")
-    _select_first_text(page)
-    page.wait_for_timeout(200)
-    _click_float_button(page, "ann-btn")
-    _click_float_button(page, "ann-submit")
-    page.wait_for_timeout(600)
+    _annotate(page)
     t1 = page.evaluate("() => { const c = document.querySelector('#sidebar-list .card'); return c ? c.style.transform : ''; }")
     page.evaluate("() => document.getElementById('doc-frame').contentWindow.scrollTo(0, 300)")
     page.wait_for_timeout(400)

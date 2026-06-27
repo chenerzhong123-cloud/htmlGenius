@@ -23,7 +23,6 @@ const toggleBtn = document.getElementById("toggle-sidebar");
 const archiveToggle = document.getElementById("archive-toggle");
 
 let userToggled = false;
-let lastSelector = null;
 let iWin = null;
 let posRAF = 0;
 let viewHCached = 0;
@@ -47,44 +46,18 @@ if (exportBtn) exportBtn.addEventListener("click", exportToClipboard);
 frame.src = docPath;
 frame.addEventListener("load", init);
 
-/** 注入 iframe 内的 overlay 高亮样式 + 悬浮批注浮层 */
+/** 注入 iframe 内的 overlay 高亮样式(批注浮层已并入 selection-toolbar,不再单独注入 #ann-float) */
 function injectStyle(doc) {
   const style = doc.createElement("style");
   style.textContent = `
     .ann-hl{ position:absolute; background:rgba(255,243,160,0.55); border-radius:2px; pointer-events:none; z-index:1; }
     .ann-hl.flash{ background:rgba(251,191,36,0.75); }
-    #ann-float{ position:absolute; z-index:999999; display:none; background:#1f2328; color:#fff; border-radius:8px; padding:6px; box-shadow:0 4px 12px rgba(0,0,0,.25); font-size:13px; }
-    #ann-float.show{ display:block; }
-    #ann-btn{ background:transparent; color:#fff; border:0; cursor:pointer; padding:4px 12px; border-radius:5px; font-size:13px; font-weight:500; }
-    #ann-btn:hover{ background:#374151; }
-    #ann-editor{ display:none; }
-    #ann-editor.show{ display:block; }
-    #ann-editor textarea{ width:240px; height:64px; font-size:13px; padding:6px; border:0; border-radius:5px; resize:none; box-sizing:border-box; }
-    #ann-editor .row{ display:flex; gap:6px; justify-content:flex-end; margin-top:6px; }
-    #ann-editor button{ border:0; border-radius:5px; padding:4px 12px; cursor:pointer; font-size:12px; font-weight:500; }
-    #ann-submit{ background:#0969da; color:#fff; }
-    #ann-cancel{ background:#4b5563; color:#fff; }
   `;
   style.dataset.htmlgeniusInjected = "true";
   doc.head.appendChild(style);
-
-  const f = doc.createElement("div");
-  f.id = "ann-float";
-  f.innerHTML = `
-    <button id="ann-btn">批注</button>
-    <div id="ann-editor">
-      <textarea id="ann-input" placeholder="写下评论…"></textarea>
-      <div class="row">
-        <button id="ann-cancel">取消</button>
-        <button id="ann-submit">提交</button>
-      </div>
-    </div>
-  `;
-  f.dataset.htmlgeniusInjected = "true";
-  doc.body.appendChild(f);
 }
 
-let iDoc, iRoot, iFloat, iBtn, iEditor, iInput;
+let iDoc, iRoot;
 
 async function init() {
   iDoc = frame.contentDocument;
@@ -92,34 +65,21 @@ async function init() {
   if (!iDoc) return;
   iRoot = iDoc.body;
   injectStyle(iDoc);
-  iFloat = iDoc.getElementById("ann-float");
-  iBtn = iDoc.getElementById("ann-btn");
-  iEditor = iDoc.getElementById("ann-editor");
-  iInput = iDoc.getElementById("ann-input");
 
   window.__describe = describe; // 供 e2e 测试
   window.__buildPrompt = buildPrompt;
   window.__frame = frame;
 
-  iFloat.addEventListener("mousedown", (e) => e.preventDefault());
-  iDoc.addEventListener("selectionchange", onSelectionChange);
-  iBtn.addEventListener("click", () => {
-    iBtn.style.display = "none";
-    iEditor.classList.add("show");
-    iInput.focus();
-  });
-  iDoc.getElementById("ann-cancel").addEventListener("click", hideFloat);
-  iDoc.getElementById("ann-submit").addEventListener("click", submitFromFloat);
-
-  // iframe 滚动/缩放 → rAF 更新卡片 transform(侧栏不滚动,避免双滚动卡顿)
+  // iframe 滚动/缩放 → rAF 更新卡片 transform
   viewHCached = sidebarScroll.clientHeight;
   iWin.addEventListener("scroll", scheduleUpdate);
   iWin.addEventListener("resize", () => { viewHCached = sidebarScroll.clientHeight; scheduleUpdate(); });
-  // editor 编辑后 → debounce re-anchor(批注在新 DOM 上重新定位)
+  // 编辑后 → re-anchor(编辑中不重建,避免打字闪烁;失焦/停顿才重建)
   iDoc.addEventListener("dom-changed", scheduleReanchor);
-  // v0.2: 编辑运行时(contenteditable + 浮工具栏 + 版本管理)
+  iDoc.body.addEventListener("blur", () => setTimeout(scheduleReanchor, 120), true);
+  // v0.2: 编辑运行时(contenteditable + 浮工具栏[含 Comment]+ 版本管理)
   initEditor(iDoc, iWin);
-  initToolbar(iDoc, iWin);
+  initToolbar(iDoc, iWin, createAnnotationFromSelection);
   window.__vm = new VersionManager(docId, iDoc, iWin);
   window.__vm.start();
   await loadAnnotations();
@@ -127,7 +87,10 @@ async function init() {
 
 let reanchorTimer = 0;
 function scheduleReanchor() {
+  // ① 编辑中(contenteditable 活跃)不 re-anchor,避免每次输入都全清重建 overlay → 闪烁
+  const editing = iDoc.activeElement && iDoc.activeElement.isContentEditable;
   clearTimeout(reanchorTimer);
+  if (editing) return;  // 编辑中不重建,等失焦(blur)再触发
   reanchorTimer = setTimeout(() => loadAnnotations(), 300);
 }
 
@@ -144,45 +107,19 @@ function currentRange() {
   return r;
 }
 
-function onSelectionChange() {
-  if (iEditor && iEditor.classList.contains("show")) return;
+/** ② 批注入口(由 selection-toolbar 的 Comment 按钮调用):当前选区 → selector → 评论 → 存储 */
+async function createAnnotationFromSelection() {
   const r = currentRange();
-  if (!r) { hideFloat(); lastSelector = null; return; }
+  if (!r) return;
   const selector = describe(r, iRoot);
-  if (!selector || !selector.exact) { hideFloat(); return; }
-  lastSelector = selector;
-
-  const rect = r.getBoundingClientRect();
-  if (rect.width === 0 && rect.height === 0) { hideFloat(); return; }
-  const above = rect.top > 50;
-  iFloat.style.left = `${rect.left + rect.width / 2}px`;
-  iFloat.style.top = above ? `${rect.top - 8}px` : `${rect.bottom + 8}px`;
-  iFloat.style.transform = above ? "translate(-50%, -100%)" : "translate(-50%, 0)";
-  iFloat.classList.add("show");
-  iBtn.style.display = "";
-  iEditor.classList.remove("show");
-  iInput.value = "";
-}
-
-function hideFloat() {
-  if (!iFloat) return;
-  iFloat.classList.remove("show");
-  iEditor.classList.remove("show");
-  iBtn.style.display = "";
-  if (iInput) iInput.value = "";
-}
-
-async function submitFromFloat() {
-  if (!lastSelector || !lastSelector.exact) return;
-  const comment = iInput.value.trim();
+  if (!selector || !selector.exact) return;
+  const comment = (iWin.prompt("批注评论(可空):") || "").trim();
   await saveAnnotation({
     document_id: docId,
-    selector: lastSelector,
-    quote: lastSelector.exact,
+    selector,
+    quote: selector.exact,
     body: { comment, action: "rewrite", instruction: "" },
   });
-  hideFloat();
-  lastSelector = null;
   iDoc.getSelection().removeAllRanges();
   await loadAnnotations();
 }
@@ -256,7 +193,7 @@ function buildPrompt(items) {
 ${lines.join("\n\n")}`;
 }
 
-/** 章节锚点(B 兜底):批注所在最近 h1/h2/h3 标题文本(用于极短/重复原文消歧) */
+/** 章节锚点(B 兜底):批注所在最近 h1/h2/h3 标题文本 */
 function sectionOf(annId) {
   const range = rangesById.get(annId);
   if (!range) return "";
@@ -304,7 +241,6 @@ async function loadAnnotations() {
   updatePositions();
 }
 
-/** overlay 高亮:用矩形覆盖 range 的所有 rect(文档坐标,不随滚动变),完全不碰原文 DOM */
 function highlightOverlay(range, ann) {
   const rects = range.getClientRects();
   const sy = iWin.scrollY, sx = iWin.scrollX;
@@ -324,7 +260,6 @@ function highlightOverlay(range, ann) {
   return divs;
 }
 
-/** range 在 iframe viewport 的顶部 Y(随滚动变) */
 function rangeViewportY(annId) {
   const range = rangesById.get(annId);
   if (!range) return -9999;
@@ -333,7 +268,6 @@ function rangeViewportY(annId) {
   return rects[0].top;
 }
 
-/** range 在 iframe 文档中的顶部 Y(相对文档顶,固定——renderMainCards 一次性算 baseY 用) */
 function markDocY(annId) {
   const range = rangesById.get(annId);
   if (!range) return 0;
@@ -341,7 +275,6 @@ function markDocY(annId) {
   return r.top + (iWin ? iWin.scrollY : 0);
 }
 
-/** 每帧:只读 scrollY + 设 transform/opacity(用缓存 baseY/height/viewH,不读布局属性,避免 reflow) */
 function updatePositions() {
   const sy = iWin.scrollY;
   for (const [, info] of cardsById) {
@@ -391,7 +324,6 @@ function renderMainCards(items) {
     listEl.innerHTML = `<div class="empty" style="position:absolute;top:8px;left:0;right:0;">选中正文文字 → 点「批注」</div>`;
     return;
   }
-  // 一次性:按文档 Y 排序 + 重叠避让算 baseY + 缓存高度(避免每帧读布局属性)
   const sorted = [...items].sort((a, b) => markDocY(a.id) - markDocY(b.id));
   const GAP = 6;
   let prevBottom = -Infinity;
@@ -418,11 +350,9 @@ function scrollToAnn(annId) {
   if (!range) return;
   const top = range.getBoundingClientRect().top + iWin.scrollY - iWin.innerHeight / 2;
   iWin.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-  // flash overlay
   const divs = overlaysById.get(annId) || [];
   divs.forEach((d) => d.classList.add("flash"));
   setTimeout(() => divs.forEach((d) => d.classList.remove("flash")), 1200);
-  // smooth 滚动期间持续更新卡片位置
   let n = 0;
   const tick = () => { updatePositions(); if (n++ < 60) requestAnimationFrame(tick); };
   tick();

@@ -1,9 +1,11 @@
 // selection-toolbar.js — 选中文字浮工具栏(加粗/颜色/字号/对齐)+ 样式应用(单元素;跨标签在 Task6 扩展)
-export function initToolbar(iDoc, iWin) {
+export function initToolbar(iDoc, iWin, onComment) {
   const bar = iDoc.createElement("div");
   bar.id = "hg-toolbar";
   bar.dataset.htmlgeniusInjected = "true";
   bar.innerHTML = `
+    <button data-act="comment" title="批注选区">批注</button>
+    <span class="hg-sep"></span>
     <button data-act="bold" title="加粗"><b>B</b></button>
     <input type="color" data-act="color" title="颜色">
     <select data-act="fontsize" title="字号"><option value="">字号</option><option value="14">14</option><option value="18">18</option><option value="24">24</option></select>
@@ -19,12 +21,19 @@ export function initToolbar(iDoc, iWin) {
     "#hg-toolbar.show{display:flex;}" +
     "#hg-toolbar button{background:transparent;color:#fff;border:0;cursor:pointer;padding:2px 6px;border-radius:4px;font-size:13px;}" +
     "#hg-toolbar button:hover{background:#374151;}" +
-    "#hg-toolbar select,input{border-radius:4px;}";
+    "#hg-toolbar select,input{border-radius:4px;}" +
+    "#hg-toolbar .hg-sep{width:1px;height:18px;background:#4b5563;margin:0 2px;}";
   iDoc.head.appendChild(style);
 
   bar.addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-act]");
-    if (btn) applyAction(iDoc, btn.dataset.act);
+    if (!btn) return;
+    if (btn.dataset.act === "comment") {
+      bar.classList.remove("show");
+      if (onComment) onComment();
+      return;
+    }
+    applyAction(iDoc, btn.dataset.act);
   });
   bar.querySelector('input[data-act="color"]').addEventListener("input", (e) => applyAction(iDoc, "color", e.target.value));
   bar.querySelector('select[data-act="fontsize"]').addEventListener("change", (e) => applyAction(iDoc, "fontsize", e.target.value));
