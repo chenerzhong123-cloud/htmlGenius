@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html><body>
+<iframe id="t" srcdoc="<html><head><style>x{color:red}</style></head><body><p>edit me</p></body></html>"></iframe>
+<script type="module">
+  import { VersionManager } from "./version.js";
+  const f = document.getElementById("t");
+  const setup = async () => {
+    const doc = f.contentDocument;
+    if (!doc || !doc.body || doc.readyState === "loading") { setTimeout(setup, 50); return; }
+    await fetch("/api/documents", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_id: "doc_vt" }),
+    });
+    window.__vm = new VersionManager("doc_vt", doc, f.contentWindow);
+    window.__ready = true;
+  };
+  setup();
+</script>
+</body></html>
