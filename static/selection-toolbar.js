@@ -14,6 +14,9 @@ export function initToolbar(iDoc, iWin, onComment) {
   `;
   iDoc.body.appendChild(bar);
 
+  // 点工具栏按钮时不清空选区(否则 applyAction 拿不到 selection → 加粗/颜色等样式无效)
+  bar.addEventListener("mousedown", (e) => e.preventDefault());
+
   const style = iDoc.createElement("style");
   style.dataset.htmlgeniusInjected = "true";
   style.textContent =
