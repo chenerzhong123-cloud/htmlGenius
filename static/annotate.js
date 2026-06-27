@@ -112,7 +112,15 @@ async function init() {
   viewHCached = sidebarScroll.clientHeight;
   iWin.addEventListener("scroll", scheduleUpdate);
   iWin.addEventListener("resize", () => { viewHCached = sidebarScroll.clientHeight; scheduleUpdate(); });
+  // editor 编辑后 → debounce re-anchor(批注在新 DOM 上重新定位)
+  iDoc.addEventListener("dom-changed", scheduleReanchor);
   await loadAnnotations();
+}
+
+let reanchorTimer = 0;
+function scheduleReanchor() {
+  clearTimeout(reanchorTimer);
+  reanchorTimer = setTimeout(() => loadAnnotations(), 300);
 }
 
 function scheduleUpdate() {

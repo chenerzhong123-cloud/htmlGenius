@@ -40,6 +40,21 @@ def test_anchor_returns_null_when_text_removed(server, page):
     assert stale is True
 
 
+def test_anchor_multi_no_context_returns_null(server, page):
+    """多处重复 + 无前后文消歧 → stale(避免静默漂移)"""
+    _wait_ready(server, page)
+    stale = page.evaluate(
+        """
+        () => {
+            // p3 有 3 个「水果」;exact=水果、无前后文 → 消歧不足
+            const sel = { type: "TextQuoteSelector", exact: "水果", prefix: "", suffix: "" };
+            return window.__anchor(sel, window.__root) === null;
+        }
+        """
+    )
+    assert stale is True
+
+
 def test_disambiguate_by_prefix_suffix(server, page):
     _wait_ready(server, page)
     result = page.evaluate(

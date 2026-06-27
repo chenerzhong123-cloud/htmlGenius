@@ -152,6 +152,9 @@ export function anchor(selector, root) {
     }
   }
 
+  // 多处命中 + 前后文消歧不足 → 判 stale(review 1.2:避免静默漂移到错误位置)
+  if (candidates.length > 1 && bestScore < exact.length * 0.5) return null;
+
   const normStart = best;
   const normEnd = best + exact.length;
   const rawStart = index.normToRaw[normStart];
