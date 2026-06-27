@@ -15,7 +15,10 @@
       const s = doc.getSelection(); s.removeAllRanges(); s.addRange(r);
       applyAction(doc, act, v);
     };
-    window.__styleOf = () => doc.defaultView.getComputedStyle(doc.getElementById("p1")).color;
+    window.__styleOf = () => {
+      const sp = doc.getElementById("p1").querySelector("span");
+      return sp ? doc.defaultView.getComputedStyle(sp).color : "";
+    };
     window.__alignOf = () => doc.defaultView.getComputedStyle(doc.getElementById("p1")).textAlign;
     window.__ready = true;
   };

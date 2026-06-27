@@ -53,14 +53,18 @@ export function applyAction(iDoc, act, value) {
   else if (act === "align-center") applyAlign(iDoc, range, "center");
 }
 
-/** 单元素改 style;跨元素选区用 surroundContents 包 span(Task6 扩展) */
+/** 包 span 只改选区(单/跨标签);跨标签 surroundContents 失败时 extractContents 兜底 */
 export function applyStyle(iDoc, range, prop, value) {
-  let el = range.commonAncestorContainer;
-  if (el.nodeType === 3) el = el.parentElement;
-  if (el && el !== iDoc.body && !el.dataset.htmlgeniusInjected) {
-    el.style[prop] = value;
-    iDoc.dispatchEvent(new iDoc.defaultView.Event("dom-changed", { bubbles: true }));
+  const span = iDoc.createElement("span");
+  span.style[prop] = value;
+  try {
+    range.surroundContents(span);
+  } catch (e) {
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
   }
+  iDoc.dispatchEvent(new iDoc.defaultView.Event("dom-changed", { bubbles: true }));
+  return span;
 }
 
 function applyAlign(iDoc, range, align) {
