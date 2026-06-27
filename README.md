@@ -1,4 +1,4 @@
-# htmlGenius · Beta v0.1
+# htmlGenius · v0.2(实时编辑)
 
 > 在 HTML 上划词批注 → 一键复制结构化 prompt → 粘贴给 AI 改 → 闭环。
 > 非侵入 overlay 高亮 + 飞书式锚定侧边栏,不破坏原文 DOM。
@@ -40,6 +40,16 @@ uv run pytest -v          # 全量 19 项(Python 3.9)
 S1 标准 selector · S2 批注与版本解耦 · S3 非侵入 overlay · S4 统一 payload · S5 sink 抽象(导出 sink 已实现)· S6 存储留字段。
 
 分层:`存储层(SQLite)` → `定位引擎(text-quote anchoring)` → `批注运行时(overlay)` → `回灌层(sink)` → `宿主(FastAPI)`。
+
+## v0.2 新增:HTML 实时编辑
+
+- **contenteditable 常驻**:整文档可编辑,光标直接改文字。
+- **浮工具栏**:选中文字 → 浮栏(加粗 / 颜色 / 字号 / 对齐)。
+- **自动版本**:编辑防抖自动存版本(滚动窗口最近 20 版,超删旧;删版本时批注引用迁移到当前版)。
+- **撤销**:Ctrl+Shift+Z(内存栈 50 步,避开浏览器原生 Ctrl+Z 的字符级 undo 死结)。
+- **结构安全**:粘贴纯文本(防外部污染)、还原 sanitize(去 script/on*)、序列化剥离注入元素、SQLite WAL + 单事务。
+- **编辑↔批注并存**:编辑改 DOM 后批注 debounce re-anchor;text-quote 最低分门槛避免静默漂移到错误位置。
+- 设计:`docs/2026-06-27-v0.2-html-editing-design.md`;计划:`docs/2026-06-27-v0.2-html-editing-plan.md`。
 
 ## 已知边界(Beta)
 
