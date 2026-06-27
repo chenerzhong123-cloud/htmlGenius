@@ -1,4 +1,7 @@
 import { describe, anchor } from "./anchoring/text-quote.js";
+import { initEditor } from "./editor.js";
+import { initToolbar } from "./selection-toolbar.js";
+import { VersionManager } from "./version.js";
 
 const params = new URLSearchParams(location.search);
 const docId = params.get("doc") || "01_token";
@@ -114,6 +117,11 @@ async function init() {
   iWin.addEventListener("resize", () => { viewHCached = sidebarScroll.clientHeight; scheduleUpdate(); });
   // editor 编辑后 → debounce re-anchor(批注在新 DOM 上重新定位)
   iDoc.addEventListener("dom-changed", scheduleReanchor);
+  // v0.2: 编辑运行时(contenteditable + 浮工具栏 + 版本管理)
+  initEditor(iDoc, iWin);
+  initToolbar(iDoc, iWin);
+  window.__vm = new VersionManager(docId, iDoc, iWin);
+  window.__vm.start();
   await loadAnnotations();
 }
 
