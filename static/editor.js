@@ -1,4 +1,19 @@
-// editor.js — contenteditable 编辑运行时:初始化 + 限定不可编辑元素 + 粘贴纯文本 + emit dom-changed
+// editor.js — contenteditable 编辑运行时:初始化 + 限定不可编辑元素 + 粘贴纯文本 + emit dom-changed + 撤销
+const undoStack = [];
+const MAX_UNDO = 50;
+
+export function pushUndo(iDoc) {
+  undoStack.push(iDoc.body.innerHTML);
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+}
+
+export function undo(iDoc) {
+  if (!undoStack.length) return false;
+  iDoc.body.innerHTML = undoStack.pop();
+  iDoc.dispatchEvent(new iDoc.defaultView.Event("dom-changed", { bubbles: true }));
+  return true;
+}
+
 export function initEditor(iDoc, iWin) {
   const body = iDoc.body;
   body.contentEditable = "true";
@@ -25,5 +40,12 @@ export function initEditor(iDoc, iWin) {
   // input → emit dom-changed(供 annotate 触发 re-anchor)
   body.addEventListener("input", () => {
     iDoc.dispatchEvent(new iWin.Event("dom-changed", { bubbles: true }));
+  });
+  // Ctrl+Shift+Z 撤销(避开浏览器原生 Ctrl+Z 的字符级 undo)
+  iDoc.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "z" || e.key === "Z")) {
+      e.preventDefault();
+      undo(iDoc);
+    }
   });
 }

@@ -2,7 +2,7 @@
 <html><body>
 <iframe id="t" srcdoc="<html><head><style>x{color:red}</style></head><body><p>hello</p></body></html>"></iframe>
 <script type="module">
-  import { initEditor } from "./editor.js";
+  import { initEditor, pushUndo, undo } from "./editor.js";
   const f = document.getElementById("t");
   const setup = () => {
     const doc = f.contentDocument;
@@ -14,6 +14,8 @@
       styleEditable: doc.querySelector("style").getAttribute("contenteditable"),
     });
     window.__doc = doc;
+    window.__pushUndo = () => pushUndo(doc);
+    window.__undo = () => undo(doc);
     window.__ready = true;
   };
   setup();
