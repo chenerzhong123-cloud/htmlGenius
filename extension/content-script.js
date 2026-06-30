@@ -155,6 +155,66 @@
     }
   }
 
+  // === 本地模式:版本管理(防抖存) + 撤销(内存栈) + 粘贴清洗 ===
+  if (isLocal) {
+    // 撤销栈
+    const undoStack = [];
+    const MAX_UNDO = 50;
+    let undoDebounce = 0;
+
+    function pushUndo() {
+      undoStack.push(document.body.innerHTML);
+      if (undoStack.length > MAX_UNDO) undoStack.shift();
+    }
+
+    function doUndo() {
+      if (!undoStack.length) return;
+      document.body.innerHTML = undoStack.pop();
+      loadAnnotations();
+    }
+
+    // Ctrl/Cmd+Z → 撤销
+    document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        doUndo();
+      }
+    });
+
+    // input → debounce 1s push undo + 防抖存版本
+    let versionTimer = 0;
+    document.body.addEventListener("input", () => {
+      clearTimeout(undoDebounce);
+      undoDebounce = setTimeout(pushUndo, 1000);
+
+      clearTimeout(versionTimer);
+      versionTimer = setTimeout(async () => {
+        const docId = await Storage.getDocumentId();
+        const html = document.documentElement.outerHTML;
+        await Storage.saveVersion(docId, html);
+      }, 1500);
+    });
+
+    // 粘贴:DOMPurify 清洗(保留安全格式)
+    document.body.addEventListener("paste", (e) => {
+      e.preventDefault();
+      const cd = e.clipboardData || {};
+      const html = cd.getData("text/html") || "";
+      const text = cd.getData("text/plain") || "";
+      const sel = document.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      if (html && window.DOMPurify) {
+        const clean = window.DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+        range.insertNode(range.createContextualFragment(clean));
+      } else {
+        range.insertNode(document.createTextNode(text));
+      }
+      range.collapse(false);
+    });
+  }
+
   // === 初始化 ===
   loadAnnotations();
   if (isLocal) document.body.contentEditable = "true";

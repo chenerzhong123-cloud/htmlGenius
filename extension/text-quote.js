@@ -108,7 +108,7 @@ function commonSuffix(a, b) {
 }
 
 /** Range → TextQuoteSelector */
-export function describe(range, root) {
+function describe(range, root) {
   const index = buildIndex(root);
   const off = rangeToOffsets(range, index);
   if (!off) return null;
@@ -122,7 +122,7 @@ export function describe(range, root) {
 }
 
 /** TextQuoteSelector → Range(找不到返回 null,即 stale) */
-export function anchor(selector, root) {
+function anchor(selector, root) {
   const index = buildIndex(root);
   const text = index.normalized;
   const exact = selector.exact;
@@ -161,3 +161,4 @@ export function anchor(selector, root) {
   const rawEnd = (index.normToRaw[normEnd - 1] ?? rawStart) + 1;
   return rawToRange(index.textNodes, rawStart, rawEnd);
 }
+window.describe = describe; window.anchor = anchor;
