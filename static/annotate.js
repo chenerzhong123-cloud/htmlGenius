@@ -76,6 +76,11 @@ async function init() {
   iWin.addEventListener("resize", () => { viewHCached = sidebarScroll.clientHeight; scheduleUpdate(); });
   // 编辑后 → re-anchor(编辑中不重建,避免打字闪烁;失焦/停顿才重建)
   iDoc.addEventListener("dom-changed", scheduleReanchor);
+  // undo 后 #hg-toolbar 被 innerHTML 覆盖 → 重建 toolbar + overlay
+  iDoc.addEventListener("undo-done", () => {
+    initToolbar(iDoc, iWin, createAnnotationFromSelection);
+    loadAnnotations();
+  });
   iDoc.body.addEventListener("blur", () => setTimeout(scheduleReanchor, 120), true);
   // v0.2: 编辑运行时(contenteditable + 浮工具栏[含 Comment]+ 版本管理)
   initEditor(iDoc, iWin);

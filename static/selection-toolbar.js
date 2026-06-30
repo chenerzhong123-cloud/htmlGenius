@@ -41,15 +41,20 @@ export function initToolbar(iDoc, iWin, onComment) {
   bar.querySelector('input[data-act="color"]').addEventListener("input", (e) => applyAction(iDoc, "color", e.target.value));
   bar.querySelector('select[data-act="fontsize"]').addEventListener("change", (e) => applyAction(iDoc, "fontsize", e.target.value));
 
+  let barRAF = 0;
   iDoc.addEventListener("selectionchange", () => {
-    const sel = iDoc.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { bar.classList.remove("show"); return; }
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) { bar.classList.remove("show"); return; }
-    bar.style.left = (rect.left + rect.width / 2 + iWin.scrollX) + "px";
-    bar.style.top = (rect.top - 8 + iWin.scrollY) + "px";
-    bar.style.transform = "translate(-50%,-100%)";
-    bar.classList.add("show");
+    if (barRAF) return;
+    barRAF = requestAnimationFrame(() => {
+      barRAF = 0;
+      const sel = iDoc.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) { bar.classList.remove("show"); return; }
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) { bar.classList.remove("show"); return; }
+      bar.style.left = (rect.left + rect.width / 2 + iWin.scrollX) + "px";
+      bar.style.top = (rect.top - 8 + iWin.scrollY) + "px";
+      bar.style.transform = "translate(-50%,-100%)";
+      bar.classList.add("show");
+    });
   });
   return bar;
 }

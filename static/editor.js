@@ -11,6 +11,7 @@ export function undo(iDoc) {
   if (!undoStack.length) return false;
   iDoc.body.innerHTML = undoStack.pop();
   iDoc.dispatchEvent(new iDoc.defaultView.Event("dom-changed", { bubbles: true }));
+  iDoc.dispatchEvent(new iDoc.defaultView.Event("undo-done", { bubbles: true }));
   return true;
 }
 
@@ -50,9 +51,10 @@ export function initEditor(iDoc, iWin) {
     clearTimeout(undoDebounce);
     undoDebounce = setTimeout(() => pushUndo(iDoc), 1000);
   });
-  // Ctrl+Shift+Z 撤销(避开浏览器原生 Ctrl+Z 的字符级 undo)
+  // 拦截 Cmd/Ctrl+Z(含 Shift 变体)→ 走自定义 undo,禁用浏览器原生字符级 undo
   iDoc.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "z" || e.key === "Z")) {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === "z" || e.key === "Z" || e.key === "y")) {
       e.preventDefault();
       undo(iDoc);
     }
