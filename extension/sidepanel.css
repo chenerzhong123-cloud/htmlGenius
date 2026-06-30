@@ -1,0 +1,15 @@
+body { font-family: -apple-system, BlinkMacSystemFont, system-ui, "PingFang SC", sans-serif; margin: 0; padding: 8px; font-size: 13px; background: #fafbfc; }
+#mode-indicator { padding: 4px 8px; border-radius: 4px; margin-bottom: 8px; font-weight: 600; font-size: 12px; }
+#mode-indicator.local { background: #eef2ff; color: #4338ca; }
+#mode-indicator.remote { background: #fef3c7; color: #92400e; }
+#annotations { margin-bottom: 8px; }
+.card { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px; margin-bottom: 6px; cursor: pointer; }
+.card:hover { box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.card .quote { color: #6b7280; font-size: 12px; border-left: 3px solid #d1d5db; padding-left: 4px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card.stale { opacity: 0.5; }
+.card.stale .quote { border-left-color: #f59e0b; }
+#actions { position: fixed; bottom: 8px; left: 8px; right: 8px; display: flex; gap: 4px; }
+button { padding: 4px 12px; border: 0; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; }
+#export-btn { background: #0969da; color: #fff; }
+#edit-btn { background: #f59e0b; color: #fff; }
+.empty { color: #9ca3af; text-align: center; padding: 16px; }

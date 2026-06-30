@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "htmlGenius",
+  "version": "0.3.0",
+  "description": "HTML 批注 + 编辑 + 回灌",
+  "permissions": ["activeTab", "sidePanel", "storage"],
+  "side_panel": { "default_path": "sidepanel.html" },
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "htmlGenius" },
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["vendor/purify.min.js", "text-quote.js", "storage.js", "content-script.js"],
+    "run_at": "document_idle"
+  }]
+}
