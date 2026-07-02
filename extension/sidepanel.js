@@ -1,19 +1,36 @@
-// sidepanel.js — htmlGenius 侧边栏:批注卡片 + 回灌 + 编辑入口
+// sidepanel.js — v0.3.1: 改用 sendMessage(替代 port)
 (function () {
   "use strict";
 
-  let port = chrome.runtime.connect({ name: "panel" });
   let isLocal = false;
+  let currentTabId = null;
 
-  port.onMessage.addListener((msg) => {
-    if (msg.type === "annotations-list") {
-      isLocal = msg.isLocal;
-      renderMode();
-      renderCards(msg.items);
-    } else if (msg.type === "annotations-updated") {
-      port.postMessage({ type: "get-annotations" });
-    } else if (msg.type === "export-data") {
-      exportPrompt(msg.items);
+  // 获取当前活跃 tab
+  async function getActiveTab() {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tabs[0];
+  }
+
+  // 发消息到 content script
+  async function sendToContent(msg) {
+    const tab = await getActiveTab();
+    if (!tab) return null;
+    currentTabId = tab.id;
+    try { return await chrome.tabs.sendMessage(tab.id, msg); }
+    catch (e) { console.log("content script not ready:", e); return null; }
+  }
+
+  // 接收 content script 广播
+  chrome.runtime.onMessage.addListener((msg, sender) => {
+    if (msg.type === "annotations-updated") {
+      // 请求最新列表
+      sendToContent({ type: "get-annotations" }).then((resp) => {
+        if (resp && resp.type === "annotations-list") {
+          isLocal = resp.isLocal;
+          renderMode();
+          renderCards(resp.items);
+        }
+      });
     }
   });
 
@@ -37,7 +54,7 @@
       const quote = (ann.quote || "").slice(0, 60);
       const comment = (ann.body && ann.body.comment) || "(无评论)";
       card.innerHTML = '<div class="quote">' + esc(quote) + '</div><div>' + esc(comment) + '</div>';
-      card.addEventListener("click", () => port.postMessage({ type: "scroll-to", id: ann.id }));
+      card.addEventListener("click", () => sendToContent({ type: "scroll-to", id: ann.id }));
       c.appendChild(card);
     }
   }
@@ -47,19 +64,27 @@
   }
 
   document.getElementById("export-btn").addEventListener("click", () => {
-    port.postMessage({ type: "get-export" });
+    sendToContent({ type: "get-export" }).then((resp) => {
+      if (resp && resp.type === "export-data") exportPrompt(resp.items);
+    });
   });
 
   document.getElementById("edit-btn").addEventListener("click", () => {
     if (confirm("⚠ 编辑仅本地临时修改,刷新或关闭页面后丢失,无法保存回原网页。\n\n确认进入编辑模式?")) {
-      port.postMessage({ type: "enable-edit" });
+      sendToContent({ type: "enable-edit" });
       document.getElementById("edit-btn").hidden = true;
       document.getElementById("mode-indicator").textContent = "\u{1F4DD} 编辑模式(临时)";
     }
   });
 
   // 初始化:请求批注列表
-  port.postMessage({ type: "get-annotations" });
+  sendToContent({ type: "get-annotations" }).then((resp) => {
+    if (resp && resp.type === "annotations-list") {
+      isLocal = resp.isLocal;
+      renderMode();
+      renderCards(resp.items);
+    }
+  });
 
   function exportPrompt(items) {
     if (!items || items.length === 0) { alert("暂无批注"); return; }
@@ -73,7 +98,7 @@
         : "定位:【原文】「" + exact + "」";
       return "==批注" + (i + 1) + "==\n" + loc + "\n评论:" + ((a.body && a.body.comment) || "(无)");
     });
-    const prompt = "你是一名 HTML 编辑执行器。下面给出文档的 " + items.length + " 条批注,请且定你逐条执行修改,并输出完整的新版 HTML:\n\n" + lines.join("\n\n");
+    const prompt = "你是一名 HTML 编辑执行器。下面给出文档的 " + items.length + " 条批注,请逐条执行修改,并输出完整的新版 HTML:\n\n" + lines.join("\n\n");
     navigator.clipboard.writeText(prompt).then(() => {
       const btn = document.getElementById("export-btn");
       btn.textContent = "已复制 ✓";
