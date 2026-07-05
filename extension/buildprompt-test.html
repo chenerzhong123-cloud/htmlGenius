@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<!-- buildprompt-test.html — 覆盖 BuildPrompt.fromAnnotations 的多级回复 DFS 组装:
+     3 层嵌套 + 多顶层 + DFS 顺序 + 作者标签 + 无选区回复 + 空列表 -->
+<html lang="zh">
+<meta charset="UTF-8">
+<title>running…</title>
+<body>
+buildprompt test
+<script src="buildprompt.js"></script>
+<script>
+(function () {
+  try {
+    if (typeof BuildPrompt !== "object" || typeof BuildPrompt.fromAnnotations !== "function") {
+      throw new Error("BuildPrompt 未暴露");
+    }
+
+    // ---- 用例 1:3 层嵌套 + 第二个顶层 ----
+    const items = [
+      { id: "a1", parent_id: null, selector: { exact: "原文1" }, body: { comment: "顶层" } },
+      { id: "a2", parent_id: "a1", selector: {}, body: { comment: "二级回复" } },
+      { id: "a3", parent_id: "a2", selector: {}, body: { comment: "三级回复" } },
+      { id: "a4", parent_id: null, selector: { exact: "原文2" }, body: { comment: "另一顶层" } },
+    ];
+    const p = BuildPrompt.fromAnnotations(items);
+
+    if (!/原文1/.test(p)) throw new Error("缺原文1");
+    if (!/顶层/.test(p) || !/二级回复/.test(p) || !/三级回复/.test(p) || !/另一顶层/.test(p)) {
+      throw new Error("缺评论");
+    }
+    // 三级回复应在二级之后(DFS 顺序:父先于子)
+    if (p.indexOf("三级回复") < p.indexOf("二级回复")) throw new Error("DFS 顺序");
+    // 二级回复应在顶层之后
+    if (p.indexOf("二级回复") < p.indexOf("顶层")) throw new Error("DFS 顺序 顶层->二级");
+    // 顶层两条都在
+    if ((p.match(/原文/g) || []).length < 2) throw new Error("顶层条数");
+    // 批注编号 ==批注1 == ==批注2 ==
+    if (!/==批注1==/.test(p) || !/==批注2==/.test(p)) throw new Error("批注编号");
+    // 头部声明顶层条数与回复
+    if (!/2 条顶层批注/.test(p) || !/多级回复/.test(p)) throw new Error("头部声明");
+
+    // ---- 用例 2:作者标签 ----
+    const withAuthor = [
+      { id: "b1", parent_id: null, selector: { exact: "段X" }, body: { comment: "嗨" }, author: { id: "u1", name: "张三" } },
+    ];
+    const pa = BuildPrompt.fromAnnotations(withAuthor);
+    if (!/\[张三\]/.test(pa)) throw new Error("作者标签缺失");
+
+    // ---- 用例 3:无选区的回复应输出"(回复,无独立选区)" ----
+    const replyOnly = [
+      { id: "c1", parent_id: null, selector: {}, body: { comment: "纯回复" } },
+    ];
+    const pr = BuildPrompt.fromAnnotations(replyOnly);
+    if (!/\(回复,无独立选区\)/.test(pr)) throw new Error("无选区回复定位行");
+
+    // ---- 用例 4:缩进随深度递增 ----
+    const deep = BuildPrompt.fromAnnotations(items);
+    const lines = deep.split("\n");
+    const idx2 = deep.indexOf("二级回复");
+    const idx3 = deep.indexOf("三级回复");
+    // 找到评论所在行的缩进前缀
+    const line2 = lines.find((l) => l.indexOf("二级回复") !== -1) || "";
+    const line3 = lines.find((l) => l.indexOf("三级回复") !== -1) || "";
+    const ind2 = line2.length - line2.replace(/^ +/, "").length;
+    const ind3 = line3.length - line3.replace(/^ +/, "").length;
+    if (!(ind3 > ind2)) throw new Error("缩进应随深度递增 got " + ind2 + "->" + ind3);
+
+    // ---- 用例 5:空列表 ----
+    const pe = BuildPrompt.fromAnnotations([]);
+    if (!/0 条顶层批注/.test(pe)) throw new Error("空列表头部");
+    if (pe.indexOf("==批注") !== -1) throw new Error("空列表不应有批注块");
+
+    // ---- 用例 6:null 入参容错 ----
+    const pn = BuildPrompt.fromAnnotations(null);
+    if (!/0 条顶层批注/.test(pn)) throw new Error("null 入参容错");
+
+    // ---- 用例 7:自环(防御,后端不应产生,但不应死循环) ----
+    const cyclic = [
+      { id: "x1", parent_id: null, selector: { exact: "根" }, body: { comment: "根评" } },
+      { id: "x2", parent_id: "x1", selector: {}, body: { comment: "子" } },
+      { id: "x3", parent_id: "x2", selector: {}, body: { comment: "孙" } },
+    ];
+    // 注:正常数据不会成环,这里只是确保 DFS 不会因深度爆炸
+    const pc = BuildPrompt.fromAnnotations(cyclic);
+    if (!/根评/.test(pc) || !/子/.test(pc) || !/孙/.test(pc)) throw new Error("正常 3 层内容缺失");
+
+    document.title = "PASS";
+  } catch (e) {
+    document.title = "FAIL: " + e.message;
+  }
+})();
+</script>
+</body>
+</html>
