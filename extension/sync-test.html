@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<!-- sync-test.html — 仅覆盖纯函数 Sync.parseEvent；EventSource 真连后端的回归在 T14 手动矩阵 -->
+<html lang="zh">
+<meta charset="UTF-8">
+<title>running…</title>
+<body>
+sync test
+<script src="sync.js"></script>
+<script>
+(function () {
+  try {
+    var d;
+    // created → {op:"create", annotation}
+    d = Sync.parseEvent("annotation:created", '{"id":"ann_1","quote":"hi"}');
+    if (!d || d.op !== "create" || !d.annotation || d.annotation.id !== "ann_1") {
+      throw new Error("create parse");
+    }
+    // deleted → {op:"delete", id}
+    d = Sync.parseEvent("annotation:deleted", '{"id":"ann_9"}');
+    if (!d || d.op !== "delete" || d.id !== "ann_9") {
+      throw new Error("delete parse");
+    }
+    // presence → {op:"presence", users:[...]}
+    d = Sync.parseEvent("presence", '{"users":[{"id":"u1"}]}');
+    if (!d || d.op !== "presence" || !Array.isArray(d.users) || !d.users[0] || d.users[0].id !== "u1") {
+      throw new Error("presence parse");
+    }
+    // hello → null（忽略）
+    d = Sync.parseEvent("hello", '{}');
+    if (d !== null) {
+      throw new Error("hello 应忽略");
+    }
+    // 未知事件 → null
+    d = Sync.parseEvent("something-weird", '{}');
+    if (d !== null) {
+      throw new Error("未知事件应返回 null");
+    }
+    // 空数据 → 容错为 {}
+    d = Sync.parseEvent("annotation:created", "");
+    if (!d || d.op !== "create" || typeof d.annotation !== "object") {
+      throw new Error("空 data 容错");
+    }
+    document.title = "PASS";
+  } catch (e) {
+    document.title = "FAIL: " + e.message;
+  }
+})();
+</script>
+</body>
+</html>
