@@ -51,7 +51,8 @@ async function dbDelete(store, key) {
   });
 }
 
-const Storage = {
+// 本地 IndexedDB 实现(原 Storage 对象,行为保持完全一致 —— 仅重命名)
+const LocalStore = {
   async getDocumentId() {
     return location.origin + location.pathname;
   },
@@ -75,3 +76,26 @@ const Storage = {
     return dbGetAllByIndex("versions", "document_id", docId);
   },
 };
+
+// === mode 分派器 ===
+// 默认 _store = LocalStore(未调用 configure 时零回归)。
+// configure({mode:"synced", ...}) 切到 RemoteStore 做注解四件套;
+// 版本(saveVersion/listVersions)始终走 LocalStore —— 版本不同步(B1 范围)。
+let _store = LocalStore;
+const Storage = {
+  configure(cfg) {
+    if (cfg && cfg.mode === "synced" && window.RemoteStore) {
+      _store = window.RemoteStore.make(cfg);
+    } else {
+      _store = LocalStore;
+    }
+  },
+  getDocumentId() { return _store.getDocumentId(); },
+  saveAnnotation(a) { return _store.saveAnnotation(a); },
+  listAnnotations(d) { return _store.listAnnotations(d); },
+  deleteAnnotation(id) { return _store.deleteAnnotation(id); },
+  // 版本永远本地(IndexedDB),与 mode 无关
+  saveVersion(docId, html) { return LocalStore.saveVersion(docId, html); },
+  listVersions(docId) { return LocalStore.listVersions(docId); },
+};
+window.Storage = Storage;

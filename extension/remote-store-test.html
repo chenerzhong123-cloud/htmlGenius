@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="UTF-8"><title>running…</title></head>
+<body>
+remote-store test
+<script src="remote-store.js"></script>
+<script>
+(async function () {
+  try {
+    if (!window.RemoteStore) throw new Error("RemoteStore 未定义");
+    // RemoteStore 纯函数:request 构造与响应解析(不发真实请求)
+    const cfg = { backend: "https://h.example", team_token: "tok", user: { id: "u1", name: "A" } };
+    const req = RemoteStore.buildCreateRequest(cfg, "doc_x",
+      { selector: { exact: "hi" }, quote: "hi", body: { comment: "c" } });
+    if (req.url !== "https://h.example/api/annotations") throw new Error("url 期望 https://h.example/api/annotations 实际 " + req.url);
+    if (req.headers["Authorization"] !== "Bearer tok") throw new Error("auth header");
+    if (req.headers["X-User-Id"] !== "u1") throw new Error("X-User-Id header");
+    if (req.headers["X-User-Name"] !== "A") throw new Error("X-User-Name header");
+    if (req.headers["Content-Type"] !== "application/json") throw new Error("Content-Type header");
+    if (req.body.document_id !== "doc_x") throw new Error("body.document_id");
+    if (req.body.quote !== "hi") throw new Error("body.quote");
+    if (req.body.selector.exact !== "hi") throw new Error("body.selector");
+    if (req.body.parent_id !== null) throw new Error("body.parent_id 默认值");
+    // parseCreate 应直接透传后端返回的 annotation dict
+    const ann = RemoteStore.parseCreate(await (new Response(JSON.stringify({ id: "ann_1", team_id: "t", document_id: "doc_x" }))).json());
+    if (ann.id !== "ann_1") throw new Error("parse id");
+    if (ann.team_id !== "t") throw new Error("parse team_id");
+    document.title = "PASS";
+  } catch (e) {
+    document.title = "FAIL: " + e.message;
+  }
+})();
+</script>
+</body>
+</html>
