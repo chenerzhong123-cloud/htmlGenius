@@ -1,10 +1,11 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import storage
+from .auth import require_team
 from .models import AnnotationCreate, DocumentCreate, VersionCreate
 
 BASE = Path(__file__).resolve().parent.parent
@@ -86,13 +87,20 @@ def get_document(document_id: str):
 
 
 @app.post("/api/annotations")
-def create_annotation(payload: AnnotationCreate):
-    return storage.save_annotation(payload)
+def create_annotation(
+    payload: AnnotationCreate,
+    team_id: str = Depends(require_team),
+    x_user_id: str = Header("u_self", alias="X-User-Id"),
+    x_user_name: str = Header("作者", alias="X-User-Name"),
+):
+    # team_id 永远来自 token (server-injected); author 永远来自 header,不被请求体覆盖
+    payload.author = {"id": x_user_id, "name": x_user_name}
+    return storage.save_annotation(payload, team_id=team_id)
 
 
 @app.get("/api/annotations")
-def list_annotations(document_id: str):
-    return {"items": storage.list_annotations(document_id)}
+def list_annotations(document_id: str, team_id: str = Depends(require_team)):
+    return {"items": storage.list_annotations(document_id, team_id)}
 
 
 @app.delete("/api/annotations/{aid}")

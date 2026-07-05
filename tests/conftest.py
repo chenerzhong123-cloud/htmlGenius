@@ -23,6 +23,11 @@ def browser():
 @pytest.fixture
 def page(browser):
     pg = browser.new_page()
+    # v0.4: viewer 前端在 T7 之前不发 team token,老浏览器测试用
+    # set_extra_http_headers 给所有请求注入 Authorization 头,使 viewer 的
+    # fetch(/api/annotations) 通过鉴权。仅测试用,不进生产代码;T7 viewer
+    # 接入 token 后可移除。
+    pg.set_extra_http_headers({"Authorization": "Bearer t_test"})
     yield pg
     pg.close()
 
@@ -52,6 +57,9 @@ def server(tmp_path_factory):
     db = tmp_path_factory.mktemp("db") / "test.db"
     env = dict(os.environ)
     env["HTMLEDITOR_DB"] = str(db)
+    # v0.4 鉴权:测试用默认 team token (viewer 前端在 T7 之前还不发 token,
+    # 故老浏览器测试用 patch-fetch fixture 注入,见 _auth_fetch 注释)
+    env["HG_TEAMS"] = '{"t_test":"team_test"}'
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "server.app:app",
          "--port", str(port), "--no-access-log"],
