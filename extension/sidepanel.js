@@ -51,15 +51,56 @@
       c.innerHTML = '<div class="empty">选中文字 → 点「批注」</div>';
       return;
     }
-    for (const ann of items) {
+    // 按 parent_id 建树(null 为顶层)
+    const byParent = {};
+    items.forEach((a) => {
+      const k = a.parent_id || null;
+      (byParent[k] = byParent[k] || []).push(a);
+    });
+    function renderNode(ann, depth) {
       const card = document.createElement("div");
       card.className = "card" + (ann._status === "stale" ? " stale" : "");
+      card.style.marginLeft = (depth * 14) + "px";
       const quote = (ann.quote || "").slice(0, 60);
       const comment = (ann.body && ann.body.comment) || "(无评论)";
-      card.innerHTML = '<div class="quote">' + esc(quote) + '</div><div>' + esc(comment) + '</div>';
+      const who = (ann.author && ann.author.name) ? "[" + ann.author.name + "]" : "";
+      card.innerHTML = '<div class="quote">' + esc(quote) + '</div><div>' + esc(who + " " + comment) + '</div>';
+      // hover 动作条
+      const acts = document.createElement("div");
+      acts.className = "card-acts";
+      const reply = document.createElement("button");
+      reply.textContent = "回复"; reply.title = "回复";
+      reply.addEventListener("click", (e) => { e.stopPropagation(); doReply(ann); });
+      acts.appendChild(reply);
+      chrome.storage.sync.get(["user"], (cfg) => {
+        const me = cfg.user && cfg.user.id;
+        if (ann.author && ann.author.id === me) {
+          const del = document.createElement("button");
+          del.textContent = "删除"; del.title = "删除";
+          del.addEventListener("click", (e) => { e.stopPropagation(); doDelete(ann); });
+          acts.appendChild(del);
+        }
+      });
+      card.appendChild(acts);
       card.addEventListener("click", () => sendToContent({ type: "scroll-to", id: ann.id }));
       c.appendChild(card);
+      (byParent[ann.id] || []).forEach((ch) => renderNode(ch, depth + 1));
     }
+    (byParent[null] || []).forEach((a) => renderNode(a, 0));
+  }
+
+  function doReply(parent) {
+    const name = (parent.author && parent.author.name) || "";
+    const comment = prompt("回复 @" + name + ":");
+    if (comment == null) return;
+    sendToContent({ type: "reply", parentId: parent.id, comment: comment || "" });
+  }
+
+  function doDelete(ann) {
+    if (!confirm("删除这条批注?回复将一并删除。")) return;
+    sendToContent({ type: "delete-annotation", id: ann.id }).then((r) => {
+      if (r && r.forbidden) alert("只能删除自己的批注");
+    });
   }
 
   function esc(s) {

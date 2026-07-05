@@ -136,6 +136,26 @@
       sendResponse({ ok: true });
     } else if (msg.type === "get-export") {
       sendResponse({ type: "export-data", items: window.__hgAnnotations || [] });
+    } else if (msg.type === "reply") {
+      // 复用父批注的 selector 上下文(回复无独立选区)
+      const parent = (window.__hgAnnotations || []).find((a) => a.id === msg.parentId);
+      const sel = (parent && parent.selector) || { type: "TextQuoteSelector", exact: (parent && parent.quote) || "" };
+      Storage.getDocumentId().then((docId) =>
+        Storage.saveAnnotation({
+          document_id: docId,
+          selector: sel,
+          quote: sel.exact || "",
+          body: { comment: msg.comment, action: "rewrite", instruction: "" },
+          parent_id: msg.parentId,
+        })
+      ).then(() => loadAnnotations());
+      sendResponse({ ok: true });
+    } else if (msg.type === "delete-annotation") {
+      Storage.deleteAnnotation(msg.id).then((ok) => {
+        sendResponse(ok ? { ok: true } : { forbidden: true });
+        if (ok) loadAnnotations();
+      });
+      return true; // 异步
     }
     return true; // 异步 sendResponse
   });
