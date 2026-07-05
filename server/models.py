@@ -25,6 +25,8 @@ class AnnotationCreate(BaseModel):
     selector: TextQuoteSelector
     quote: str
     body: AnnotationBody = Field(default_factory=AnnotationBody)
+    author: dict = Field(default_factory=lambda: {"id": "u_self", "name": "作者"})
+    parent_id: Optional[str] = None
 
 
 class Annotation(BaseModel):
@@ -34,11 +36,13 @@ class Annotation(BaseModel):
     created_at: datetime
     updated_at: datetime
     author: dict[str, str] = Field(default_factory=lambda: {"id": "u_self", "name": "作者"})
-    scope: Literal["private", "group", "public"] = "private"
+    scope: Literal["private", "group", "public"] = "group"
     status: Literal["open", "resolved", "stale"] = "open"
     selector: TextQuoteSelector
     quote: str
     body: AnnotationBody
+    team_id: str = "default"
+    parent_id: Optional[str] = None
 
 
 class VersionCreate(BaseModel):

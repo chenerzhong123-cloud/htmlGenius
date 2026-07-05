@@ -63,6 +63,12 @@ def init_db(path: Path) -> None:
         cols = {row["name"] for row in c.execute("PRAGMA table_info(versions)")}
         if "html_content" not in cols:
             c.execute("ALTER TABLE versions ADD COLUMN html_content TEXT")
+        # v0.4 迁移:annotations 加 team_id/parent_id 列(若旧库缺)
+        cols_ann = {row["name"] for row in c.execute("PRAGMA table_info(annotations)")}
+        if "team_id" not in cols_ann:
+            c.execute("ALTER TABLE annotations ADD COLUMN team_id TEXT DEFAULT 'default'")
+        if "parent_id" not in cols_ann:
+            c.execute("ALTER TABLE annotations ADD COLUMN parent_id TEXT")
     finally:
         c.close()
 
@@ -204,24 +210,26 @@ def delete_version(document_id: str, version: int) -> bool:
         c.close()
 
 
-def save_annotation(payload: AnnotationCreate) -> dict:
+def save_annotation(payload: AnnotationCreate, team_id: str = "default") -> dict:
     aid = "ann_" + secrets.token_hex(8)
     now = _now()
     selector = payload.selector.model_dump()
     body = payload.body.model_dump()
+    author = payload.author or {"id": "u_self", "name": "作者"}
     c = _connect()
     try:
         c.execute(
             """INSERT INTO annotations
-               (id, document_id, version, created_at, updated_at, author, scope, status, selector, quote, body)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+               (id, document_id, version, created_at, updated_at, author, scope, status, selector, quote, body, team_id, parent_id)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 aid, payload.document_id, payload.version, now, now,
-                json.dumps({"id": "u_self", "name": "作者"}, ensure_ascii=False),
-                "private", "open",
+                json.dumps(author, ensure_ascii=False),
+                "group", "open",
                 json.dumps(selector, ensure_ascii=False),
                 payload.quote,
                 json.dumps(body, ensure_ascii=False),
+                team_id, payload.parent_id,
             ),
         )
     finally:
@@ -248,12 +256,12 @@ def delete_annotation(aid: str) -> bool:
     return deleted
 
 
-def list_annotations(document_id: str) -> list[dict]:
+def list_annotations(document_id: str, team_id: str = "default") -> list[dict]:
     c = _connect()
     try:
         rows = c.execute(
-            "SELECT * FROM annotations WHERE document_id=? ORDER BY created_at",
-            (document_id,),
+            "SELECT * FROM annotations WHERE document_id=? AND team_id=? ORDER BY created_at",
+            (document_id, team_id),
         ).fetchall()
     finally:
         c.close()
@@ -296,4 +304,6 @@ def _row_to_ann(r: sqlite3.Row) -> dict:
         "selector": json.loads(r["selector"]),
         "quote": r["quote"],
         "body": json.loads(r["body"]),
+        "team_id": r["team_id"],
+        "parent_id": r["parent_id"],
     }
