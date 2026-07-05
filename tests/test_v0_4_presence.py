@@ -186,22 +186,46 @@ def test_gc_removes_stale_user(tmp_path, monkeypatch):
 
 
 def test_gc_boundary_keeps_user_at_exactly_ttl(tmp_path, monkeypatch):
-    """TTL 边界: last_seen 落后恰好 60s 不应被清(>60 才清)。"""
+    """TTL 边界语义: now - last_seen == _TTL 保留(严格 > 才清);
+    now - last_seen > _TTL 哪怕只多 1ms 也清。
+
+    冻结 ``presence.time.time`` 而非依赖 ``time.time()`` 实时值 ——
+    后者在写入 last_seen 与 GC 取 now 之间会流逝,使差值漂移到 _TTL 之上,
+    造成 flaky 失败。
+    """
     _init(tmp_path, monkeypatch)
 
+    fixed_last_seen = 1000.0
+
     async def run():
-        await presence.update(
-            "team_a", "doc_x", {"id": "u1", "name": "阿甲"}, "join"
-        )
         key = ("team_a", "doc_x")
-        # exactly 60s ago —— now - last_seen == 60,不满足 > 60,保留
-        presence._USERS[key]["u1"]["last_seen"] = time.time() - presence._TTL
+        # 直接置 last_seen,绕过实时时钟;clock 由 monkeypatch 控制
+        presence._USERS[key]["u1"] = {
+            "user": {"id": "u1", "name": "阿甲"},
+            "last_seen": fixed_last_seen,
+        }
+
+        # 1) 恰好等于边界 now - last_seen == _TTL → 严格 > 不成立 → 保留
+        monkeypatch.setattr(
+            presence.time, "time", lambda: fixed_last_seen + presence._TTL
+        )
         await presence.update(
             "team_a", "doc_x", {"id": "u2", "name": "阿乙"}, "join"
         )
-        # u1 应仍在(边界保留),u2 加入
-        assert "u1" in presence._USERS[key]
+        assert "u1" in presence._USERS[key], "u1 应在边界(==TTL)被保留"
         assert "u2" in presence._USERS[key]
+
+        # 2) 越过边界 1ms now - last_seen == _TTL + 0.001 → 应被清
+        monkeypatch.setattr(
+            presence.time,
+            "time",
+            lambda: fixed_last_seen + presence._TTL + 0.001,
+        )
+        await presence.update(
+            "team_a", "doc_x", {"id": "u3", "name": "阿丙"}, "heartbeat"
+        )
+        assert "u1" not in presence._USERS[key], "u1 越过边界(>TTL)应被清"
+        assert "u3" in presence._USERS[key]
 
     _run(run())
 
