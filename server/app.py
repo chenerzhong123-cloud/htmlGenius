@@ -6,10 +6,12 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from . import storage
 from .auth import require_team, require_team_query
 from .models import AnnotationCreate, DocumentCreate, VersionCreate
+from .presence import update as presence_update
 from .sse import rooms
 
 BASE = Path(__file__).resolve().parent.parent
@@ -127,6 +129,25 @@ async def delete_annotation(
 def _sse_chunk(event: str, data: dict) -> str:
     """SSE 单条消息:event 行 + JSON data 行 + 空行。"""
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+class PresenceIn(BaseModel):
+    """POST /api/presence 请求体。
+
+    team_id 永远来自 Bearer token(require_team),不来自请求体;user 由客户端
+    自报(id/name),op 取 join(默认) / heartbeat / bye。
+    """
+
+    doc: str
+    user: dict
+    op: str = "join"
+
+
+@app.post("/api/presence")
+async def presence_post(payload: PresenceIn, team_id: str = Depends(require_team)):
+    """上报在线状态并广播 presence。返回 {"ok": True}。"""
+    await presence_update(team_id, payload.doc, payload.user, payload.op)
+    return {"ok": True}
 
 
 @app.get("/api/stream")
