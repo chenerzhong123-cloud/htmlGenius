@@ -31,6 +31,9 @@
           renderCards(resp.items);
         }
       });
+    } else if (msg.type === "presence") {
+      // content-script 转发的在线用户列表
+      renderPresence(msg.users);
     }
   });
 
@@ -77,7 +80,58 @@
     }
   });
 
-  // 初始化:请求批注列表
+  // === 协同配置(token+用户)+ presence 展示 (T11) ===
+  const CFG_KEYS = ["mode", "backend", "team_token", "user"];
+
+  function toggleCfgFields() {
+    const synced = document.getElementById("cfg-mode").value === "synced";
+    ["cfg-backend", "cfg-token", "cfg-username"].forEach((id) => {
+      document.getElementById(id).hidden = !synced;
+    });
+  }
+
+  function loadCfg() {
+    chrome.storage.sync.get(CFG_KEYS, (c) => {
+      document.getElementById("cfg-mode").value = c.mode || "local";
+      document.getElementById("cfg-backend").value = c.backend || "";
+      document.getElementById("cfg-token").value = c.team_token || "";
+      document.getElementById("cfg-username").value = (c.user && c.user.name) || "";
+      toggleCfgFields();
+    });
+  }
+
+  function saveCfg() {
+    // 先读旧 user.id,保留稳定身份(避免每次保存变 id)
+    chrome.storage.sync.get(["user"], (cur) => {
+      const oldId = cur.user && cur.user.id;
+      const cfg = {
+        mode: document.getElementById("cfg-mode").value,
+        backend: document.getElementById("cfg-backend").value.trim(),
+        team_token: document.getElementById("cfg-token").value.trim(),
+        user: {
+          id: oldId || ("u_" + Math.random().toString(36).slice(2, 8)),
+          name: document.getElementById("cfg-username").value.trim() || "匿名",
+        },
+      };
+      chrome.storage.sync.set(cfg, () => {
+        const btn = document.getElementById("cfg-save");
+        btn.textContent = "已保存 ✓";
+        setTimeout(() => (btn.textContent = "保存配置"), 1500);
+        alert("刷新页面生效");
+      });
+    });
+  }
+
+  function renderPresence(users) {
+    const el = document.getElementById("presence");
+    if (!users || users.length === 0) { el.textContent = ""; return; }
+    el.textContent = "在线: " + users.map((u) => u.name || u.id).join(", ");
+  }
+
+  document.getElementById("cfg-mode").addEventListener("change", toggleCfgFields);
+  document.getElementById("cfg-save").addEventListener("click", saveCfg);
+
+  // 初始化:请求批注列表 + 加载配置
   sendToContent({ type: "get-annotations" }).then((resp) => {
     if (resp && resp.type === "annotations-list") {
       isLocal = resp.isLocal;
@@ -85,6 +139,7 @@
       renderCards(resp.items);
     }
   });
+  loadCfg();
 
   function exportPrompt(items) {
     if (!items || items.length === 0) { alert("暂无批注"); return; }
