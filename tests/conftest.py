@@ -23,11 +23,16 @@ def browser():
 @pytest.fixture
 def page(browser):
     pg = browser.new_page()
-    # v0.4: viewer 前端在 T7 之前不发 team token,老浏览器测试用
-    # set_extra_http_headers 给所有请求注入 Authorization 头,使 viewer 的
-    # fetch(/api/annotations) 通过鉴权。仅测试用,不进生产代码;T7 viewer
-    # 接入 token 后可移除。
-    pg.set_extra_http_headers({"Authorization": "Bearer t_test"})
+    # FIXME(v0.4 鉴权): viewer 生产代码从 localStorage.hg_token 读 token,经
+    # annotate.js 的 authHeaders() 注入 Authorization: Bearer。这里走【真实路径】
+    # —— 用 add_init_script 在每个页面导航前把 token 写进 localStorage,等价于
+    # 用户在 viewer.html 的 token 入口点过「设置」。务必与 viewer.html / annotate.js
+    # 的存储键 hg_token 保持同步;一旦该键改名,此处须同改。
+    # add_init_script 接收的是【原始 JS 语句】(在每次导航的 document_start
+    # 执行),不是函数表达式 —— 切勿包成 "() => {...}",那样只定义不调用。
+    pg.add_init_script(
+        "try { localStorage.setItem('hg_token', 't_test'); } catch (e) {}"
+    )
     yield pg
     pg.close()
 

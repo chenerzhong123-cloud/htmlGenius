@@ -22,8 +22,12 @@ def _annotate_first_text(server, page, doc):
             range.setStart(target, 0);
             range.setEnd(target, 10);
             const sel = window.__describe(range, root);
+            // 复用 viewer 生产路径的鉴权(localStorage.hg_token → Authorization)
+            const tok = localStorage.getItem('hg_token') || '';
             const r = await fetch('/api/annotations', {
-                method: 'POST', headers: {'Content-Type':'application/json'},
+                method: 'POST',
+                headers: Object.assign({ 'Content-Type': 'application/json' },
+                    tok ? { Authorization: 'Bearer ' + tok } : {}),
                 body: JSON.stringify({document_id: docId, selector: sel, quote: sel.exact,
                     body: {comment:'t', action:'rewrite', instruction:''}})
             });

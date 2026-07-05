@@ -66,6 +66,9 @@ window.Sync = (function () {
     var onCreate = opts.onCreate || null;
     var onDelete = opts.onDelete || null;
     var onPresence = opts.onPresence || null;
+    // v0.4 §5.3:重连(及首连)时回调一次,供 content-script 跑 GET /api/annotations
+    // 全量对账,补齐断线期间错过的 delta。首连会多一次 GET,可接受。
+    var onReconnect = opts.onReconnect || null;
 
     var url =
       backend +
@@ -129,12 +132,17 @@ window.Sync = (function () {
       }
     );
 
-    // 打开即 join + 25s 心跳（与后端 60s GC 留足 2 次心跳冗余）
+    // 打开即 join + 25s 心跳（与后端 60s GC 留足 2 次心跳冗余）。
+    // onopen 在首连和 EventSource 自动重连时都会触发 → 顺便调 onReconnect
+    // 跑一次 GET /api/annotations 全量对账(§5.3),补齐断线期间错过的 delta。
     es.onopen = function () {
       sendPresence("join");
       hbTimer = setInterval(function () {
         sendPresence("heartbeat");
       }, 25000);
+      if (onReconnect) {
+        try { onReconnect(); } catch (e) { /* 对账失败不影响主流程 */ }
+      }
     };
 
     // EventSource 默认自动重连，这里只需静默

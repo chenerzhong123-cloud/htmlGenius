@@ -22,7 +22,13 @@ class RoomManager:
 
     def unsubscribe(self, team_id: str, doc_id: str, q: asyncio.Queue) -> None:
         """离开房间。discard 保证幂等(连接断开重复清理也安全)。"""
-        self._queues[(team_id, doc_id)].discard(q)
+        key = (team_id, doc_id)
+        # 注意:不能用 self._queues[key](defaultdict 会重新创建空 set),
+        # 必须用 in 判存在;discard 后若 set 已空就删 key,防 _queues 无界增长。
+        if key in self._queues:
+            self._queues[key].discard(q)
+            if not self._queues[key]:
+                del self._queues[key]
 
     async def broadcast(self, team_id: str, doc_id: str, event: str, data: dict) -> None:
         """向房间内所有订阅者投递一条消息。list() 快照防迭代中变更。"""

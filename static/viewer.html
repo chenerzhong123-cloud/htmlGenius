@@ -12,6 +12,9 @@
     <span id="status"></span>
     <button id="export-btn" title="把批注组装成 prompt,复制到剪贴板">回灌</button>
     <button id="toggle-sidebar" title="折叠/展开侧边栏">侧栏</button>
+    <input id="token-input" type="password" size="12" placeholder="团队 token"
+           style="font-size:12px;padding:1px 4px;margin-left:6px;border:1px solid #ccc;border-radius:3px;">
+    <button id="token-set" title="保存团队 token 到本地">设置</button>
   </div>
   <div id="main">
     <div id="doc-wrap">
@@ -28,6 +31,22 @@
     </aside>
   </div>
   <script src="/static/vendor/purify.min.js"></script>
+  <script>
+    // v0.4: 团队 token 入口(轻量)。token 存 localStorage.hg_token,annotate.js
+    // 的 authHeaders() 读取它给 /api/annotations 加 Authorization: Bearer。
+    // 首次访问若 hg_token 为空 → 所有请求 401,引导用户在此粘贴 token 后点「设置」。
+    (function () {
+      var inp = document.getElementById("token-input");
+      var btn = document.getElementById("token-set");
+      try { if (localStorage.getItem("hg_token")) inp.value = localStorage.getItem("hg_token"); } catch (e) {}
+      btn.addEventListener("click", function () {
+        var v = (inp.value || "").trim();
+        try { v ? localStorage.setItem("hg_token", v) : localStorage.removeItem("hg_token"); } catch (e) {}
+        alert(v ? "token 已保存,即将刷新页面以应用。" : "token 已清除,即将刷新。");
+        location.reload();
+      });
+    })();
+  </script>
   <script type="module" src="/static/annotate.js"></script>
 </body>
 </html>

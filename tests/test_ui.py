@@ -109,7 +109,11 @@ def test_export_prompt_format(server, page):
     _annotate(page, "请把这段改简洁")
     prompt = page.evaluate(
         """async () => {
-            const r = await fetch('/api/annotations?document_id=01_token');
+            // 复用 viewer 生产路径的鉴权(localStorage.hg_token → Authorization)
+            const tok = localStorage.getItem('hg_token') || '';
+            const r = await fetch('/api/annotations?document_id=01_token', {
+                headers: tok ? { Authorization: 'Bearer ' + tok } : {}
+            });
             const data = await r.json();
             return window.__buildPrompt(data.items);
         }"""

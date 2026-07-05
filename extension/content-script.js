@@ -46,6 +46,8 @@
         user: _cfg.user,
         onCreate: (ann) => applyRemoteChange({ op: "create", annotation: ann }),
         onDelete: (id) => applyRemoteChange({ op: "delete", id }),
+        // §5.3 重连/首连对账:onopen 时全量 GET 一次,补齐断线期间漏掉的 delta。
+        onReconnect: () => loadAnnotations(),
         onPresence: (users) => {
           try {
             chrome.runtime.sendMessage({ type: "presence", users }).catch(() => {});

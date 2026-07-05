@@ -10,6 +10,20 @@ const docPath = docId === "spec"
   : `/samples/${docId}.html`;
 
 const API = "/api";
+
+// v0.4 鉴权:T2 后 /api/annotations 需要 Bearer token。token 由 viewer.html
+// 写入 localStorage.hg_token;未设置则返回 undefined → 不发 Authorization(会 401,
+// 这正是引导用户输入 token 的正确信号)。
+function hgToken() {
+  try { return localStorage.getItem("hg_token") || null; } catch (e) { return null; }
+}
+function authHeaders(extra) {
+  const h = Object.assign({}, extra || {});
+  const tok = hgToken();
+  if (tok) h["Authorization"] = `Bearer ${tok}`;
+  return h;
+}
+
 const frame = document.getElementById("doc-frame");
 const statusEl = document.getElementById("status");
 document.getElementById("doc-title").textContent = `文档:${docId}`;
@@ -132,20 +146,25 @@ async function createAnnotationFromSelection() {
 async function saveAnnotation(payload) {
   const r = await fetch(`${API}/annotations`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
   return r.json();
 }
 
 async function deleteAnnotation(aid) {
-  await fetch(`${API}/annotations/${aid}`, { method: "DELETE" });
+  await fetch(`${API}/annotations/${aid}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
   await loadAnnotations();
 }
 
 /** 导出 sink:把批注组装成结构化 prompt,复制到剪贴板(回灌 CLI) */
 async function exportToClipboard() {
-  const r = await fetch(`${API}/annotations?document_id=${encodeURIComponent(docId)}`);
+  const r = await fetch(`${API}/annotations?document_id=${encodeURIComponent(docId)}`, {
+    headers: authHeaders(),
+  });
   const data = await r.json();
   const items = data.items || [];
   if (items.length === 0) { alert("暂无批注可回灌"); return; }
@@ -218,7 +237,9 @@ async function loadAnnotations() {
   iDoc.querySelectorAll(".ann-hl").forEach((d) => d.remove());
   overlaysById.clear();
 
-  const r = await fetch(`${API}/annotations?document_id=${encodeURIComponent(docId)}`);
+  const r = await fetch(`${API}/annotations?document_id=${encodeURIComponent(docId)}`, {
+    headers: authHeaders(),
+  });
   const data = await r.json();
 
   const main = [];
