@@ -104,8 +104,13 @@ def list_annotations(document_id: str, team_id: str = Depends(require_team)):
 
 
 @app.delete("/api/annotations/{aid}")
-def delete_annotation(aid: str):
-    deleted = storage.delete_annotation(aid)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="annotation not found")
-    return {"ok": True}
+def delete_annotation(
+    aid: str,
+    team_id: str = Depends(require_team),
+    x_user_id: str = Header("u_self", alias="X-User-Id"),
+):
+    try:
+        deleted = storage.delete_annotation(aid, team_id, x_user_id)  # list[dict]
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="not owner")
+    return {"ok": True, "deleted": [d["id"] for d in deleted]}

@@ -35,6 +35,8 @@ def test_annotation_roundtrip(tmp_path, monkeypatch):
 
 
 def test_delete_annotation(tmp_path, monkeypatch):
+    # v0.4-T3: DELETE 端点改为 require_team + X-User-Id(作者校验 + 级联子树)。
+    # 创建时 author 由 X-User-Id 头注入,删除时同一 X-User-Id 才放行。
     monkeypatch.setenv("HG_TEAMS", '{"t_test":"team_test"}')
     storage.init_db(tmp_path / "d.db")
     r = client.post(
@@ -44,15 +46,25 @@ def test_delete_annotation(tmp_path, monkeypatch):
             "selector": {"exact": "x", "prefix": "", "suffix": ""},
             "quote": "x",
         },
-        headers=_AUTH,
+        headers={**_AUTH, "X-User-Id": "u_test"},
     )
     aid = r.json()["id"]
 
-    rd = client.delete(f"/api/annotations/{aid}")
-    assert rd.status_code == 200 and rd.json() == {"ok": True}
+    # 作者本人删 → 200,deleted 含该 id
+    rd = client.delete(
+        f"/api/annotations/{aid}",
+        headers={**_AUTH, "X-User-Id": "u_test"},
+    )
+    assert rd.status_code == 200
+    assert rd.json() == {"ok": True, "deleted": [aid]}
 
     r3 = client.get("/api/annotations", params={"document_id": "doc_d"}, headers=_AUTH)
     assert len(r3.json()["items"]) == 0
 
-    rd2 = client.delete(f"/api/annotations/{aid}")
-    assert rd2.status_code == 404
+    # 二次删:行已不存在 → delete_annotation 返回 [],端点仍 200(空 deleted)
+    rd2 = client.delete(
+        f"/api/annotations/{aid}",
+        headers={**_AUTH, "X-User-Id": "u_test"},
+    )
+    assert rd2.status_code == 200
+    assert rd2.json() == {"ok": True, "deleted": []}

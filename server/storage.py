@@ -246,14 +246,50 @@ def get_annotation(aid: str) -> dict | None:
     return _row_to_ann(r) if r else None
 
 
-def delete_annotation(aid: str) -> bool:
+def delete_annotation(aid: str, team_id: str, actor_id: str) -> list[dict]:
+    """作者校验 + 级联删子树。
+
+    - 行不存在 → 返回 ``[]``。
+    - ``row["team_id"] != team_id`` (跨团队) 或 ``author.id != actor_id`` (非作者) → ``PermissionError``。
+    - 通过: BFS by ``parent_id`` 收集整棵子树,单事务 (BEGIN IMMEDIATE/COMMIT, 异常 ROLLBACK) 删除,
+      返回 ``[{"id": ..., "document_id": ...}, ...]``。
+    """
     c = _connect()
     try:
-        cur = c.execute("DELETE FROM annotations WHERE id=?", (aid,))
-        deleted = cur.rowcount > 0
+        row = c.execute(
+            "SELECT team_id, author, document_id FROM annotations WHERE id=?", (aid,)
+        ).fetchone()
+        if row is None:
+            return []
+        if row["team_id"] != team_id:
+            raise PermissionError("wrong team")
+        if json.loads(row["author"]).get("id") != actor_id:
+            raise PermissionError("not owner")
+        doc_id = row["document_id"]
+        # BFS 收集子树(by parent_id)
+        to_delete: list[str] = [aid]
+        queue: list[str] = [aid]
+        while queue:
+            cur = queue.pop()
+            children = [
+                r["id"]
+                for r in c.execute(
+                    "SELECT id FROM annotations WHERE parent_id=?", (cur,)
+                ).fetchall()
+            ]
+            to_delete.extend(children)
+            queue.extend(children)
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            for did in to_delete:
+                c.execute("DELETE FROM annotations WHERE id=?", (did,))
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+        return [{"id": did, "document_id": doc_id} for did in to_delete]
     finally:
         c.close()
-    return deleted
 
 
 def list_annotations(document_id: str, team_id: str = "default") -> list[dict]:
