@@ -1,12 +1,16 @@
+import asyncio
+import json
 import os
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import storage
-from .auth import require_team
+from .auth import require_team, require_team_query
 from .models import AnnotationCreate, DocumentCreate, VersionCreate
+from .sse import rooms
 
 BASE = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("HTMLEDITOR_DB", BASE / "annotations.db"))
@@ -114,3 +118,31 @@ def delete_annotation(
     except PermissionError:
         raise HTTPException(status_code=403, detail="not owner")
     return {"ok": True, "deleted": [d["id"] for d in deleted]}
+
+
+def _sse_chunk(event: str, data: dict) -> str:
+    """SSE 单条消息:event 行 + JSON data 行 + 空行。"""
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@app.get("/api/stream")
+async def stream(doc: str, team_id: str = Depends(require_team_query)):
+    """SSE 长连接:hello → 转发房间广播 → 15s keepalive 注释。
+
+    team_id 由 require_team_query 从 ?token= 注入(永不来自请求体);
+    doc 是路径外 query 参数。EventSource 不能设自定义头,故 token 走 query。
+    """
+    async def gen():
+        q = await rooms.subscribe(team_id, doc)
+        try:
+            yield _sse_chunk("hello", {"room": f"{team_id}:{doc}"})
+            while True:
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=15)
+                    yield _sse_chunk(msg["event"], msg["data"])
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"  # keepalive 注释行
+        finally:
+            rooms.unsubscribe(team_id, doc, q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")

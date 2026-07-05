@@ -31,9 +31,13 @@ def require_team(authorization: Optional[str] = Header(None)) -> str:
     return teams[token]
 
 
-def require_team_query(token: str = Query(...)) -> str:
-    """Query string token -> team_id。给 SSE 端点用 (EventSource 不能设头)。"""
+def require_team_query(token: Optional[str] = Query(None)) -> str:
+    """Query string token -> team_id。给 SSE 端点用 (EventSource 不能设头)。
+
+    token 用 ``Query(None)`` 而非 ``Query(...)`` —— 缺 token 必须返回 401
+    (而非 FastAPI 默认的 422 校验错误),这样客户端拿到统一的鉴权失败语义。
+    """
     teams = _teams()
-    if token not in teams:
+    if not token or token not in teams:
         raise HTTPException(status_code=401, detail="invalid token")
     return teams[token]
