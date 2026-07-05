@@ -91,7 +91,7 @@ def get_document(document_id: str):
 
 
 @app.post("/api/annotations")
-def create_annotation(
+async def create_annotation(
     payload: AnnotationCreate,
     team_id: str = Depends(require_team),
     x_user_id: str = Header("u_self", alias="X-User-Id"),
@@ -99,7 +99,9 @@ def create_annotation(
 ):
     # team_id 永远来自 token (server-injected); author 永远来自 header,不被请求体覆盖
     payload.author = {"id": x_user_id, "name": x_user_name}
-    return storage.save_annotation(payload, team_id=team_id)
+    ann = storage.save_annotation(payload, team_id=team_id)
+    await rooms.broadcast(team_id, payload.document_id, "annotation:created", ann)
+    return ann
 
 
 @app.get("/api/annotations")
@@ -108,7 +110,7 @@ def list_annotations(document_id: str, team_id: str = Depends(require_team)):
 
 
 @app.delete("/api/annotations/{aid}")
-def delete_annotation(
+async def delete_annotation(
     aid: str,
     team_id: str = Depends(require_team),
     x_user_id: str = Header("u_self", alias="X-User-Id"),
@@ -117,6 +119,8 @@ def delete_annotation(
         deleted = storage.delete_annotation(aid, team_id, x_user_id)  # list[dict]
     except PermissionError:
         raise HTTPException(status_code=403, detail="not owner")
+    for d in deleted:
+        await rooms.broadcast(team_id, d["document_id"], "annotation:deleted", {"id": d["id"]})
     return {"ok": True, "deleted": [d["id"] for d in deleted]}
 
 
