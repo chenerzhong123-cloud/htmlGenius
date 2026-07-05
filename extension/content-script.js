@@ -134,6 +134,9 @@
     } else if (msg.type === "enable-edit") {
       document.body.contentEditable = "true";
       sendResponse({ ok: true });
+    } else if (msg.type === "disable-edit") {
+      document.body.contentEditable = "false";
+      sendResponse({ ok: true });
     } else if (msg.type === "get-export") {
       sendResponse({ type: "export-data", items: window.__hgAnnotations || [] });
     } else if (msg.type === "reply") {
