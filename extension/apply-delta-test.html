@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<!-- apply-delta-test.html — 覆盖纯函数 Sync.applyDelta(create 幂等 / delete + 级联子树)
+
+  真连后端的 SSE 回归在 T14 手动矩阵;本页只测纯逻辑,直接加载 sync.js
+  (classic script,挂 window.Sync),不内联 applyDelta 实现 —— 单一真相源。
+-->
+<html lang="zh">
+<meta charset="UTF-8">
+<title>running…</title>
+<body>
+apply-delta test
+<script src="sync.js"></script>
+<script>
+(function () {
+  try {
+    if (typeof Sync.applyDelta !== "function") {
+      throw new Error("Sync.applyDelta 未定义");
+    }
+
+    // create:新注解入列
+    var list = [];
+    Sync.applyDelta(list, { op: "create", annotation: { id: "a1", parent_id: null } });
+    Sync.applyDelta(list, { op: "create", annotation: { id: "a2", parent_id: "a1" } });
+    if (list.length !== 2) throw new Error("create 长度=" + list.length);
+
+    // delete + 级联:删 a1 → 子回复 a2 一并删
+    Sync.applyDelta(list, { op: "delete", id: "a1" });
+    if (list.length !== 0) throw new Error("cascade delete 长度=" + list.length);
+
+    // create 幂等:同 id 二次 create 不重复
+    Sync.applyDelta(list, { op: "create", annotation: { id: "a3", parent_id: null } });
+    Sync.applyDelta(list, { op: "create", annotation: { id: "a3", parent_id: null } });
+    if (list.length !== 1) throw new Error("idempotent 长度=" + list.length);
+
+    // delete 不存在的 id:静默无副作用
+    Sync.applyDelta(list, { op: "delete", id: "nope" });
+    if (list.length !== 1) throw new Error("delete-unknown 长度=" + list.length);
+
+    // 未知 op:无副作用
+    Sync.applyDelta(list, { op: "weird", annotation: { id: "a4" } });
+    if (list.length !== 1) throw new Error("unknown-op 长度=" + list.length);
+
+    document.title = "PASS";
+  } catch (e) {
+    document.title = "FAIL: " + e.message;
+  }
+})();
+</script>
+</body>
+</html>

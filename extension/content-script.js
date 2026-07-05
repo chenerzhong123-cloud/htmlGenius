@@ -5,6 +5,59 @@
 
   const { describe, anchor } = window;
 
+  // === 协同 sync/mode:读 chrome.storage.sync,mode==="synced" 才接入后端 ===
+  // 无配置或 mode 为 local/unset → 走 LocalStore(零回归)。
+  let _cfg = { mode: "local" };
+  let _sync = null;
+
+  if (chrome.storage && chrome.storage.sync) {
+    chrome.storage.sync.get(
+      ["mode", "backend", "team_token", "user"],
+      (c) => {
+        _cfg = Object.assign({}, _cfg, c || {});
+        if (_cfg.mode === "synced") {
+          Storage.configure(_cfg); // 切到 RemoteStore
+          startSync();
+        }
+      }
+    );
+  }
+
+  // applyRemoteChange:把 delta 应用到 window.__hgAnnotations(纯 Sync.applyDelta)
+  // 再调 loadAnnotations() 重渲染 overlay(读 Storage 全量 + anchor)。
+  // 测试钩子:window.__hgApplyRemoteChange。
+  function applyRemoteChange(delta) {
+    if (!window.__hgAnnotations) window.__hgAnnotations = [];
+    if (window.Sync && typeof window.Sync.applyDelta === "function") {
+      window.Sync.applyDelta(window.__hgAnnotations, delta);
+    }
+    loadAnnotations();
+  }
+  window.__hgApplyRemoteChange = applyRemoteChange;
+
+  // startSync:解析 docId 后开 EventSource,回调映射到 applyRemoteChange。
+  function startSync() {
+    if (!window.Sync) return;
+    Storage.getDocumentId().then((docId) => {
+      _sync = window.Sync.start({
+        backend: _cfg.backend,
+        team_token: _cfg.team_token,
+        docId,
+        user: _cfg.user,
+        onCreate: (ann) => applyRemoteChange({ op: "create", annotation: ann }),
+        onDelete: (id) => applyRemoteChange({ op: "delete", id }),
+        onPresence: (users) => {
+          try {
+            chrome.runtime.sendMessage({ type: "presence", users }).catch(() => {});
+          } catch (e) { /* 非关键路径 */ }
+        },
+      });
+    });
+  }
+
+  window.addEventListener("beforeunload", () => { if (_sync) _sync.stop(); });
+
+
   // === 双模式判断 ===
   const isLocal = ["file:", "data:", "blob:"].includes(location.protocol)
     || ["localhost", "127.0.0.1", "0.0.0.0"].includes(location.hostname);

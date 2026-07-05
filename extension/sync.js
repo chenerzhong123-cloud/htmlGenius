@@ -32,6 +32,31 @@ window.Sync = (function () {
     return null; // hello / 未知事件忽略
   }
 
+  // 纯函数:把 delta 原地应用到 list,返回 list。
+  //   op:"create" — id 不存在才 push(幂等:重复 create 同 id 不重复入列)
+  //   op:"delete" — 移除该 id 及其所有子孙(parent_id === 被删 id 的项级联删除)
+  //   其余 op 静默无副作用。
+  // 不触碰 DOM / chrome.*;content-script 调它后再自行重渲染 overlay。
+  function applyDelta(list, delta) {
+    if (!list || !delta) return list;
+    if (delta.op === "create") {
+      var ann = delta.annotation || {};
+      if (!list.find(function (a) { return a && a.id === ann.id; })) {
+        list.push(ann);
+      }
+    } else if (delta.op === "delete") {
+      var id = delta.id;
+      // 先删目标
+      var i = list.findIndex(function (a) { return a && a.id === id; });
+      if (i >= 0) list.splice(i, 1);
+      // 级联:删所有 parent_id === 被删 id 的子回复
+      for (var j = list.length - 1; j >= 0; j--) {
+        if (list[j] && list[j].parent_id === id) list.splice(j, 1);
+      }
+    }
+    return list;
+  }
+
   function start(opts) {
     opts = opts || {};
     var backend = opts.backend || "";
@@ -156,5 +181,5 @@ window.Sync = (function () {
     return { stop: stop, sendPresence: sendPresence };
   }
 
-  return { start: start, parseEvent: parseEvent };
+  return { start: start, parseEvent: parseEvent, applyDelta: applyDelta };
 })();
