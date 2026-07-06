@@ -84,10 +84,10 @@
       reply.textContent = "回复"; reply.title = "回复";
       reply.addEventListener("click", (e) => { e.stopPropagation(); doReply(ann); });
       acts.appendChild(reply);
-      chrome.storage.sync.get(["user"], (cfg) => {
+      chrome.storage.sync.get(["user", "mode"], (cfg) => {
         const me = cfg.user && cfg.user.id;
-        // 本地模式单用户:所有批注均可删;协同模式:仅作者本人。
-        if (isLocal || (ann.author && ann.author.id === me)) {
+        // 单用户(非协同)模式:所有批注均可删;协同模式:仅作者本人。
+        if (cfg.mode !== "synced" || (ann.author && ann.author.id === me)) {
           const del = document.createElement("button");
           del.textContent = "删除"; del.title = "删除";
           del.addEventListener("click", (e) => { e.stopPropagation(); doDelete(ann); });
