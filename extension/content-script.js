@@ -80,17 +80,20 @@
   // === 注入样式 ===
   const style = document.createElement("style");
   style.textContent = `
-    .hg-hl{ position:fixed; background:rgba(255,243,160,0.55); pointer-events:none; z-index:2147483646; border-radius:2px; }
-    .hg-hl.flash{ background:rgba(251,191,36,0.75); }
-    #hg-toolbar{ position:fixed; z-index:2147483647; display:none; background:#1f2328; color:#fff;
-      border-radius:6px; padding:4px; gap:2px; align-items:center; box-shadow:0 4px 12px rgba(0,0,0,.25); font-size:13px; }
+    .hg-hl{ position:fixed; background:rgba(232,165,90,0.32); pointer-events:none; z-index:2147483646; border-radius:2px; }
+    .hg-hl.flash{ background:rgba(204,120,92,0.5); }
+    #hg-toolbar{ position:fixed; z-index:2147483647; display:none; background:#181715; color:#faf9f5;
+      border-radius:8px; padding:4px; gap:2px; align-items:center; box-shadow:0 4px 12px rgba(0,0,0,.28); font-size:13px;
+      font-family:"Inter","PingFang SC","Microsoft YaHei",-apple-system,BlinkMacSystemFont,system-ui,sans-serif; }
     #hg-toolbar.show{ display:flex; }
-    #hg-toolbar button{ background:transparent; color:#fff; border:0; cursor:pointer; padding:2px 6px; border-radius:4px; font-size:13px; }
-    #hg-toolbar button:hover{ background:#374151; }
-    #hg-toolbar .hg-sep{ width:1px; height:18px; background:#4b5563; margin:0 2px; }
+    #hg-toolbar button{ background:transparent; color:#faf9f5; border:0; cursor:pointer; padding:4px 8px; border-radius:6px; font-size:13px; }
+    #hg-toolbar button:hover{ background:#252320; }
+    #hg-toolbar button[data-act="comment"]{ background:#cc785c; color:#fff; }
+    #hg-toolbar button[data-act="comment"]:hover{ background:#a9583e; }
+    #hg-toolbar .hg-sep{ width:1px; height:18px; background:#3a3935; margin:0 2px; }
     #hg-toolbar .hg-colors{ display:none; gap:2px; align-items:center; }
     #hg-toolbar .hg-colors.show{ display:flex; }
-    #hg-toolbar .hg-c{ width:16px; height:16px; border-radius:50%; cursor:pointer; border:1px solid rgba(255,255,255,0.3); }
+    #hg-toolbar .hg-c{ width:16px; height:16px; border-radius:50%; cursor:pointer; border:1px solid rgba(250,249,245,0.3); }
   `;
   document.head.appendChild(style);
 
@@ -169,6 +172,18 @@
         })
       ).then(() => loadAnnotations());
       sendResponse({ ok: true });
+    } else if (msg.type === "commit-comment") {
+      // 来自 sidepanel 草稿块的提交:用 start-comment 时捕获的 selector + 用户输入的评论落库。
+      cfgReady.then(() => Storage.getDocumentId()).then((docId) =>
+        Storage.saveAnnotation({
+          document_id: docId,
+          selector: msg.selector,
+          quote: msg.quote,
+          body: { comment: msg.comment, action: "rewrite", instruction: "" },
+          author: _cfg.user || { id: "u_self", name: "作者" },
+        })
+      ).then(() => loadAnnotations());
+      sendResponse({ ok: true });
     } else if (msg.type === "delete-annotation") {
       Storage.deleteAnnotation(msg.id).then((ok) => {
         sendResponse(ok ? { ok: true } : { forbidden: true });
@@ -201,21 +216,16 @@
   });
 
   // === 批注创建 ===
+  // v0.4.1: 不再用浏览器 prompt。捕获选区后通知 sidepanel 开草稿块内联编辑,
+  // 用户在侧边栏提交(commit-comment)时才真正落库。
   async function createAnnotation() {
     const sel = document.getSelection();
     if (!sel || sel.rangeCount === 0) return;
     const range = sel.getRangeAt(0);
     const selector = describe(range, document.body);
     if (!selector || !selector.exact) return;
-    const comment = prompt("批注评论(可空):") || "";
-    await cfgReady; // Fix #4: 确保 _cfg.user.id 就绪,RemoteStore 才会带正确的 X-User-Id。
-    const docId = await Storage.getDocumentId();
-    await Storage.saveAnnotation({
-      document_id: docId, selector, quote: selector.exact,
-      body: { comment, action: "rewrite", instruction: "" },
-    });
+    chrome.runtime.sendMessage({ type: "start-comment", selector, quote: selector.exact }).catch(() => {});
     sel.removeAllRanges();
-    await loadAnnotations();
   }
 
   // === 样式应用(仅本地) ===

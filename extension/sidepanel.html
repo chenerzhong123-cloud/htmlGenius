@@ -1,23 +1,18 @@
 <!DOCTYPE html><html lang="zh-CN"><head>
 <meta charset="UTF-8"><link rel="stylesheet" href="sidepanel.css">
 </head><body>
-<div id="config">
-  <select id="cfg-mode"><option value="local">本地</option><option value="synced">协同</option></select>
-  <input id="cfg-backend" placeholder="https://你的后端" hidden>
-  <input id="cfg-token" placeholder="团队 token" hidden>
-  <input id="cfg-username" placeholder="你的名字" hidden>
-  <button id="cfg-save">保存配置</button>
+<div id="header">
+  <span class="brand">htmlGenius</span>
+  <span class="mode-badge">本地模式</span>
 </div>
 <div id="mode-indicator">加载中…</div>
 <div id="presence"></div>
+<div id="draft-host"></div>
 <div id="annotations"></div>
 <div id="actions">
   <button id="export-btn">一键复制所有评论</button>
   <button id="edit-btn" hidden>切换编辑模式</button>
 </div>
-<script src="remote-store.js"></script>
-<script src="sync.js"></script>
-<script src="storage.js"></script>
 <script src="buildprompt.js"></script>
 <script src="sidepanel.js"></script>
 </body></html>

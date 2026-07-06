@@ -1,20 +1,161 @@
-body { font-family: -apple-system, BlinkMacSystemFont, system-ui, "PingFang SC", sans-serif; margin: 0; padding: 8px; font-size: 13px; background: #fafbfc; }
-#mode-indicator { padding: 4px 8px; border-radius: 4px; margin-bottom: 8px; font-weight: 600; font-size: 12px; }
-#mode-indicator.local { background: #eef2ff; color: #4338ca; }
-#mode-indicator.remote { background: #fef3c7; color: #92400e; }
-#annotations { margin-bottom: 8px; }
-.card { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px; margin-bottom: 6px; cursor: pointer; }
-.card:hover { box-shadow: 0 1px 4px rgba(0,0,0,.08); }
-.card .quote { color: #6b7280; font-size: 12px; border-left: 3px solid #d1d5db; padding-left: 4px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* === Anthropic warm-canvas design tokens (DESIGN.md) === */
+:root {
+  --canvas: #faf9f5;
+  --surface-soft: #f5f0e8;
+  --surface-card: #efe9de;
+  --surface-cream-strong: #e8e0d2;
+  --surface-dark: #181715;
+  --surface-dark-elevated: #252320;
+  --ink: #141413;
+  --body: #3d3d3a;
+  --muted: #6c6a64;
+  --muted-soft: #8e8b82;
+  --hairline: #e6dfd8;
+  --primary: #cc785c;
+  --primary-active: #a9583e;
+  --on-primary: #ffffff;
+  --warning: #d4a017;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-pill: 9999px;
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", "Tiempos Headline", Georgia, serif;
+}
+
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fonts/inter-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("fonts/inter-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Cormorant Garamond"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fonts/cormorant-garamond-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Cormorant Garamond"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("fonts/cormorant-garamond-latin-500-normal.woff2") format("woff2"); }
+
+body {
+  font-family: var(--font-sans);
+  margin: 0; padding: 12px;
+  font-size: 14px; line-height: 1.55;
+  background: var(--canvas); color: var(--body);
+}
+
+/* === 品牌头 === */
+#header {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 4px 4px 12px; margin-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.brand {
+  font-family: var(--font-serif); font-size: 22px; font-weight: 500;
+  color: var(--ink); letter-spacing: -0.3px; line-height: 1;
+}
+.mode-badge {
+  font-size: 11px; font-weight: 500; color: var(--ink);
+  background: var(--surface-cream-strong);
+  padding: 3px 10px; border-radius: var(--r-pill); letter-spacing: 0.3px;
+}
+
+#mode-indicator {
+  padding: 6px 10px; border-radius: var(--r-md); margin-bottom: 8px;
+  font-size: 12px; font-weight: 500;
+  background: var(--surface-card); color: var(--muted);
+}
+#presence { font-size: 12px; color: var(--muted); padding: 0 4px 8px; }
+
+/* === 批注卡片 === */
+#annotations { margin-bottom: 72px; } /* 给底部固定 actions 留位 */
+.card {
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: 12px 14px; margin-bottom: 8px;
+  cursor: pointer;
+  transition: box-shadow .15s ease;
+}
+.card:hover { box-shadow: 0 1px 3px rgba(20,20,19,0.08); }
+.card .quote {
+  color: var(--muted); font-size: 12px;
+  border-left: 3px solid var(--primary);
+  padding-left: 8px; margin-bottom: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.card .comment { color: var(--body); word-break: break-word; }
 .card.stale { opacity: 0.5; }
-.card.stale .quote { border-left-color: #f59e0b; }
-#actions { position: fixed; bottom: 8px; left: 8px; right: 8px; display: flex; gap: 4px; }
-button { padding: 4px 12px; border: 0; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; }
-#export-btn { background: #0969da; color: #fff; }
-#edit-btn { background: #f59e0b; color: #fff; }
-.empty { color: #9ca3af; text-align: center; padding: 16px; }
-.card-acts { display: none; margin-top: 4px; }
-.card:hover .card-acts { display: inline; }
-.card-acts button { margin-right: 4px; }
-.card a { color:#0969da; text-decoration:underline; }
-.card a:hover { opacity:.8; }
+.card.stale .quote { border-left-color: var(--warning); }
+.card a { color: var(--primary); text-decoration: underline; }
+.card a:hover { opacity: 0.8; }
+
+/* hover 动作条 */
+.card-acts { display: none; margin-top: 8px; }
+.card:hover .card-acts { display: flex; gap: 6px; }
+.card-acts button {
+  height: 28px; padding: 4px 12px; font-size: 12px;
+  background: var(--canvas); color: var(--ink);
+  border: 1px solid var(--hairline); border-radius: var(--r-md);
+}
+
+/* === 底部 actions === */
+#actions {
+  position: fixed; bottom: 12px; left: 12px; right: 12px;
+  display: flex; gap: 8px;
+}
+button {
+  font-family: var(--font-sans); font-size: 13px; font-weight: 500;
+  padding: 10px 16px; border: 1px solid transparent;
+  border-radius: var(--r-md); cursor: pointer; line-height: 1; height: 38px;
+}
+#export-btn { background: var(--primary); color: var(--on-primary); flex: 1; }
+#export-btn:active { background: var(--primary-active); }
+#edit-btn { background: var(--canvas); color: var(--ink); border-color: var(--hairline); }
+#edit-btn:active { background: var(--surface-card); }
+
+.empty { color: var(--muted-soft); text-align: center; padding: 24px 16px; font-size: 13px; }
+
+/* === 内联草稿/回复/确认(无浏览器弹窗) === */
+.draft-card, .reply-editor {
+  background: var(--canvas);
+  border: 1px solid var(--primary);
+  border-radius: var(--r-lg);
+  padding: 10px 12px; margin-bottom: 8px;
+}
+.reply-editor { margin-top: 8px; }
+.draft-label {
+  font-size: 11px; font-weight: 500; color: var(--primary);
+  letter-spacing: 0.5px; margin-bottom: 6px;
+}
+.draft-card .quote, .reply-editor .quote {
+  font-size: 12px; color: var(--muted);
+  border-left: 3px solid var(--primary); padding-left: 8px; margin-bottom: 6px;
+}
+.draft-input, .reply-editor textarea {
+  width: 100%; box-sizing: border-box;
+  font-family: var(--font-sans); font-size: 13px; line-height: 1.5;
+  color: var(--ink); background: var(--canvas);
+  border: 1px solid var(--hairline); border-radius: var(--r-md);
+  padding: 8px 10px; resize: vertical; min-height: 52px;
+}
+.draft-input:focus, .reply-editor textarea:focus {
+  outline: 2px solid rgba(204,120,92,0.3); border-color: var(--primary);
+}
+.draft-acts { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.draft-acts button { height: 30px; padding: 4px 12px; font-size: 12px; border-radius: var(--r-md); }
+.draft-acts .draft-save, .draft-acts .reply-save { background: var(--primary); color: var(--on-primary); }
+.draft-acts .draft-save:active, .draft-acts .reply-save:active { background: var(--primary-active); }
+.draft-acts .draft-cancel, .draft-acts .reply-cancel { background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline); }
+
+.delete-confirm {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--hairline);
+  font-size: 12px; color: var(--muted);
+}
+.delete-confirm button { height: 26px; padding: 3px 10px; font-size: 12px; border-radius: var(--r-md); }
+.delete-confirm .del-ok { background: var(--warning); color: #fff; }
+.delete-confirm .del-cancel { background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline); }
+
+/* toast(替代 alert) */
+.toast {
+  position: fixed; bottom: 64px; left: 12px; right: 12px;
+  background: var(--surface-dark); color: var(--canvas);
+  padding: 8px 12px; border-radius: var(--r-md); font-size: 12px;
+  opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 100;
+}
+.toast.show { opacity: 1; }

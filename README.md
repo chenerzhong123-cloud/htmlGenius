@@ -1,7 +1,9 @@
-# htmlGenius · v0.4(多人协同批注)
+# htmlGenius · v0.4.1(本地批注 + 编辑 + 回灌)
 
 > 在 HTML 上划词批注 → 一键复制结构化 prompt → 粘贴给 AI 改 → 闭环。
 > 非侵入 overlay 高亮 + 飞书式锚定侧边栏,不破坏原文 DOM。
+
+> **v0.4.1**：按 Anthropic 暖色编辑规范(`design-spec/design-md/claude/DESIGN.md`)重塑侧边栏 + 浮工具栏 UI；创建/回复/删除改为侧边栏**内联交互**(无浏览器弹窗,Enter 保存)；打包 Inter + Cormorant Garamond 字体(OFL)。**多人协同功能代码就绪但入口暂时隐藏**，待飞书 OAuth 接入后再开放(见下 §v0.4)。
 
 htmlGenius 把「AI 生成的 HTML」变成可批注、可回灌的闭环:你在浏览器里对 HTML 划词写评论,系统把批注组装成带「前文 + 原文 + 后文」精确定位的 prompt 复制到剪贴板,粘贴进 Claude Code / 任意 AI 会话即可让其逐条修改。设计文档见 `docs/2026-06-25-html-annotation-feedback-loop-design.md`,阶段 0 实现计划见 `docs/2026-06-25-stage0-plan.md`。
 

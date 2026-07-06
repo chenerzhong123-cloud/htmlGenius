@@ -1,17 +1,17 @@
-// sidepanel.js — v0.3.1: 改用 sendMessage(替代 port)
+// sidepanel.js — v0.4.1: 内联交互(创建/回复/删除均不用浏览器弹窗)
 (function () {
   "use strict";
 
   let isLocal = false;
   let currentTabId = null;
+  let _pendingSelector = null; // 新建批注草稿的 {selector, quote}(来自 content-script)
+  let _toastTimer = 0;
 
-  // 获取当前活跃 tab
   async function getActiveTab() {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     return tabs[0];
   }
 
-  // 发消息到 content script
   async function sendToContent(msg) {
     const tab = await getActiveTab();
     if (!tab) return null;
@@ -20,21 +20,22 @@
     catch (e) { console.log("content script not ready:", e); return null; }
   }
 
-  // 接收 content script 广播
+  // 接收 content-script 消息
   chrome.runtime.onMessage.addListener((msg, sender) => {
     if (msg.type === "annotations-updated") {
-      // 请求最新列表
       sendToContent({ type: "get-annotations" }).then((resp) => {
         if (resp && resp.type === "annotations-list") {
           isLocal = resp.isLocal;
-          _editing = !!resp.editing; // Fix #3: 以页面实际编辑态为准(刷新后复位为查看)
+          _editing = !!resp.editing; // 以页面实际编辑态为准(刷新后复位为查看)
           renderMode();
           renderCards(resp.items);
         }
       });
     } else if (msg.type === "presence") {
-      // content-script 转发的在线用户列表
       renderPresence(msg.users);
+    } else if (msg.type === "start-comment") {
+      // 页面上点了「批注」→ 在侧边栏开草稿块内联编辑评论
+      showDraft(msg.selector, msg.quote);
     }
   });
 
@@ -43,8 +44,7 @@
   function renderMode() {
     const el = document.getElementById("mode-indicator");
     const btn = document.getElementById("edit-btn");
-    btn.hidden = false;  // 始终可见(toggle)
-    // Fix #3/#2: 按钮文案始终由 _editing(页面真相源)决定,避免与页面漂移。
+    btn.hidden = false;
     if (_editing) {
       el.textContent = "\u{1F4DD} 编辑模式";
       btn.textContent = "切换查看模式";
@@ -52,7 +52,6 @@
       el.textContent = isLocal ? "\u{1F4CD} 本地文档(可编辑)" : "\u{1F310} 远程网页(只读批注)";
       btn.textContent = "切换编辑模式";
     }
-    el.className = isLocal ? "local" : "remote";
   }
 
   function renderCards(items) {
@@ -62,12 +61,8 @@
       c.innerHTML = '<div class="empty">选中文字 → 点「批注」</div>';
       return;
     }
-    // 按 parent_id 建树(null 为顶层)
     const byParent = {};
-    items.forEach((a) => {
-      const k = a.parent_id || null;
-      (byParent[k] = byParent[k] || []).push(a);
-    });
+    items.forEach((a) => { const k = a.parent_id || null; (byParent[k] = byParent[k] || []).push(a); });
     function renderNode(ann, depth) {
       const card = document.createElement("div");
       card.className = "card" + (ann._status === "stale" ? " stale" : "");
@@ -75,22 +70,19 @@
       const quote = (ann.quote || "").slice(0, 60);
       const comment = (ann.body && ann.body.comment) || "(无评论)";
       const who = (ann.author && ann.author.name) ? "[" + ann.author.name + "]" : "";
-      // Fix #5: who/quote 仍转义;comment 走 linkify(先转义再包 <a>),URL 可点。
       card.innerHTML = '<div class="quote">' + esc(quote) + '</div><div>' + esc(who + " ") + linkify(comment) + '</div>';
-      // hover 动作条
       const acts = document.createElement("div");
       acts.className = "card-acts";
       const reply = document.createElement("button");
       reply.textContent = "回复"; reply.title = "回复";
-      reply.addEventListener("click", (e) => { e.stopPropagation(); doReply(ann); });
+      reply.addEventListener("click", (e) => { e.stopPropagation(); doReply(ann, card); });
       acts.appendChild(reply);
       chrome.storage.sync.get(["user", "mode"], (cfg) => {
         const me = cfg.user && cfg.user.id;
-        // 单用户(非协同)模式:所有批注均可删;协同模式:仅作者本人。
         if (cfg.mode !== "synced" || (ann.author && ann.author.id === me)) {
           const del = document.createElement("button");
           del.textContent = "删除"; del.title = "删除";
-          del.addEventListener("click", (e) => { e.stopPropagation(); doDelete(ann); });
+          del.addEventListener("click", (e) => { e.stopPropagation(); doDelete(ann, card); });
           acts.appendChild(del);
         }
       });
@@ -102,25 +94,103 @@
     (byParent[null] || []).forEach((a) => renderNode(a, 0));
   }
 
-  function doReply(parent) {
-    const name = (parent.author && parent.author.name) || "";
-    const comment = prompt("回复 @" + name + ":");
-    if (comment == null) return;
-    sendToContent({ type: "reply", parentId: parent.id, comment: comment || "" });
+  // === 新建批注:内联草稿块(替代浏览器 prompt)===
+  function showDraft(selector, quote) {
+    cancelDraft();
+    _pendingSelector = { selector, quote };
+    const host = document.getElementById("draft-host");
+    const draft = document.createElement("div");
+    draft.className = "draft-card";
+    draft.innerHTML =
+      '<div class="draft-label">新建批注</div>' +
+      '<div class="quote">' + esc((quote || "").slice(0, 80)) + '</div>' +
+      '<textarea class="draft-input" placeholder="写评论…(Enter 保存 · Shift+Enter 换行)" rows="3"></textarea>' +
+      '<div class="draft-acts"><button class="draft-cancel">取消</button><button class="draft-save">保存</button></div>';
+    host.appendChild(draft);
+    const ta = draft.querySelector(".draft-input");
+    window.focus();          // 抢侧边栏窗口焦点(点批注浮窗时焦点在页面)
+    ta.focus();              // 立即聚焦输入框(不用 setTimeout,避免被页面抢回)
+    draft.querySelector(".draft-save").addEventListener("click", commitDraft);
+    draft.querySelector(".draft-cancel").addEventListener("click", cancelDraft);
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitDraft(); }
+      if (e.key === "Escape") { e.preventDefault(); cancelDraft(); }
+    });
   }
 
-  function doDelete(ann) {
-    if (!confirm("删除这条批注?回复将一并删除。")) return;
-    sendToContent({ type: "delete-annotation", id: ann.id }).then((r) => {
-      if (r && r.forbidden) alert("只能删除自己的批注");
+  function commitDraft() {
+    const draft = document.querySelector(".draft-card");
+    if (!draft || !_pendingSelector) return;
+    const comment = draft.querySelector(".draft-input").value;
+    sendToContent({
+      type: "commit-comment",
+      selector: _pendingSelector.selector,
+      quote: _pendingSelector.quote,
+      comment: comment || "",
     });
+    _pendingSelector = null;
+    draft.remove();
+  }
+
+  function cancelDraft() {
+    const draft = document.querySelector(".draft-card");
+    if (draft) draft.remove();
+    _pendingSelector = null;
+  }
+
+  // === 回复:卡片内联编辑器(替代浏览器 prompt)===
+  function doReply(parent, card) {
+    card.querySelectorAll(".reply-editor, .delete-confirm").forEach((e) => e.remove());
+    document.querySelectorAll(".reply-editor").forEach((e) => e.remove()); // 关掉别处已开的
+    const editor = document.createElement("div");
+    editor.className = "reply-editor";
+    editor.innerHTML =
+      '<textarea placeholder="回复…(Enter 保存 · Shift+Enter 换行)" rows="2"></textarea>' +
+      '<div class="draft-acts"><button class="reply-cancel">取消</button><button class="reply-save">保存</button></div>';
+    card.appendChild(editor);
+    const ta = editor.querySelector("textarea");
+    window.focus();
+    ta.focus();
+    const submit = () => {
+      sendToContent({ type: "reply", parentId: parent.id, comment: ta.value || "" });
+      editor.remove();
+    };
+    editor.querySelector(".reply-save").addEventListener("click", submit);
+    editor.querySelector(".reply-cancel").addEventListener("click", () => editor.remove());
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+      if (e.key === "Escape") { e.preventDefault(); editor.remove(); }
+    });
+  }
+
+  // === 删除:卡片内联确认(替代浏览器 confirm)===
+  function doDelete(ann, card) {
+    card.querySelectorAll(".reply-editor, .delete-confirm").forEach((e) => e.remove());
+    const conf = document.createElement("div");
+    conf.className = "delete-confirm";
+    conf.innerHTML = '<span>删除这条?回复一并删除。</span><button class="del-cancel">取消</button><button class="del-ok">确认删除</button>';
+    card.appendChild(conf);
+    conf.querySelector(".del-ok").addEventListener("click", () => {
+      sendToContent({ type: "delete-annotation", id: ann.id }).then((r) => {
+        if (r && r.forbidden) showToast("只能删除自己的批注");
+      });
+      conf.remove();
+    });
+    conf.querySelector(".del-cancel").addEventListener("click", () => conf.remove());
+  }
+
+  function showToast(msg) {
+    let t = document.querySelector(".toast");
+    if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.appendChild(t); }
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => t.classList.remove("show"), 2000);
   }
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
-
-  // Fix #5: 评论里的 URL 转链接。先转义再插 <a>,故无 XSS 风险。
   function linkify(text) {
     const safe = esc(text);
     return safe.replace(/https?:\/\/[^\s<]+/g, (u) => '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>');
@@ -130,7 +200,7 @@
     sendToContent({ type: "get-export" }).then((resp) => {
       if (resp && resp.type === "export-data") {
         const items = resp.items || [];
-        if (!items.length) { alert("暂无批注"); return; }
+        if (!items.length) { showToast("暂无批注"); return; }
         const prompt = (window.BuildPrompt ? BuildPrompt.fromAnnotations(items) : "");
         navigator.clipboard.writeText(prompt).then(() => {
           const btn = document.getElementById("export-btn");
@@ -150,50 +220,8 @@
       sendToContent({ type: "disable-edit" });
       _editing = false;
     }
-    renderMode(); // 文案/指示由 _editing 统一驱动
+    renderMode();
   });
-
-  // === 协同配置(token+用户)+ presence 展示 (T11) ===
-  const CFG_KEYS = ["mode", "backend", "team_token", "user"];
-
-  function toggleCfgFields() {
-    const synced = document.getElementById("cfg-mode").value === "synced";
-    ["cfg-backend", "cfg-token", "cfg-username"].forEach((id) => {
-      document.getElementById(id).hidden = !synced;
-    });
-  }
-
-  function loadCfg() {
-    chrome.storage.sync.get(CFG_KEYS, (c) => {
-      document.getElementById("cfg-mode").value = c.mode || "local";
-      document.getElementById("cfg-backend").value = c.backend || "";
-      document.getElementById("cfg-token").value = c.team_token || "";
-      document.getElementById("cfg-username").value = (c.user && c.user.name) || "";
-      toggleCfgFields();
-    });
-  }
-
-  function saveCfg() {
-    // 先读旧 user.id,保留稳定身份(避免每次保存变 id)
-    chrome.storage.sync.get(["user"], (cur) => {
-      const oldId = cur.user && cur.user.id;
-      const cfg = {
-        mode: document.getElementById("cfg-mode").value,
-        backend: document.getElementById("cfg-backend").value.trim(),
-        team_token: document.getElementById("cfg-token").value.trim(),
-        user: {
-          id: oldId || ("u_" + Math.random().toString(36).slice(2, 8)),
-          name: document.getElementById("cfg-username").value.trim() || "匿名",
-        },
-      };
-      chrome.storage.sync.set(cfg, () => {
-        const btn = document.getElementById("cfg-save");
-        btn.textContent = "已保存 ✓";
-        setTimeout(() => (btn.textContent = "保存配置"), 1500);
-        alert("刷新页面生效");
-      });
-    });
-  }
 
   function renderPresence(users) {
     const el = document.getElementById("presence");
@@ -201,17 +229,13 @@
     el.textContent = "在线: " + users.map((u) => u.name || u.id).join(", ");
   }
 
-  document.getElementById("cfg-mode").addEventListener("change", toggleCfgFields);
-  document.getElementById("cfg-save").addEventListener("click", saveCfg);
-
-  // 初始化:请求批注列表 + 加载配置
+  // 初始化
   sendToContent({ type: "get-annotations" }).then((resp) => {
     if (resp && resp.type === "annotations-list") {
       isLocal = resp.isLocal;
-      _editing = !!resp.editing; // Fix #3: 初始即同步页面编辑态(刷新后为查看)
+      _editing = !!resp.editing;
       renderMode();
       renderCards(resp.items);
     }
   });
-  loadCfg();
 })();
