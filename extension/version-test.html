@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>version-test</title>
+</head>
+<body>
+  <div id="content">原文</div>
+  <!-- 与 content-script.js 同源的 capture/apply 小工具(此处复制以独立验证契约) -->
+  <script>
+    function captureBodyForSave() {
+      var clone = document.body.cloneNode(true);
+      clone.querySelectorAll("#hg-toolbar, .hg-hl").forEach(function (el) { el.remove(); });
+      return clone.innerHTML;
+    }
+    function applyRestoredBody(html) {
+      var tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      var toolbar = document.getElementById("hg-toolbar");
+      document.body.innerHTML = "";
+      while (tmp.firstChild) document.body.appendChild(tmp.firstChild);
+      if (toolbar) document.body.appendChild(toolbar); // 同一节点挂回,保留监听
+    }
+  </script>
+  <script src="storage.js"></script>
+  <script>
+    (async function () {
+      try {
+        // === 1. LocalStore 往返:saveVersion -> listVersions 保持 html_content ===
+        var docId = "test://version-roundtrip";
+        var saved = '<div id="content">编辑后 DEF <b>粗</b></div>';
+        await Storage.saveVersion(docId, saved);
+        var vs = await Storage.listVersions(docId);
+        if (!vs || !vs.length) throw new Error("listVersions 空");
+        var last = vs[vs.length - 1]; // 升序,末尾=最新
+        if (last.html_content !== saved)
+          throw new Error("往返不一致: " + JSON.stringify(last.html_content));
+
+        // === 2. captureBodyForSave:剥离扩展 chrome,保留正文 ===
+        document.body.innerHTML =
+          '<div id="content">编辑后 DEF</div>' +
+          '<div id="hg-toolbar"></div>' +   // 扩展工具栏
+          '<div class="hg-hl"></div>';       // 扩展 overlay
+        var cleaned = captureBodyForSave();
+        if (cleaned.indexOf("hg-toolbar") !== -1) throw new Error("capture 未去 toolbar: " + cleaned);
+        if (cleaned.indexOf("hg-hl") !== -1) throw new Error("capture 未去 overlay: " + cleaned);
+        if (cleaned.indexOf("编辑后 DEF") === -1) throw new Error("capture 丢了正文: " + cleaned);
+
+        // === 3. applyRestoredBody:重建正文 + 保留原 toolbar 节点 + 无重复 ===
+        // 模拟 content-script 已建的 toolbar(带标记,验证"同一节点被保留")
+        document.body.innerHTML = '<div id="content">原始页面</div>';
+        var tb = document.createElement("div");
+        tb.id = "hg-toolbar";
+        tb.dataset.kept = "yes";
+        document.body.appendChild(tb);
+        applyRestoredBody(cleaned);
+        var restoredContent = document.querySelector("#content");
+        if (!restoredContent || restoredContent.textContent !== "编辑后 DEF")
+          throw new Error("还原后正文不对: " + document.body.innerHTML);
+        var restoredTb = document.getElementById("hg-toolbar");
+        if (!restoredTb || restoredTb.dataset.kept !== "yes")
+          throw new Error("还原丢失了原 toolbar 节点(监听会失效): " + document.body.innerHTML);
+        var tbCount = document.querySelectorAll("#hg-toolbar").length;
+        if (tbCount !== 1) throw new Error("还原后 toolbar 出现 " + tbCount + " 个(应唯一)");
+
+        // === 4. 撤销周期:snapshot(clean) -> 改动 -> 还原 -> 正文回退 + 同一 toolbar 节点保留 ===
+        // 复刻 pushUndo(存 clean 快照) + doUndo(applyRestoredBody 还原) 的契约:
+        // 关键是撤销后 toolbar 必须仍是原节点(否则点击监听全失效)。
+        document.body.innerHTML = '<div id="content">第一版</div>';
+        var tb2 = document.createElement("div");
+        tb2.id = "hg-toolbar";
+        tb2.dataset.kept = "2";
+        document.body.appendChild(tb2);
+        var snapshot = captureBodyForSave(); // 模拟 pushUndo
+        document.querySelector("#content").textContent = "第二版(继续编辑)";
+        applyRestoredBody(snapshot); // 模拟 doUndo
+        var afterContent = document.querySelector("#content");
+        if (!afterContent || afterContent.textContent !== "第一版")
+          throw new Error("撤销未回退到快照: " + document.body.innerHTML);
+        var afterTb = document.getElementById("hg-toolbar");
+        if (!afterTb || afterTb.dataset.kept !== "2")
+          throw new Error("撤销后 toolbar 不是原节点(监听会丢): " + document.body.innerHTML);
+        if (document.querySelectorAll("#hg-toolbar").length !== 1)
+          throw new Error("撤销后 toolbar 数量异常");
+
+        document.title = "PASS";
+      } catch (e) {
+        document.title = "FAIL: " + (e && e.message ? e.message : e);
+      }
+    })();
+  </script>
+</body>
+</html>

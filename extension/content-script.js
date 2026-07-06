@@ -313,13 +313,13 @@
     let undoDebounce = 0;
 
     function pushUndo() {
-      undoStack.push(document.body.innerHTML);
+      undoStack.push(captureBodyForSave()); // clean 快照(无 toolbar/overlay),撤销时才保得住工具栏
       if (undoStack.length > MAX_UNDO) undoStack.shift();
     }
 
     function doUndo() {
       if (!undoStack.length) return;
-      document.body.innerHTML = undoStack.pop();
+      applyRestoredBody(undoStack.pop()); // 重建正文 + 保留同一 toolbar 节点(监听不丢)
       if (_editing) document.body.contentEditable = "true"; // Fix #2: undo 后保持编辑态
       loadAnnotations();
     }
@@ -338,8 +338,9 @@
       clearTimeout(versionTimer);
       versionTimer = setTimeout(async () => {
         const docId = await Storage.getDocumentId();
-        const html = document.documentElement.outerHTML;
-        await Storage.saveVersion(docId, html);
+        // 只存正文,剥离扩展注入的 toolbar/overlay,避免还原时重复或错位
+        const html = captureBodyForSave();
+        try { await Storage.saveVersion(docId, html); } catch (e) { /* 存失败不阻塞编辑 */ }
       }, 1500);
     });
 
@@ -370,7 +371,38 @@
     reanchorTimer = setTimeout(() => { loadAnnotations(); }, 300);
   });
 
+  // === 本地模式:版本还原(本地文件无法写回磁盘,靠 IndexedDB 保存的正文版本恢复)===
+  function captureBodyForSave() {
+    // 克隆 body,剥离扩展注入的 toolbar 与 overlay,只留用户正文
+    const clone = document.body.cloneNode(true);
+    clone.querySelectorAll("#hg-toolbar, .hg-hl").forEach((el) => el.remove());
+    return clone.innerHTML;
+  }
+  function applyRestoredBody(html) {
+    // 用保存的正文重建 body;同一 toolbar 节点重新挂回(保留其事件监听,不产生重复)
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html;
+    const toolbar = document.getElementById("hg-toolbar");
+    document.body.innerHTML = "";
+    while (tmp.firstChild) document.body.appendChild(tmp.firstChild);
+    if (toolbar) document.body.appendChild(toolbar);
+  }
+  async function restoreLatestVersion() {
+    if (!isLocal) return;
+    try {
+      const docId = await Storage.getDocumentId();
+      const vs = await Storage.listVersions(docId);
+      if (vs && vs.length) {
+        const html = vs[vs.length - 1].html_content; // 升序,末尾=最新
+        if (html) applyRestoredBody(html);
+      }
+    } catch (e) { /* IndexedDB 读失败不阻塞批注功能 */ }
+  }
+
   // === 初始化 ===
-  loadAnnotations();
+  (async () => {
+    await restoreLatestVersion(); // 本地:先还原上次编辑(保留 toolbar 节点),再渲染批注
+    await loadAnnotations();
+  })();
   console.log("htmlGenius v0.4 ready, mode:", isLocal ? "local" : "remote(readonly)", "starts in view");
 })();

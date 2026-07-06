@@ -23,6 +23,7 @@ NAMES = [
     "apply-delta-test.html",
     "buildprompt-test.html",
     "sync-test.html",
+    "version-test.html",
 ]
 
 
