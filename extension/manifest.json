@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "htmlGenius",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "HTML 划词批注 + 实时编辑 + 一键回灌",
   "permissions": ["activeTab", "sidePanel", "storage"],
   "side_panel": { "default_path": "sidepanel.html" },
