@@ -27,6 +27,7 @@
       sendToContent({ type: "get-annotations" }).then((resp) => {
         if (resp && resp.type === "annotations-list") {
           isLocal = resp.isLocal;
+          _editing = !!resp.editing; // Fix #3: 以页面实际编辑态为准(刷新后复位为查看)
           renderMode();
           renderCards(resp.items);
         }
@@ -41,10 +42,17 @@
 
   function renderMode() {
     const el = document.getElementById("mode-indicator");
-    el.textContent = isLocal ? "\u{1F4CD} 本地文档(可编辑)" : "\u{1F310} 远程网页(只读批注)";
+    const btn = document.getElementById("edit-btn");
+    btn.hidden = false;  // 始终可见(toggle)
+    // Fix #3/#2: 按钮文案始终由 _editing(页面真相源)决定,避免与页面漂移。
+    if (_editing) {
+      el.textContent = "\u{1F4DD} 编辑模式";
+      btn.textContent = "切换查看模式";
+    } else {
+      el.textContent = isLocal ? "\u{1F4CD} 本地文档(可编辑)" : "\u{1F310} 远程网页(只读批注)";
+      btn.textContent = "切换编辑模式";
+    }
     el.className = isLocal ? "local" : "remote";
-    document.getElementById("edit-btn").hidden = false;  // 始终可见(toggle)
-    if (!_editing) document.getElementById("edit-btn").textContent = "切换编辑模式";
   }
 
   function renderCards(items) {
@@ -67,7 +75,8 @@
       const quote = (ann.quote || "").slice(0, 60);
       const comment = (ann.body && ann.body.comment) || "(无评论)";
       const who = (ann.author && ann.author.name) ? "[" + ann.author.name + "]" : "";
-      card.innerHTML = '<div class="quote">' + esc(quote) + '</div><div>' + esc(who + " " + comment) + '</div>';
+      // Fix #5: who/quote 仍转义;comment 走 linkify(先转义再包 <a>),URL 可点。
+      card.innerHTML = '<div class="quote">' + esc(quote) + '</div><div>' + esc(who + " ") + linkify(comment) + '</div>';
       // hover 动作条
       const acts = document.createElement("div");
       acts.className = "card-acts";
@@ -110,6 +119,12 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
 
+  // Fix #5: 评论里的 URL 转链接。先转义再插 <a>,故无 XSS 风险。
+  function linkify(text) {
+    const safe = esc(text);
+    return safe.replace(/https?:\/\/[^\s<]+/g, (u) => '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>');
+  }
+
   document.getElementById("export-btn").addEventListener("click", () => {
     sendToContent({ type: "get-export" }).then((resp) => {
       if (resp && resp.type === "export-data") {
@@ -130,14 +145,11 @@
       if (!isLocal && !confirm("⚠ 编辑仅本地临时修改,刷新或关闭页面后丢失,无法保存回原网页。\n\n进入编辑模式?")) return;
       sendToContent({ type: "enable-edit" });
       _editing = true;
-      document.getElementById("edit-btn").textContent = "切换查看模式";
-      document.getElementById("mode-indicator").textContent = "\u{1F4DD} 编辑模式";
     } else {
       sendToContent({ type: "disable-edit" });
       _editing = false;
-      document.getElementById("edit-btn").textContent = "切换编辑模式";
-      renderMode();
     }
+    renderMode(); // 文案/指示由 _editing 统一驱动
   });
 
   // === 协同配置(token+用户)+ presence 展示 (T11) ===
@@ -195,6 +207,7 @@
   sendToContent({ type: "get-annotations" }).then((resp) => {
     if (resp && resp.type === "annotations-list") {
       isLocal = resp.isLocal;
+      _editing = !!resp.editing; // Fix #3: 初始即同步页面编辑态(刷新后为查看)
       renderMode();
       renderCards(resp.items);
     }

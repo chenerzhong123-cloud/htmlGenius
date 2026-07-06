@@ -16,3 +16,5 @@ button { padding: 4px 12px; border: 0; border-radius: 4px; cursor: pointer; font
 .card-acts { display: none; margin-top: 4px; }
 .card:hover .card-acts { display: inline; }
 .card-acts button { margin-right: 4px; }
+.card a { color:#0969da; text-decoration:underline; }
+.card a:hover { opacity:.8; }

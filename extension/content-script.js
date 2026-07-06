@@ -9,19 +9,26 @@
   // 无配置或 mode 为 local/unset → 走 LocalStore(零回归)。
   let _cfg = { mode: "local" };
   let _sync = null;
-
-  if (chrome.storage && chrome.storage.sync) {
-    chrome.storage.sync.get(
-      ["mode", "backend", "team_token", "user"],
-      (c) => {
-        _cfg = Object.assign({}, _cfg, c || {});
-        if (_cfg.mode === "synced") {
-          Storage.configure(_cfg); // 切到 RemoteStore
-          startSync();
+  // Fix #4: cfg 读取异步,但 createAnnotation/reply 必须在 _cfg.user 就绪后才能保存
+  // (否则 RemoteStore 用默认 X-User-Id: u_self → author.id 与 sidepanel 的 cfg.user.id 不匹配 → 无删除按钮)。
+  // 用 Promise 让保存路径 await 它。
+  const cfgReady = new Promise((resolve) => {
+    if (chrome.storage && chrome.storage.sync) {
+      chrome.storage.sync.get(
+        ["mode", "backend", "team_token", "user"],
+        (c) => {
+          _cfg = Object.assign({}, _cfg, c || {});
+          if (_cfg.mode === "synced") {
+            Storage.configure(_cfg); // 切到 RemoteStore
+            startSync();
+          }
+          resolve(_cfg);
         }
-      }
-    );
-  }
+      );
+    } else {
+      resolve(_cfg);
+    }
+  });
 
   // applyRemoteChange:把 delta 应用到 window.__hgAnnotations(纯 Sync.applyDelta)
   // 再调 loadAnnotations() 重渲染 overlay(读 Storage 全量 + anchor)。
@@ -63,6 +70,12 @@
   // === 双模式判断 ===
   const isLocal = ["file:", "data:", "blob:"].includes(location.protocol)
     || ["localhost", "127.0.0.1", "0.0.0.0"].includes(location.hostname);
+
+  // Fix #3/#2: content-script 是编辑态的唯一真相源,sidepanel 经 get-annotations 同步。
+  // 页面始终以「查看」模式启动(含刷新);进入编辑需显式 enable-edit。
+  let _editing = false;
+  // Fix #1: 编辑输入后延迟重锚定 overlay 高亮。
+  let reanchorTimer = 0;
 
   // === 注入样式 ===
   const style = document.createElement("style");
@@ -125,7 +138,7 @@
   // side panel → content script: chrome.tabs.sendMessage
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === "get-annotations") {
-      sendResponse({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal });
+      sendResponse({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing });
     } else if (msg.type === "scroll-to") {
       const ann = (window.__hgAnnotations || []).find((a) => a.id === msg.id);
       if (ann) {
@@ -134,10 +147,10 @@
       }
       sendResponse({ ok: true });
     } else if (msg.type === "enable-edit") {
-      document.body.contentEditable = "true";
+      document.body.contentEditable = "true"; _editing = true;
       sendResponse({ ok: true });
     } else if (msg.type === "disable-edit") {
-      document.body.contentEditable = "false";
+      document.body.contentEditable = "false"; _editing = false;
       sendResponse({ ok: true });
     } else if (msg.type === "get-export") {
       sendResponse({ type: "export-data", items: window.__hgAnnotations || [] });
@@ -145,7 +158,8 @@
       // 复用父批注的 selector 上下文(回复无独立选区)
       const parent = (window.__hgAnnotations || []).find((a) => a.id === msg.parentId);
       const sel = (parent && parent.selector) || { type: "TextQuoteSelector", exact: (parent && parent.quote) || "" };
-      Storage.getDocumentId().then((docId) =>
+      // Fix #4: 等 _cfg.user 就绪,保证 X-User-Id 正确 → author.id 与 sidepanel 一致。
+      cfgReady.then(() => Storage.getDocumentId()).then((docId) =>
         Storage.saveAnnotation({
           document_id: docId,
           selector: sel,
@@ -194,6 +208,7 @@
     const selector = describe(range, document.body);
     if (!selector || !selector.exact) return;
     const comment = prompt("批注评论(可空):") || "";
+    await cfgReady; // Fix #4: 确保 _cfg.user.id 就绪,RemoteStore 才会带正确的 X-User-Id。
     const docId = await Storage.getDocumentId();
     await Storage.saveAnnotation({
       document_id: docId, selector, quote: selector.exact,
@@ -295,6 +310,7 @@
     function doUndo() {
       if (!undoStack.length) return;
       document.body.innerHTML = undoStack.pop();
+      if (_editing) document.body.contentEditable = "true"; // Fix #2: undo 后保持编辑态
       loadAnnotations();
     }
 
@@ -336,8 +352,15 @@
     });
   }
 
+  // Fix #1: body 被编辑时(任意模式),延迟重锚定 overlay 高亮,使其跟随文字移动。
+  // 放在 isLocal 块之外 —— 远程页若也开了 contentEditable 同样生效。与上面的
+  // undo/version input 监听互不冲突(两者都可触发)。
+  document.body.addEventListener("input", () => {
+    if (reanchorTimer) clearTimeout(reanchorTimer);
+    reanchorTimer = setTimeout(() => { loadAnnotations(); }, 300);
+  });
+
   // === 初始化 ===
   loadAnnotations();
-  if (isLocal) document.body.contentEditable = "true";
-  console.log("htmlGenius v0.3.1 ready, mode:", isLocal ? "local(editable)" : "remote(readonly)");
+  console.log("htmlGenius v0.4 ready, mode:", isLocal ? "local" : "remote(readonly)", "starts in view");
 })();
