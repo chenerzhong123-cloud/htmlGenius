@@ -18,25 +18,35 @@ uv run uvicorn server.app:app --port 8000 --reload
 ## 测试
 
 ```bash
-uv run pytest -v          # 全量 69 项（Python 3.9）
+uv run pytest -v          # 全量 87 项（Python 3.9）
 ```
 
-覆盖：健康检查 / 数据模型 / SQLite 存储 / HTTP API / 定位算法 / 端到端重定位 / UI e2e / 编辑器·工具栏·序列化·sanitize / 版本管理 / v0.4 协同（schema 迁移 · team token 鉴权 · SSE 房间 · 写后广播 · presence GC · 仅作者删除级联）。
+覆盖：健康检查 / 数据模型 / SQLite 存储 / HTTP API / 定位算法 / 端到端重定位 / UI e2e / 编辑器·工具栏·序列化·sanitize / 版本管理 / v0.4 协同（schema 迁移 · SSE 房间 · 写后广播 · presence GC · 仅作者删除级联）/ v0.5 飞书 OAuth（sessions · lark 客户端 · require_session · /auth 端点 · 硬身份作者）。
 
 ## 架构（骨架决策）
 
 - **S1** 标准 selector · **S2** 批注与版本解耦 · **S3** 非侵入 overlay · **S4** 统一 payload · **S5** sink 抽象（导出 sink 已实现）· **S6** 存储留字段。
 - 分层：`存储层(SQLite)` → `定位引擎(text-quote anchoring)` → `批注运行时(overlay)` → `回灌层(sink)` → `宿主(FastAPI)`。
 
-## 多人协同后端
+## 多人协同后端（v0.5：飞书 OAuth + session）
 
 ```bash
-HG_TEAMS='{"tok_alpha_a3f9b2e7":"team_alpha"}' uv run uvicorn server.app:app --port 8000 --reload
+HG_LARK_APP_ID=cli_xxx HG_LARK_APP_SECRET=sec_xxx \
+HG_AUTH_ALLOW_DEV=1 \
+uv run uvicorn server.app:app --port 8000 --reload
 ```
 
-`HG_TEAMS` 是 JSON map：**键 = 团队 token（随机串），值 = team_id**；多团队逗号分隔。不配或 JSON 非法 → 所有需鉴权接口 401。所有数据自存自管（SQLite 文件），不依赖任何第三方 SaaS。
+| env | 用途 | 默认 |
+|---|---|---|
+| `HG_LARK_APP_ID` / `HG_LARK_APP_SECRET` | 飞书自建应用凭据（真 OAuth 必填） | — |
+| `HG_DEFAULT_TEAM` | `tenant_key` 缺失时的 team_id 回退（单组织=单团队） | `"default"` |
+| `HG_AUTH_ALLOW_DEV` | 开放 `/auth/dev-login` 旁路（本地开发/测试，**生产必须 `0`**） | `"0"` |
+| `HG_SESSION_TTL` | session 有效期（秒） | `604800`（7 天） |
+| `HG_LARK_BASE` | 飞书 API 域名（国际版 Larksuite 改之） | `https://open.feishu.cn` |
 
-完整部署（Nginx SSE 关 buffering、HTTP/2、`HG_TEAMS` 环境文件、manifest `host_permissions`、稳定 URL 约束、集成验收矩阵、常见坑）：见 [`docs/2026-07-05-v0.4-deploy.md`](docs/2026-07-05-v0.4-deploy.md)。
+鉴权：扩展走 `chrome.identity.launchWebAuthFlow` → `/auth/lark/login` → 飞书授权 → `/auth/lark/callback` 换 session token；后续请求带 `Authorization: Bearer <session_token>`。批注 author = 飞书 `open_id`（后端 session 注入，硬身份）。所有数据自存自管（SQLite），不用 SaaS。
+
+完整部署（Nginx SSE 关 buffering、HTTP/2、env 文件、manifest `host_permissions`、飞书后台重定向 URI、稳定 URL 约束、集成验收矩阵、常见坑）：见 [`docs/2026-07-05-v0.4-deploy.md`](docs/2026-07-05-v0.4-deploy.md)（含 v0.5 补充）。
 
 ### 稳定 URL 约束（跨版本 re-anchor 的前提）
 
@@ -44,7 +54,8 @@ HG_TEAMS='{"tok_alpha_a3f9b2e7":"team_alpha"}' uv run uvicorn server.app:app --p
 
 ## 已知技术边界
 
-- **仅作者删除为软约束**：team-token 鉴权下，「仅作者」靠 header 里的用户名，不是强身份——拿到 token 的人可伪造任意作者名强行删（后端无法区分）。硬化成硬约束需上 OAuth/飞书鉴权（下一阶段）。
+- **仅作者删除为硬约束（v0.5 起）**：author = 飞书 `open_id`，由后端 session 注入；删除校验 `session.open_id`，不可伪造。
+- **飞书 authen 端点版本**：实现采用 v1 `/authen/v1/authorize` + `/authen/v1/access_token`；飞书另有 v2 端点，若 v1 不可用改 `server/lark.py` 端点字符串即可（流程不变）。
 - **严格 CSP 第三方站点回退轮询**：content-script 里直接跑 `EventSource` 连后端，若被批注页面下发了严格的 `Content-Security-Policy: connect-src`，SSE 会被页面 CSP 拦下；此时退化为定时 `GET /api/annotations` 轮询对账（数据不丢，只是不实时）。MV3 `host_permissions` 只控扩展自己的跨域权限，管不到页面 CSP。
 - **EventSource 在 content-script**：SSE 连接随页面生命周期，关标签即断（`bye` 心跳负责 presence 移除）。
 - **RangeSelector 未实现**：选区跨多个块级元素时，exact 会被压成单段。
@@ -52,9 +63,10 @@ HG_TEAMS='{"tok_alpha_a3f9b2e7":"team_alpha"}' uv run uvicorn server.app:app --p
 
 ## 路线图
 
-- **强身份鉴权**：飞书 OAuth 替换 team-token（硬化仅作者删除），随后开放协同入口。
+- ~~强身份鉴权：飞书 OAuth 替换 team-token~~（v0.5 已完成）。
 - **群组管理 UI**：团队 / 成员 / 分享链接的可视化配置。
-- **Postgres + Yjs**：从 SSE 增量推送升级到 CRDT 实时协同编辑。
+- **CRDT 实时协同编辑**：从 SSE 增量推送升级到 Postgres + Yjs。
+- **登录态热切换**：登录后免刷新即接入协同（当前需刷新页面）。
 
 ## 设计与实现计划
 
@@ -65,4 +77,5 @@ HG_TEAMS='{"tok_alpha_a3f9b2e7":"team_alpha"}' uv run uvicorn server.app:app --p
 | v0.3 | [`docs/2026-06-30-v0.3-chrome-extension-design.md`](docs/2026-06-30-v0.3-chrome-extension-design.md) | [`docs/2026-06-30-v0.3-chrome-extension-plan.md`](docs/2026-06-30-v0.3-chrome-extension-plan.md) |
 | v0.4 | [`docs/2026-07-05-v0.4-plugin-collab-design.md`](docs/2026-07-05-v0.4-plugin-collab-design.md) | [`docs/2026-07-05-v0.4-plugin-collab-plan.md`](docs/2026-07-05-v0.4-plugin-collab-plan.md) |
 | v0.4.1 | [`docs/2026-07-06-v0.4.1-ui-redesign-design.md`](docs/2026-07-06-v0.4.1-ui-redesign-design.md) | — |
+| v0.5 | [`docs/2026-07-06-v0.5-lark-oauth-design.md`](docs/2026-07-06-v0.5-lark-oauth-design.md) | [`docs/2026-07-06-v0.5-lark-oauth-plan.md`](docs/2026-07-06-v0.5-lark-oauth-plan.md) |
 | v0.4 部署 | — | [`docs/2026-07-05-v0.4-deploy.md`](docs/2026-07-05-v0.4-deploy.md) |
