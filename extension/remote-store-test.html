@@ -9,13 +9,12 @@ remote-store test
   try {
     if (!window.RemoteStore) throw new Error("RemoteStore 未定义");
     // RemoteStore 纯函数:request 构造与响应解析(不发真实请求)
-    const cfg = { backend: "https://h.example", team_token: "tok", user: { id: "u1", name: "A" } };
+    const cfg = { backend: "https://h.example", session_token: "tok" };
     const req = RemoteStore.buildCreateRequest(cfg, "doc_x",
       { selector: { exact: "hi" }, quote: "hi", body: { comment: "c" } });
     if (req.url !== "https://h.example/api/annotations") throw new Error("url 期望 https://h.example/api/annotations 实际 " + req.url);
     if (req.headers["Authorization"] !== "Bearer tok") throw new Error("auth header");
-    if (req.headers["X-User-Id"] !== "u1") throw new Error("X-User-Id header");
-    if (req.headers["X-User-Name"] !== "A") throw new Error("X-User-Name header");
+    if (req.headers["X-User-Id"] !== undefined) throw new Error("不应再发 X-User-Id(v0.5 author 由 session 注入)");
     if (req.headers["Content-Type"] !== "application/json") throw new Error("Content-Type header");
     if (req.body.document_id !== "doc_x") throw new Error("body.document_id");
     if (req.body.quote !== "hi") throw new Error("body.quote");

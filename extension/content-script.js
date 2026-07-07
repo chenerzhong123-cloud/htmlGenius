@@ -9,13 +9,11 @@
   // 无配置或 mode 为 local/unset → 走 LocalStore(零回归)。
   let _cfg = { mode: "local" };
   let _sync = null;
-  // Fix #4: cfg 读取异步,但 createAnnotation/reply 必须在 _cfg.user 就绪后才能保存
-  // (否则 RemoteStore 用默认 X-User-Id: u_self → author.id 与 sidepanel 的 cfg.user.id 不匹配 → 无删除按钮)。
-  // 用 Promise 让保存路径 await 它。
+  // cfg 读取异步;协同模式下保存批注需等 _cfg.session_token 就绪(RemoteStore 用它做 Authorization)。
   const cfgReady = new Promise((resolve) => {
     if (chrome.storage && chrome.storage.sync) {
       chrome.storage.sync.get(
-        ["mode", "backend", "team_token", "user"],
+        ["mode", "backend", "session_token", "user"],
         (c) => {
           _cfg = Object.assign({}, _cfg, c || {});
           if (_cfg.mode === "synced") {
@@ -48,7 +46,7 @@
     Storage.getDocumentId().then((docId) => {
       _sync = window.Sync.start({
         backend: _cfg.backend,
-        team_token: _cfg.team_token,
+        session_token: _cfg.session_token,
         docId,
         user: _cfg.user,
         onCreate: (ann) => applyRemoteChange({ op: "create", annotation: ann }),

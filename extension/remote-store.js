@@ -9,11 +9,9 @@ window.RemoteStore = (function () {
   "use strict";
 
   function authHeaders(cfg) {
-    const user = cfg.user || {};
+    // v0.5: 只发 session token;author 由后端从 session 注入(不再带 X-User 头)
     return {
-      "Authorization": "Bearer " + cfg.team_token,
-      "X-User-Id": user.id || "u_self",
-      "X-User-Name": user.name || "作者",
+      "Authorization": "Bearer " + cfg.session_token,
       "Content-Type": "application/json",
     };
   }

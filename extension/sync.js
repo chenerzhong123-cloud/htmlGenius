@@ -60,7 +60,7 @@ window.Sync = (function () {
   function start(opts) {
     opts = opts || {};
     var backend = opts.backend || "";
-    var teamToken = opts.team_token || "";
+    var sessionToken = opts.session_token || "";
     var docId = opts.docId || "";
     var user = opts.user || {};
     var onCreate = opts.onCreate || null;
@@ -75,7 +75,7 @@ window.Sync = (function () {
       "/api/stream?doc=" +
       encodeURIComponent(docId) +
       "&token=" +
-      encodeURIComponent(teamToken);
+      encodeURIComponent(sessionToken);
 
     var es = new EventSource(url);
     var hbTimer = null;
@@ -90,10 +90,8 @@ window.Sync = (function () {
       return fetch(backend + "/api/presence", {
         method: "POST",
         headers: {
-          Authorization: "Bearer " + teamToken,
+          Authorization: "Bearer " + sessionToken,
           "Content-Type": "application/json",
-          "X-User-Id": user.id || "",
-          "X-User-Name": user.name || "",
         },
         body: body,
       }).catch(function () {
@@ -173,7 +171,7 @@ window.Sync = (function () {
           fetch(backend + "/api/presence", {
             method: "POST",
             headers: {
-              Authorization: "Bearer " + teamToken,
+              Authorization: "Bearer " + sessionToken,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ doc: docId, user: user, op: "bye" }),
