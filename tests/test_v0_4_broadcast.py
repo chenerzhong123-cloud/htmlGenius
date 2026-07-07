@@ -7,6 +7,8 @@ httpx.ASGITransport 不向 StreamingResponse 推送增量 body —— 已在 Tas
 ``asyncio.wait_for(q.get())`` 取出并断言 event/data。这精确证明了端点以
 正确的 (team, doc, event, payload) 调用广播,而 SSE 线缆的真实投递留给
 T8(插件)与 T14(手测)。
+
+v0.5: 鉴权改 session token。author 来自 session.open_id。
 """
 import asyncio
 import threading
@@ -14,7 +16,7 @@ import threading
 import httpx
 
 from server.app import app
-from server import storage
+from server import sessions, storage
 from server.models import AnnotationCreate, DocumentCreate, TextQuoteSelector
 from server.sse import rooms
 
@@ -50,17 +52,15 @@ def _run(coro):
 
 
 def _init(tmp_path, monkeypatch):
-    monkeypatch.setenv("HG_TEAMS", '{"tok_a":"team_a","tok_b":"team_b"}')
+    """建库 + 返回 team_a / open_id=u1 的鉴权头。"""
     storage.init_db(tmp_path / "b.db")
     storage.register_document(DocumentCreate(document_id="doc_x"))
-
-
-H_AUTH = {"Authorization": "Bearer tok_a", "X-User-Id": "u1", "X-User-Name": "u1name"}
+    return {"Authorization": "Bearer " + sessions.create_session("u1", "u1name", "team_a")}
 
 
 def test_post_triggers_created_broadcast(tmp_path, monkeypatch):
     """POST /api/annotations 后,doc_x 房间队列收到 annotation:created(完整批注)。"""
-    _init(tmp_path, monkeypatch)
+    H = _init(tmp_path, monkeypatch)
     transport = httpx.ASGITransport(app=app)
 
     async def run():
@@ -74,7 +74,7 @@ def test_post_triggers_created_broadcast(tmp_path, monkeypatch):
                         "selector": {"type": "TextQuoteSelector", "exact": "hi"},
                         "quote": "hi",
                     },
-                    headers=H_AUTH,
+                    headers=H,
                 )
                 assert r.status_code == 200, r.text
                 ann = r.json()
@@ -92,7 +92,7 @@ def test_post_triggers_created_broadcast(tmp_path, monkeypatch):
 
 def test_post_does_not_leak_to_other_team(tmp_path, monkeypatch):
     """team_a 的 POST 不应投递到 (team_b, doc_x) 房间。"""
-    _init(tmp_path, monkeypatch)
+    H = _init(tmp_path, monkeypatch)
     transport = httpx.ASGITransport(app=app)
 
     async def run():
@@ -106,7 +106,7 @@ def test_post_does_not_leak_to_other_team(tmp_path, monkeypatch):
                         "selector": {"type": "TextQuoteSelector", "exact": "hi"},
                         "quote": "hi",
                     },
-                    headers=H_AUTH,
+                    headers=H,
                 )
             try:
                 msg = await asyncio.wait_for(q_b.get(), timeout=0.3)
@@ -121,7 +121,7 @@ def test_post_does_not_leak_to_other_team(tmp_path, monkeypatch):
 
 def test_post_does_not_leak_to_other_doc(tmp_path, monkeypatch):
     """同一 team 下 doc_x 的广播不应投递到 (team_a, doc_other) 房间。"""
-    _init(tmp_path, monkeypatch)
+    H = _init(tmp_path, monkeypatch)
     storage.register_document(DocumentCreate(document_id="doc_other"))
     transport = httpx.ASGITransport(app=app)
 
@@ -136,7 +136,7 @@ def test_post_does_not_leak_to_other_doc(tmp_path, monkeypatch):
                         "selector": {"type": "TextQuoteSelector", "exact": "hi"},
                         "quote": "hi",
                     },
-                    headers=H_AUTH,
+                    headers=H,
                 )
             try:
                 msg = await asyncio.wait_for(q_other.get(), timeout=0.3)
@@ -151,7 +151,7 @@ def test_post_does_not_leak_to_other_doc(tmp_path, monkeypatch):
 
 def test_delete_triggers_deleted_broadcast(tmp_path, monkeypatch):
     """DELETE 单条 → 队列收到 annotation:deleted, payload 含被删 id。"""
-    _init(tmp_path, monkeypatch)
+    H = _init(tmp_path, monkeypatch)
     a = storage.save_annotation(
         AnnotationCreate(
             document_id="doc_x",
@@ -167,10 +167,7 @@ def test_delete_triggers_deleted_broadcast(tmp_path, monkeypatch):
         q = await rooms.subscribe("team_a", "doc_x")
         try:
             async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-                r = await c.delete(
-                    f"/api/annotations/{a['id']}",
-                    headers={"Authorization": "Bearer tok_a", "X-User-Id": "u1"},
-                )
+                r = await c.delete(f"/api/annotations/{a['id']}", headers=H)
                 assert r.status_code == 200, r.text
                 assert r.json()["deleted"] == [a["id"]]
             msg = await asyncio.wait_for(q.get(), timeout=2)
@@ -184,7 +181,7 @@ def test_delete_triggers_deleted_broadcast(tmp_path, monkeypatch):
 
 def test_delete_cascade_broadcasts_each_id(tmp_path, monkeypatch):
     """级联删除整棵子树 → 每个被删 id 触发一条 annotation:deleted(多条事件)。"""
-    _init(tmp_path, monkeypatch)
+    H = _init(tmp_path, monkeypatch)
     parent = storage.save_annotation(
         AnnotationCreate(
             document_id="doc_x",
@@ -220,10 +217,7 @@ def test_delete_cascade_broadcasts_each_id(tmp_path, monkeypatch):
         q = await rooms.subscribe("team_a", "doc_x")
         try:
             async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-                r = await c.delete(
-                    f"/api/annotations/{parent['id']}",
-                    headers={"Authorization": "Bearer tok_a", "X-User-Id": "u1"},
-                )
+                r = await c.delete(f"/api/annotations/{parent['id']}", headers=H)
                 assert r.status_code == 200, r.text
                 assert set(r.json()["deleted"]) == {parent["id"], child["id"], grand["id"]}
             seen: set[str] = set()
@@ -252,15 +246,13 @@ def test_delete_non_owner_still_403_and_no_broadcast(tmp_path, monkeypatch):
         team_id="team_a",
     )
     transport = httpx.ASGITransport(app=app)
+    h_u2 = {"Authorization": "Bearer " + sessions.create_session("u2", "u2", "team_a")}
 
     async def run():
         q = await rooms.subscribe("team_a", "doc_x")
         try:
             async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-                r = await c.delete(
-                    f"/api/annotations/{a['id']}",
-                    headers={"Authorization": "Bearer tok_a", "X-User-Id": "u2"},
-                )
+                r = await c.delete(f"/api/annotations/{a['id']}", headers=h_u2)
                 assert r.status_code == 403
             try:
                 msg = await asyncio.wait_for(q.get(), timeout=0.3)

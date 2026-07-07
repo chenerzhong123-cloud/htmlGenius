@@ -6,6 +6,7 @@ import threading
 import httpx
 
 from server.app import app
+from server import sessions
 from server import storage
 from server.models import DocumentCreate
 from server.sse import rooms
@@ -43,9 +44,9 @@ def _run(coro):
 
 
 def _init(tmp_path, monkeypatch):
-    monkeypatch.setenv("HG_TEAMS", '{"tok_a":"team_a"}')
     storage.init_db(tmp_path / "sse.db")
     storage.register_document(DocumentCreate(document_id="doc_x"))
+    return sessions.create_session("u1", "u1", "team_a")
 
 
 def test_room_manager_broadcast_reaches_subscribers():
@@ -100,13 +101,13 @@ def test_stream_emits_hello(tmp_path, monkeypatch):
     0.5s 后断开。不用 httpx.ASGITransport 的 stream():本环境下它不向
     StreamingResponse 推送增量 body(已实测确认),用裸 ASGI 才能稳定拿到首块。
     """
-    _init(tmp_path, monkeypatch)
+    tok = _init(tmp_path, monkeypatch)
 
     async def run():
         scope = {
             "type": "http", "method": "GET", "path": "/api/stream",
             "raw_path": b"/api/stream",
-            "query_string": b"doc=doc_x&token=tok_a",
+            "query_string": ("doc=doc_x&token=" + tok).encode(),
             "headers": [], "server": ("t", 80), "client": ("c", 1),
             "root_path": "", "scheme": "http", "http_version": "1.1",
         }

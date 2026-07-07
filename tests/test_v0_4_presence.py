@@ -21,6 +21,7 @@ import httpx
 
 from server.app import app
 from server import presence
+from server import sessions
 from server import storage
 from server.models import DocumentCreate
 from server.sse import rooms
@@ -59,7 +60,6 @@ def _run(coro):
 def _init(tmp_path, monkeypatch):
     """每个测试前清空 presence 全局表,避免相互污染。"""
     presence._USERS.clear()
-    monkeypatch.setenv("HG_TEAMS", '{"tok_a":"team_a","tok_b":"team_b"}')
     storage.init_db(tmp_path / "p.db")
     storage.register_document(DocumentCreate(document_id="doc_x"))
 
@@ -239,7 +239,7 @@ def test_post_presence_no_token_401(tmp_path, monkeypatch):
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             r = await c.post(
                 "/api/presence",
-                json={"doc": "doc_x", "user": {"id": "u1", "name": "阿甲"}},
+                json={"doc": "doc_x", "op": "join"},
             )
             assert r.status_code == 401
 
@@ -250,6 +250,7 @@ def test_post_presence_ok_returns_ok(tmp_path, monkeypatch):
     """POST /api/presence 合法 token → 200 {"ok": True} 且触发广播。"""
     _init(tmp_path, monkeypatch)
     transport = httpx.ASGITransport(app=app)
+    tok = sessions.create_session("u1", "阿甲", "team_a")
 
     async def run():
         q = await rooms.subscribe("team_a", "doc_x")
@@ -259,12 +260,8 @@ def test_post_presence_ok_returns_ok(tmp_path, monkeypatch):
             ) as c:
                 r = await c.post(
                     "/api/presence",
-                    json={
-                        "doc": "doc_x",
-                        "user": {"id": "u1", "name": "阿甲"},
-                        "op": "join",
-                    },
-                    headers={"Authorization": "Bearer tok_a"},
+                    json={"doc": "doc_x", "op": "join"},
+                    headers={"Authorization": f"Bearer {tok}"},
                 )
                 assert r.status_code == 200, r.text
                 assert r.json() == {"ok": True}
