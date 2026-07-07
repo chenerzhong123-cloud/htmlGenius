@@ -32,16 +32,16 @@
   </div>
   <script src="/static/vendor/purify.min.js"></script>
   <script>
-    // v0.4: 团队 token 入口(轻量)。token 存 localStorage.hg_token,annotate.js
-    // 的 authHeaders() 读取它给 /api/annotations 加 Authorization: Bearer。
-    // 首次访问若 hg_token 为空 → 所有请求 401,引导用户在此粘贴 token 后点「设置」。
+    // v0.5: session token 入口(轻量,手动测/本地用)。token 存 localStorage.hg_session,
+    // annotate.js 的 authHeaders() 读取它给 /api/annotations 加 Authorization: Bearer。
+    // 首次访问若 hg_session 为空 → 所有请求 401,引导用户在此粘贴 session token 后点「设置」。
     (function () {
       var inp = document.getElementById("token-input");
       var btn = document.getElementById("token-set");
-      try { if (localStorage.getItem("hg_token")) inp.value = localStorage.getItem("hg_token"); } catch (e) {}
+      try { if (localStorage.getItem("hg_session")) inp.value = localStorage.getItem("hg_session"); } catch (e) {}
       btn.addEventListener("click", function () {
         var v = (inp.value || "").trim();
-        try { v ? localStorage.setItem("hg_token", v) : localStorage.removeItem("hg_token"); } catch (e) {}
+        try { v ? localStorage.setItem("hg_session", v) : localStorage.removeItem("hg_session"); } catch (e) {}
         alert(v ? "token 已保存,即将刷新页面以应用。" : "token 已清除,即将刷新。");
         location.reload();
       });

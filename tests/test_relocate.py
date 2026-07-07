@@ -22,8 +22,8 @@ def _annotate_first_text(server, page, doc):
             range.setStart(target, 0);
             range.setEnd(target, 10);
             const sel = window.__describe(range, root);
-            // 复用 viewer 生产路径的鉴权(localStorage.hg_token → Authorization)
-            const tok = localStorage.getItem('hg_token') || '';
+            // 复用 viewer 生产路径的鉴权(localStorage.hg_session → Authorization)
+            const tok = localStorage.getItem('hg_session') || '';
             const r = await fetch('/api/annotations', {
                 method: 'POST',
                 headers: Object.assign({ 'Content-Type': 'application/json' },

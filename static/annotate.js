@@ -11,11 +11,11 @@ const docPath = docId === "spec"
 
 const API = "/api";
 
-// v0.4 鉴权:T2 后 /api/annotations 需要 Bearer token。token 由 viewer.html
-// 写入 localStorage.hg_token;未设置则返回 undefined → 不发 Authorization(会 401,
-// 这正是引导用户输入 token 的正确信号)。
+// v0.5 鉴权:/api/annotations 需要 Bearer session token。token 由 viewer.html
+// (或测试的 page fixture)写入 localStorage.hg_session;未设置则不发 Authorization
+// (会 401,引导用户登录)。
 function hgToken() {
-  try { return localStorage.getItem("hg_token") || null; } catch (e) { return null; }
+  try { return localStorage.getItem("hg_session") || null; } catch (e) { return null; }
 }
 function authHeaders(extra) {
   const h = Object.assign({}, extra || {});
