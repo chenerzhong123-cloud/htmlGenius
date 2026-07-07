@@ -24,6 +24,7 @@ NAMES = [
     "buildprompt-test.html",
     "sync-test.html",
     "version-test.html",
+    "login-test.html",
 ]
 
 

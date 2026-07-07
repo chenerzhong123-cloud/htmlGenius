@@ -5,6 +5,13 @@
   <span class="brand">htmlGenius</span>
   <span class="mode-badge">本地模式</span>
 </div>
+<div id="collab">
+  <div class="collab-row">
+    <input id="backend-input" placeholder="后端地址 https://…" />
+    <button id="lark-login-btn">飞书登录</button>
+  </div>
+  <div id="login-state"></div>
+</div>
 <div id="mode-indicator">加载中…</div>
 <div id="presence"></div>
 <div id="draft-host"></div>
@@ -14,5 +21,6 @@
   <button id="edit-btn" hidden>切换编辑模式</button>
 </div>
 <script src="buildprompt.js"></script>
+<script src="login.js"></script>
 <script src="sidepanel.js"></script>
 </body></html>

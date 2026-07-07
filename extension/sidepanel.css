@@ -93,6 +93,33 @@ body {
   border: 1px solid var(--hairline); border-radius: var(--r-md);
 }
 
+/* === 协同登录(v0.5) === */
+#collab {
+  background: var(--surface-card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: 10px 12px; margin-bottom: 12px;
+}
+.collab-row { display: flex; gap: 6px; }
+#backend-input {
+  flex: 1; min-width: 0;
+  font-family: var(--font-sans); font-size: 12px;
+  color: var(--ink); background: var(--canvas);
+  border: 1px solid var(--hairline); border-radius: var(--r-md);
+  padding: 6px 8px; height: 30px;
+}
+#backend-input:focus { outline: 2px solid rgba(204,120,92,0.3); border-color: var(--primary); }
+#lark-login-btn {
+  background: var(--primary); color: var(--on-primary);
+  border: 0; height: 30px; padding: 0 12px; font-size: 12px; border-radius: var(--r-md); white-space: nowrap;
+}
+#lark-login-btn:active { background: var(--primary-active); }
+#login-state { font-size: 11px; color: var(--muted); margin-top: 6px; min-height: 14px; }
+#logout-btn {
+  background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline);
+  height: 22px; padding: 0 8px; font-size: 11px; margin-left: 6px; border-radius: var(--r-md);
+}
+
 /* === 底部 actions === */
 #actions {
   position: fixed; bottom: 12px; left: 12px; right: 12px;

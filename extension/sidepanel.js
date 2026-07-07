@@ -229,6 +229,68 @@
     el.textContent = "在线: " + users.map((u) => u.name || u.id).join(", ");
   }
 
+  // === 飞书登录(v0.5 协同) ===
+  const loginBtn = document.getElementById("lark-login-btn");
+  const backendInput = document.getElementById("backend-input");
+  const loginState = document.getElementById("login-state");
+
+  function getCfg(keys) { return new Promise((r) => chrome.storage.sync.get(keys, r)); }
+  function setCfg(obj) { return new Promise((r) => chrome.storage.sync.set(obj, r)); }
+
+  function renderLogoutBtn() {
+    if (document.getElementById("logout-btn")) return;
+    const b = document.createElement("button");
+    b.id = "logout-btn"; b.textContent = "退出登录";
+    b.addEventListener("click", doLogout);
+    loginState.appendChild(b);
+  }
+  async function doLogout() {
+    const cfg = await getCfg(["backend", "session_token"]);
+    if (cfg.backend && cfg.session_token) {
+      try {
+        await fetch(cfg.backend + "/auth/logout", {
+          method: "POST", headers: { Authorization: "Bearer " + cfg.session_token },
+        });
+      } catch (e) { /* 忽略:本地清 storage 即可 */ }
+    }
+    await new Promise((r) => chrome.storage.sync.remove(["session_token", "user", "mode"], r));
+    loginState.textContent = "已退出(刷新页面回到本地模式)";
+    const ob = document.getElementById("logout-btn"); if (ob) ob.remove();
+  }
+  async function checkSession() {
+    const cfg = await getCfg(["mode", "backend", "session_token"]);
+    if (cfg.backend) backendInput.value = cfg.backend;
+    if (cfg.mode === "synced" && cfg.session_token && cfg.backend) {
+      try {
+        const me = await fetch(cfg.backend + "/auth/me", {
+          headers: { Authorization: "Bearer " + cfg.session_token },
+        }).then((r) => (r.ok ? r.json() : null));
+        if (me && me.id) {
+          loginState.textContent = "已登录:" + (me.name || me.id) + " ";
+          renderLogoutBtn();
+          return;
+        }
+      } catch (e) { /* 失效,落到下行提示 */ }
+      loginState.textContent = "登录已失效,请重新登录";
+    }
+  }
+  loginBtn.addEventListener("click", async () => {
+    const backend = (backendInput.value || "").trim().replace(/\/+$/, "");
+    if (!backend) { showToast("请填后端地址"); return; }
+    if (!/^https?:\/\//.test(backend)) { showToast("后端地址需以 http(s):// 开头"); return; }
+    loginState.textContent = "登录中…";
+    try {
+      const r = await Login.start({ backend });
+      await setCfg({ mode: "synced", backend, session_token: r.token, user: r.user });
+      loginState.textContent = "已登录:" + (r.user.name || r.user.id) + " ";
+      renderLogoutBtn();
+      showToast("登录成功,刷新页面以接入协同");
+    } catch (e) {
+      loginState.textContent = "登录失败:" + (e && e.message ? e.message : e);
+    }
+  });
+  checkSession();
+
   // 初始化
   sendToContent({ type: "get-annotations" }).then((resp) => {
     if (resp && resp.type === "annotations-list") {

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="UTF-8"><title>running…</title></head>
+<body>
+login test
+<script src="login.js"></script>
+<script>
+(function () {
+  try {
+    if (!window.Login) throw new Error("Login 未定义");
+    // parseCallbackUrl:从重定向 URL 解析 code/state
+    var p = Login.parseCallbackUrl("https://abc.chromiumapp.org/?code=CODE_1&state=STATE_1");
+    if (p.code !== "CODE_1") throw new Error("code 期望 CODE_1 实际 " + p.code);
+    if (p.state !== "STATE_1") throw new Error("state 期望 STATE_1 实际 " + p.state);
+    var p2 = Login.parseCallbackUrl("https://abc.chromiumapp.org/");
+    if (p2.code !== "" || p2.state !== "") throw new Error("无参应返回空串");
+    var p3 = Login.parseCallbackUrl("not-a-url");
+    if (p3.code !== "" || p3.state !== "") throw new Error("坏 URL 应返回空串");
+    // buildCallbackBody:正确字段名 + 值
+    var body = JSON.parse(Login.buildCallbackBody({ code: "C", redirect: "https://x.chromiumapp.org/", state: "S" }));
+    if (body.code !== "C") throw new Error("body.code");
+    if (body.redirect_uri !== "https://x.chromiumapp.org/") throw new Error("body.redirect_uri");
+    if (body.state !== "S") throw new Error("body.state");
+    document.title = "PASS";
+  } catch (e) {
+    document.title = "FAIL: " + e.message;
+  }
+})();
+</script>
+</body>
+</html>
