@@ -57,6 +57,14 @@ def init_db(path: Path) -> None:
                 quote TEXT,
                 body TEXT
             );
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                open_id TEXT,
+                name TEXT,
+                team_id TEXT,
+                created_at TEXT,
+                expires_at TEXT
+            );
             """
         )
         # v0.2 迁移:versions 加 html_content 列(若旧库缺)
