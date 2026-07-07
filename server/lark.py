@@ -3,7 +3,7 @@
 V2 流程(标准 OAuth 2.0,RFC 6749;V1 已被飞书标为历史版本,故用 V2):
 - authorize: accounts.feishu.cn/open-apis/authen/v1/authorize(用户授权页)→ 回调带 code
 - token:     POST open.feishu.cn/open-apis/authen/v2/oauth/token(code → access_token;不含用户信息)
-- userinfo:  GET  open.feishu.cn/open-apis/authen/v2/user_info(access_token → open_id/name/tenant_key)
+- userinfo:  GET  open.feishu.cn/open-apis/authen/v1/user_info(access_token → open_id/name;v2 路径实测 404)
 
 失败抛异常,由端点层转 400/502。team_id 优先 tenant_key,缺失回退 HG_DEFAULT_TEAM。
 """
