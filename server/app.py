@@ -81,7 +81,8 @@ def lark_callback(payload: CallbackIn):
         raise HTTPException(status_code=400, detail="bad state")
     try:
         info = lark.exchange_code(payload.code, payload.redirect_uri)
-    except Exception as e:  # 飞书侧失败(网络/凭据/code 失效)
+    except Exception as e:  # 飞书侧失败(网络/凭据/code 失效/user_info 路径)
+        print(f"[lark_callback] exchange failed: {e!r}", flush=True)
         raise HTTPException(status_code=502, detail=f"lark exchange failed: {e}")
     token = sessions.create_session(info["open_id"], info["name"], info["team_id"])
     return {

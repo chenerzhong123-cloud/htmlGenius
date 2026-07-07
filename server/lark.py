@@ -46,13 +46,14 @@ def _default_team() -> str:
 
 
 def _user_info(user_access_token: str) -> "dict[str, str]":
-    """V2:user_access_token → {open_id, name, team_id}。
+    """user_access_token → {open_id, name, team_id}。
 
-    注意:此端点真机联调时若 404,改为 /authen/v1/user_info(飞书对 user_info 的 v1/v2
-    文档指向略有歧义);响应解析兼容 data 包裹与扁平两种。
+    用 /authen/v1/user_info:实测 /authen/v2/user_info 返 404(不存在),飞书文档对
+    user_info 的指向也是 v1。V2 token 端点产出的 user_access_token 兼容此端点。
+    响应解析兼容 data 包裹与扁平两种。
     """
     r = httpx.get(
-        f"{_base()}/open-apis/authen/v2/user_info",
+        f"{_base()}/open-apis/authen/v1/user_info",
         headers={"Authorization": "Bearer " + user_access_token},
         timeout=10,
     )
@@ -61,6 +62,8 @@ def _user_info(user_access_token: str) -> "dict[str, str]":
     if data.get("code") != 0:
         raise RuntimeError(f"lark user_info failed: {data}")
     d = data.get("data") or data  # 兼容 data 包裹 / 扁平
+    if "open_id" not in d:
+        raise RuntimeError(f"lark user_info no open_id: {data}")
     team_id = d.get("tenant_key") or d.get("tenant_id") or _default_team()
     return {"open_id": d["open_id"], "name": d.get("name", ""), "team_id": team_id}
 
