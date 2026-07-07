@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from .storage import _connect, _now
 
 _DEFAULT_TTL = int(os.environ.get("HG_SESSION_TTL", "604800"))  # 7 天
+_RENEW_THRESHOLD = 86400  # 滑动续期:剩余不足 1 天则续
 
 
 def _expir(ttl: int) -> str:
@@ -45,6 +46,29 @@ def get_session(token: str) -> "dict[str, str] | None":
     if datetime.now(timezone.utc) > exp:
         return None
     return {"open_id": r["open_id"], "name": r["name"], "team_id": r["team_id"]}
+
+
+def touch_session(token: str) -> "dict[str, str] | None":
+    """取 session(同 get_session),并在剩余 < _RENEW_THRESHOLD 时滑动续期。
+
+    过期/不存在返回 None(不续)。鉴权依赖用它,实现"活跃即续期"。
+    """
+    c = _connect()
+    try:
+        r = c.execute(
+            "SELECT open_id, name, team_id, expires_at FROM sessions WHERE token=?", (token,)
+        ).fetchone()
+        if r is None:
+            return None
+        exp = datetime.fromisoformat(r["expires_at"])
+        now = datetime.now(timezone.utc)
+        if now > exp:
+            return None
+        if (exp - now).total_seconds() < _RENEW_THRESHOLD:
+            c.execute("UPDATE sessions SET expires_at=? WHERE token=?", (_expir(_DEFAULT_TTL), token))
+        return {"open_id": r["open_id"], "name": r["name"], "team_id": r["team_id"]}
+    finally:
+        c.close()
 
 
 def delete_session(token: str) -> bool:

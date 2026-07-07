@@ -34,7 +34,7 @@ def _bearer(authorization: Optional[str]) -> str:
 
 def require_session(authorization: Optional[str] = Header(None)) -> Session:
     """Bearer session token -> Session。缺失/无效/过期 -> 401。"""
-    s = sessions.get_session(_bearer(authorization))
+    s = sessions.touch_session(_bearer(authorization))
     if s is None:
         raise HTTPException(status_code=401, detail="invalid session")
     return Session(**s)
@@ -45,7 +45,7 @@ def require_session_query(token: Optional[str] = Query(None)) -> Session:
 
     token 用 ``Query(None)`` —— 缺 token 返 401(而非 422),与旧 require_team_query 一致。
     """
-    s = sessions.get_session((token or "").strip()) if token else None
+    s = sessions.touch_session((token or "").strip()) if token else None
     if s is None:
         raise HTTPException(status_code=401, detail="invalid session")
     return Session(**s)

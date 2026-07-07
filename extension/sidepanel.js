@@ -284,7 +284,10 @@
       await setCfg({ mode: "synced", backend, session_token: r.token, user: r.user });
       loginState.textContent = "已登录:" + (r.user.name || r.user.id) + " ";
       renderLogoutBtn();
-      showToast("登录成功,刷新页面以接入协同");
+      // 自动刷新被批注页:content-script 重读配置接入协同(免用户手动刷新)
+      const tab = await getActiveTab();
+      if (tab && tab.id) { try { await chrome.tabs.reload(tab.id); } catch (e) { /* 非关键 */ } }
+      showToast("登录成功,已接入协同");
     } catch (e) {
       loginState.textContent = "登录失败:" + (e && e.message ? e.message : e);
     }

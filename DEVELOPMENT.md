@@ -18,7 +18,7 @@ uv run uvicorn server.app:app --port 8000 --reload
 ## 测试
 
 ```bash
-uv run pytest -v          # 全量 87 项（Python 3.9）
+uv run pytest -v          # 全量 91 项（Python 3.9）
 ```
 
 覆盖：健康检查 / 数据模型 / SQLite 存储 / HTTP API / 定位算法 / 端到端重定位 / UI e2e / 编辑器·工具栏·序列化·sanitize / 版本管理 / v0.4 协同（schema 迁移 · SSE 房间 · 写后广播 · presence GC · 仅作者删除级联）/ v0.5 飞书 OAuth（sessions · lark 客户端 · require_session · /auth 端点 · 硬身份作者）。
@@ -55,7 +55,8 @@ uv run uvicorn server.app:app --port 8000 --reload
 ## 已知技术边界
 
 - **仅作者删除为硬约束（v0.5 起）**：author = 飞书 `open_id`，由后端 session 注入；删除校验 `session.open_id`，不可伪造。
-- **飞书 authen 端点版本**：实现采用 v1 `/authen/v1/authorize` + `/authen/v1/access_token`；飞书另有 v2 端点，若 v1 不可用改 `server/lark.py` 端点字符串即可（流程不变）。
+- **飞书 authen V2**：实现采用 V2（`/authen/v2/oauth/token` + `/authen/v2/user_info`，标准 OAuth2；V1 已被飞书标为历史版本）。授权页 `accounts.feishu.cn/open-apis/authen/v1/authorize`。真机联调若 `user_info` 路径不符，改 `server/lark.py` 即可。
+- **session 滑动续期**：剩余 < 1 天时，鉴权请求自动续一个 TTL（活跃即不过期，闲置 7 天才失效）。
 - **严格 CSP 第三方站点回退轮询**：content-script 里直接跑 `EventSource` 连后端，若被批注页面下发了严格的 `Content-Security-Policy: connect-src`，SSE 会被页面 CSP 拦下；此时退化为定时 `GET /api/annotations` 轮询对账（数据不丢，只是不实时）。MV3 `host_permissions` 只控扩展自己的跨域权限，管不到页面 CSP。
 - **EventSource 在 content-script**：SSE 连接随页面生命周期，关标签即断（`bye` 心跳负责 presence 移除）。
 - **RangeSelector 未实现**：选区跨多个块级元素时，exact 会被压成单段。

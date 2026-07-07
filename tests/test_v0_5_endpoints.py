@@ -20,7 +20,7 @@ def test_lark_login_returns_authurl(tmp_path, monkeypatch):
     r = client.get("/auth/lark/login", params={"redirect": "https://ext.chromiumapp.org/"})
     assert r.status_code == 200
     j = r.json()
-    assert j["auth_url"].startswith("https://open.feishu.cn/open-apis/authen/v1/authorize?")
+    assert j["auth_url"].startswith("https://accounts.feishu.cn/open-apis/authen/v1/authorize?")
     assert "state" in j and j["state"]
 
 
