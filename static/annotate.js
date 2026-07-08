@@ -5,11 +5,13 @@ import { VersionManager } from "./version.js";
 
 const params = new URLSearchParams(location.search);
 const docId = params.get("doc") || "01_token";
+// 兼容子路径部署(如阿里云 /hg):根路径用 "",/hg/ 下用 "/hg"
+const BASE = location.pathname.startsWith("/hg/") ? "/hg" : "";
 const docPath = docId === "spec"
-  ? "/docs/2026-06-25-html-annotation-feedback-loop-design.html"
-  : `/samples/${docId}.html`;
+  ? `${BASE}/docs/2026-06-25-html-annotation-feedback-loop-design.html`
+  : `${BASE}/samples/${docId}.html`;
 
-const API = "/api";
+const API = `${BASE}/api`;
 
 // v0.5 鉴权:/api/annotations 需要 Bearer session token。token 由 viewer.html
 // (或测试的 page fixture)写入 localStorage.hg_session;未设置则不发 Authorization
@@ -99,7 +101,7 @@ async function init() {
   // v0.2: 编辑运行时(contenteditable + 浮工具栏[含 Comment]+ 版本管理)
   initEditor(iDoc, iWin);
   initToolbar(iDoc, iWin, createAnnotationFromSelection);
-  window.__vm = new VersionManager(docId, iDoc, iWin);
+  window.__vm = new VersionManager(docId, iDoc, iWin, API);
   window.__vm.start();
   await loadAnnotations();
 }

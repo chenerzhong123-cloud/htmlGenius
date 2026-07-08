@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>htmlGenius 批注查看器</title>
-  <link rel="stylesheet" href="/static/annotate.css">
+  <link rel="stylesheet" href="annotate.css">
 </head>
 <body>
   <div id="bar">
@@ -30,7 +30,7 @@
       </div>
     </aside>
   </div>
-  <script src="/static/vendor/purify.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
   <script>
     // v0.5: session token 入口(轻量,手动测/本地用)。token 存 localStorage.hg_session,
     // annotate.js 的 authHeaders() 读取它给 /api/annotations 加 Authorization: Bearer。
@@ -47,6 +47,6 @@
       });
     })();
   </script>
-  <script type="module" src="/static/annotate.js"></script>
+  <script type="module" src="annotate.js"></script>
 </body>
 </html>
