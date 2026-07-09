@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -26,6 +27,15 @@ DB_PATH = Path(os.environ.get("HTMLEDITOR_DB", BASE / "annotations.db"))
 
 app = FastAPI(title="htmlGenius · stage0")
 storage.init_db(DB_PATH)
+
+# CORS:content-script 从任意页面(如 open.feishu.cn)跨域调后端,
+# 需 CORS 头 + OPTIONS 预检。扩展后端标准做法(session_token 做鉴权,CORS 只控可达)。
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
 
 @app.middleware("http")
@@ -269,13 +279,16 @@ async def create_annotation(
     # author.id = 飞书 open_id(后端 session 注入,不可伪造);team_id = session.team_id
     payload.author = {"id": session.open_id, "name": session.name}
     ann = storage.save_annotation(payload, team_id=session.team_id)
+    print(f"[ann] CREATE team={session.team_id} doc={payload.document_id} id={ann['id']} author={session.open_id}", flush=True)
     await rooms.broadcast(session.team_id, payload.document_id, "annotation:created", ann)
     return ann
 
 
 @app.get("/api/annotations")
 def list_annotations(document_id: str, session: Session = Depends(require_session)):
-    return {"items": storage.list_annotations(document_id, session.team_id)}
+    items = storage.list_annotations(document_id, session.team_id)
+    print(f"[ann] LIST team={session.team_id} doc={document_id} -> {len(items)}", flush=True)
+    return {"items": items}
 
 
 @app.delete("/api/annotations/{aid}")

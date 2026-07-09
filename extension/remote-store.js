@@ -46,20 +46,34 @@ window.RemoteStore = (function () {
         ann = ann || {};
         const docId = ann.document_id || await this.getDocumentId();
         const req = buildCreateRequest(cfg, docId, ann);
-        const r = await fetch(req.url, {
-          method: "POST",
-          headers: req.headers,
-          body: JSON.stringify(req.body),
-        });
-        if (!r.ok) throw new Error("save failed " + r.status);
-        return r.json();
+        console.log("[hg] RS.save POST", req.url, "headers:", JSON.stringify(req.headers));
+        try {
+          const r = await fetch(req.url, {
+            method: "POST",
+            headers: req.headers,
+            body: JSON.stringify(req.body),
+          });
+          console.log("[hg] RS.save resp", r.status);
+          if (!r.ok) throw new Error("save failed " + r.status);
+          return r.json();
+        } catch (e) {
+          console.error("[hg] RS.save ERROR:", e.message || e);
+          throw e;
+        }
       },
       async listAnnotations(docId) {
         const url = cfg.backend + "/api/annotations?document_id=" + encodeURIComponent(docId);
-        const r = await fetch(url, { headers: authHeaders(cfg) });
-        if (!r.ok) throw new Error("list failed " + r.status);
-        const j = await r.json();
-        return j.items || [];
+        console.log("[hg] RS.list GET", url);
+        try {
+          const r = await fetch(url, { headers: authHeaders(cfg) });
+          console.log("[hg] RS.list resp", r.status);
+          if (!r.ok) throw new Error("list failed " + r.status);
+          const j = await r.json();
+          return j.items || [];
+        } catch (e) {
+          console.error("[hg] RS.list ERROR:", e.message || e);
+          throw e;
+        }
       },
       async deleteAnnotation(id) {
         const url = cfg.backend + "/api/annotations/" + encodeURIComponent(id);

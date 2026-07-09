@@ -4,6 +4,7 @@
   "use strict";
 
   const { describe, anchor } = window;
+  console.log("[hg] cs loaded: Storage=", typeof window.Storage, "RemoteStore=", typeof window.RemoteStore, "Sync=", typeof window.Sync);
 
   // === 协同 sync/mode:读 chrome.storage.sync,mode==="synced" 才接入后端 ===
   // 无配置或 mode 为 local/unset → 走 LocalStore(零回归)。
@@ -16,9 +17,13 @@
         ["mode", "backend", "session_token", "user"],
         (c) => {
           _cfg = Object.assign({}, _cfg, c || {});
+          console.log("[hg] cfg:", JSON.stringify({mode:_cfg.mode, backend:_cfg.backend, hasToken:!!_cfg.session_token, hasUser:!!_cfg.user}));
           if (_cfg.mode === "synced") {
             Storage.configure(_cfg); // 切到 RemoteStore
             startSync();
+            console.log("[hg] switched to RemoteStore(协同)");
+          } else {
+            console.log("[hg] staying LocalStore(本地)—— storage 里 mode 不是 synced");
           }
           resolve(_cfg);
         }
