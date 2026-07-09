@@ -65,6 +65,35 @@ def init_db(path: Path) -> None:
                 created_at TEXT,
                 expires_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS teams (
+                team_id TEXT PRIMARY KEY,
+                name TEXT,
+                created_by_sub TEXT,
+                created_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS users (
+                google_sub TEXT PRIMARY KEY,
+                email TEXT,
+                name TEXT,
+                picture TEXT,
+                first_seen TEXT,
+                last_seen TEXT
+            );
+            CREATE TABLE IF NOT EXISTS memberships (
+                google_sub TEXT,
+                team_id TEXT,
+                joined_at TEXT,
+                PRIMARY KEY (google_sub, team_id)
+            );
+            CREATE TABLE IF NOT EXISTS invites (
+                code TEXT PRIMARY KEY,
+                team_id TEXT,
+                created_by_sub TEXT,
+                created_at TEXT,
+                max_uses INTEGER,
+                used_count INTEGER DEFAULT 0,
+                expires_at TEXT
+            );
             """
         )
         # v0.2 迁移:versions 加 html_content 列(若旧库缺)

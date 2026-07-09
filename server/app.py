@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import lark, sessions, storage
+from . import google, lark, sessions, storage, teams
 from .auth import (
     Session,
     consume_state,
@@ -125,6 +125,72 @@ def dev_login(payload: DevLoginIn):
         "user": {"id": payload.open_id, "name": payload.name},
         "team_id": team,
     }
+
+
+# === Google 身份 + 邀请码 (档3) ===
+
+
+class GoogleIn(BaseModel):
+    access_token: str
+    action: Optional[str] = None  # "join" | "create"
+    code: Optional[str] = None
+    team_name: Optional[str] = None
+
+
+class GoogleSessionIn(BaseModel):
+    access_token: str
+    team_id: str
+
+
+@app.post("/auth/google")
+def auth_google(payload: GoogleIn):
+    """Google 登录:验身份 → upsert 用户 →(可选:join 凭码 / create 新团队)→ 返回 teams。
+
+    无 action 时是纯"身份 + 我的团队列表"查询(侧栏静默重登用它)。
+    """
+    try:
+        info = google.verify(payload.access_token)
+    except Exception as e:  # token 无效/aud 不符
+        print(f"[auth_google] verify failed: {e!r}", flush=True)
+        raise HTTPException(status_code=401, detail=f"google verify failed: {e}")
+    teams.upsert_user(info["sub"], info["email"], info["name"], info["picture"])
+    if payload.action == "join":
+        if not payload.code:
+            raise HTTPException(status_code=400, detail="code required for join")
+        if not teams.redeem_invite(payload.code, info["sub"]):
+            raise HTTPException(status_code=400, detail="invalid or expired code")
+    elif payload.action == "create":
+        teams.create_team(payload.team_name or "", info["sub"])
+    return {
+        "sub": info["sub"],
+        "email": info["email"],
+        "name": info["name"],
+        "teams": teams.user_teams(info["sub"]),
+    }
+
+
+@app.post("/auth/google/session")
+def auth_google_session(payload: GoogleSessionIn):
+    """选一个 team → 校验 membership → 发协同用 session token(复用 sessions)。"""
+    try:
+        info = google.verify(payload.access_token)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"google verify failed: {e}")
+    if not teams.is_member(info["sub"], payload.team_id):
+        raise HTTPException(status_code=403, detail="not a member of this team")
+    token = sessions.create_session(info["sub"], info["name"], payload.team_id)
+    return {
+        "token": token,
+        "user": {"id": info["sub"], "name": info["name"]},
+        "team_id": payload.team_id,
+    }
+
+
+@app.post("/auth/invites")
+def create_invite(session: Session = Depends(require_session)):
+    """当前 session 的 team 生成邀请码(任意成员可生)。"""
+    code = teams.create_invite(session.team_id, session.open_id)
+    return {"code": code, "team_id": session.team_id, "join_url": f"/hg/join?code={code}"}
 
 
 # === 文档 / 版本 (无鉴权,本地工具) ===
