@@ -119,6 +119,23 @@ body {
   background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline);
   height: 22px; padding: 0 8px; font-size: 11px; margin-left: 6px; border-radius: var(--r-md);
 }
+#google-login-btn {
+  background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline);
+  height: 30px; padding: 0 12px; font-size: 12px; border-radius: var(--r-md); white-space: nowrap; flex: 1;
+}
+#google-login-btn:active { background: var(--surface-card); }
+#invite-btn {
+  background: var(--surface-card); color: var(--ink); border: 1px solid var(--hairline);
+  height: 22px; padding: 0 8px; font-size: 11px; margin-left: 6px; border-radius: var(--r-md);
+}
+#team-setup { margin-top: 8px; }
+#invite-code-input {
+  flex: 1; min-width: 0; font-family: var(--font-sans); font-size: 12px;
+  color: var(--ink); background: var(--canvas); border: 1px solid var(--hairline);
+  border-radius: var(--r-md); padding: 6px 8px; height: 30px;
+}
+#join-btn { background: var(--primary); color: var(--on-primary); border: 0; height: 30px; padding: 0 12px; font-size: 12px; border-radius: var(--r-md); white-space: nowrap; }
+.link-btn { background: transparent; border: 0; color: var(--primary); font-size: 11px; padding: 4px 0; margin-top: 4px; cursor: pointer; height: auto; }
 
 /* === 底部 actions === */
 #actions {

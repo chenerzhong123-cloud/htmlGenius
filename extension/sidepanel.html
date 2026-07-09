@@ -6,9 +6,16 @@
   <span class="mode-badge">本地模式</span>
 </div>
 <div id="collab">
-  <div class="collab-row">
-    <input id="backend-input" placeholder="后端地址 https://…" />
+  <div id="login-area" class="collab-row">
     <button id="lark-login-btn">飞书登录</button>
+    <button id="google-login-btn">Google 登录</button>
+  </div>
+  <div id="team-setup" hidden>
+    <div class="collab-row">
+      <input id="invite-code-input" placeholder="邀请码" />
+      <button id="join-btn">加入团队</button>
+    </div>
+    <button id="create-team-btn" class="link-btn">+ 新建团队</button>
   </div>
   <div id="login-state"></div>
 </div>
@@ -20,6 +27,7 @@
   <button id="export-btn">一键复制所有评论</button>
   <button id="edit-btn" hidden>切换编辑模式</button>
 </div>
+<script src="config.js"></script>
 <script src="buildprompt.js"></script>
 <script src="login.js"></script>
 <script src="sidepanel.js"></script>

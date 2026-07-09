@@ -229,70 +229,131 @@
     el.textContent = "在线: " + users.map((u) => u.name || u.id).join(", ");
   }
 
-  // === 飞书登录(v0.5 协同) ===
+  // === 协同登录(飞书 + Google 档3,后端地址烤在 config.js) ===
+  const BACKEND = (window.HG_CONFIG && window.HG_CONFIG.backend) || "";
   const loginBtn = document.getElementById("lark-login-btn");
-  const backendInput = document.getElementById("backend-input");
+  const googleBtn = document.getElementById("google-login-btn");
   const loginState = document.getElementById("login-state");
+  const teamSetup = document.getElementById("team-setup");
+  const inviteInput = document.getElementById("invite-code-input");
 
   function getCfg(keys) { return new Promise((r) => chrome.storage.sync.get(keys, r)); }
   function setCfg(obj) { return new Promise((r) => chrome.storage.sync.set(obj, r)); }
 
+  async function applySession(r) {
+    await setCfg({ mode: "synced", backend: BACKEND, session_token: r.token, user: r.user });
+    loginState.textContent = "已登录:" + (r.user.name || r.user.id) + " ";
+    renderLogoutBtn();
+    renderInviteBtn();
+    if (teamSetup) teamSetup.hidden = true;
+    const tab = await getActiveTab();
+    if (tab && tab.id) { try { await chrome.tabs.reload(tab.id); } catch (e) { /* 非关键 */ } }
+  }
   function renderLogoutBtn() {
     if (document.getElementById("logout-btn")) return;
     const b = document.createElement("button");
-    b.id = "logout-btn"; b.textContent = "退出登录";
+    b.id = "logout-btn"; b.textContent = "退出";
     b.addEventListener("click", doLogout);
     loginState.appendChild(b);
   }
+  function renderInviteBtn() {
+    if (document.getElementById("invite-btn")) return;
+    const b = document.createElement("button");
+    b.id = "invite-btn"; b.textContent = "邀请队友";
+    b.addEventListener("click", doInvite);
+    loginState.appendChild(b);
+  }
   async function doLogout() {
-    const cfg = await getCfg(["backend", "session_token"]);
-    if (cfg.backend && cfg.session_token) {
-      try {
-        await fetch(cfg.backend + "/auth/logout", {
-          method: "POST", headers: { Authorization: "Bearer " + cfg.session_token },
-        });
-      } catch (e) { /* 忽略:本地清 storage 即可 */ }
+    const cfg = await getCfg(["session_token"]);
+    if (cfg.session_token) {
+      try { await fetch(BACKEND + "/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + cfg.session_token } }); } catch (e) { /* 忽略 */ }
     }
     await new Promise((r) => chrome.storage.sync.remove(["session_token", "user", "mode"], r));
-    loginState.textContent = "已退出(刷新页面回到本地模式)";
-    const ob = document.getElementById("logout-btn"); if (ob) ob.remove();
+    loginState.textContent = "已退出";
+    ["logout-btn", "invite-btn"].forEach((id) => { const e = document.getElementById(id); if (e) e.remove(); });
   }
-  async function checkSession() {
-    const cfg = await getCfg(["mode", "backend", "session_token"]);
-    if (cfg.backend) backendInput.value = cfg.backend;
-    if (cfg.mode === "synced" && cfg.session_token && cfg.backend) {
+  async function doInvite() {
+    const cfg = await getCfg(["session_token"]);
+    try {
+      const r = await fetch(BACKEND + "/auth/invites", { method: "POST", headers: { Authorization: "Bearer " + cfg.session_token } });
+      const j = await r.json();
+      if (j.code) {
+        showToast("邀请码已复制:" + j.code);
+        try { await navigator.clipboard.writeText(j.code); } catch (e) {}
+      }
+    } catch (e) { showToast("邀请失败"); }
+  }
+
+  // 飞书登录
+  loginBtn.addEventListener("click", async () => {
+    loginState.textContent = "飞书登录中…";
+    try {
+      const r = await Login.start({ backend: BACKEND });
+      await applySession(r);
+      showToast("飞书登录成功");
+    } catch (e) { loginState.textContent = "登录失败:" + (e && e.message ? e.message : e); }
+  });
+
+  // Google 登录(交互)
+  googleBtn.addEventListener("click", async () => {
+    loginState.textContent = "Google 登录中…";
+    try {
+      const r = await Login.googleStart({ interactive: true });
+      if (r.token) { await applySession(r); showToast("Google 登录成功"); }
+      else { loginState.textContent = "登录成功,请加入或新建团队"; if (teamSetup) teamSetup.hidden = false; }
+    } catch (e) { loginState.textContent = "登录失败:" + (e && e.message ? e.message : e); }
+  });
+
+  // 加入团队(凭码)
+  document.getElementById("join-btn").addEventListener("click", async () => {
+    const code = (inviteInput.value || "").trim();
+    if (!code) { showToast("填邀请码"); return; }
+    loginState.textContent = "加入中…";
+    try {
+      const r = await Login.googleStart({ interactive: true, action: "join", code });
+      if (r.token) { await applySession(r); showToast("已加入团队"); }
+      else { loginState.textContent = "加入失败(码无效?)"; }
+    } catch (e) { loginState.textContent = "加入失败:" + (e && e.message ? e.message : e); }
+  });
+  // 新建团队
+  document.getElementById("create-team-btn").addEventListener("click", async () => {
+    loginState.textContent = "建团中…";
+    try {
+      const r = await Login.googleStart({ interactive: true, action: "create" });
+      if (r.token) { await applySession(r); showToast("已创建并加入团队"); }
+    } catch (e) { loginState.textContent = "建团失败:" + (e && e.message ? e.message : e); }
+  });
+
+  // join 链接页(/hg/join?code=)content-script 发来的码 → 预填 + 展开
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === "join-code" && inviteInput) {
+      inviteInput.value = msg.code;
+      if (teamSetup) teamSetup.hidden = false;
+      loginState.textContent = "已填入邀请码,点「Google 登录」→「加入团队」";
+    }
+  });
+
+  // 静默重登:侧栏打开 → getAuthToken(非交互)→ 有团队直接 session;否则查已有 session
+  async function silentReauth() {
+    try {
+      const r = await Login.googleStart({ interactive: false });
+      if (r.token) { await applySession(r); return; }
+      if (r.teams && r.teams.length === 0) { loginState.textContent = "请加入或新建团队"; if (teamSetup) teamSetup.hidden = false; return; }
+    } catch (e) { /* 无 Google token,落到 storage 检查 */ }
+    const cfg = await getCfg(["mode", "session_token"]);
+    if (cfg.mode === "synced" && cfg.session_token) {
       try {
-        const me = await fetch(cfg.backend + "/auth/me", {
-          headers: { Authorization: "Bearer " + cfg.session_token },
-        }).then((r) => (r.ok ? r.json() : null));
+        const me = await fetch(BACKEND + "/auth/me", { headers: { Authorization: "Bearer " + cfg.session_token } }).then((r) => (r.ok ? r.json() : null));
         if (me && me.id) {
           loginState.textContent = "已登录:" + (me.name || me.id) + " ";
-          renderLogoutBtn();
+          renderLogoutBtn(); renderInviteBtn();
           return;
         }
-      } catch (e) { /* 失效,落到下行提示 */ }
+      } catch (e) {}
       loginState.textContent = "登录已失效,请重新登录";
     }
   }
-  loginBtn.addEventListener("click", async () => {
-    const backend = (backendInput.value || "").trim().replace(/\/+$/, "");
-    if (!backend) { showToast("请填后端地址"); return; }
-    if (!/^https?:\/\//.test(backend)) { showToast("后端地址需以 http(s):// 开头"); return; }
-    loginState.textContent = "登录中…";
-    try {
-      const r = await Login.start({ backend });
-      await setCfg({ mode: "synced", backend, session_token: r.token, user: r.user });
-      loginState.textContent = "已登录:" + (r.user.name || r.user.id) + " ";
-      renderLogoutBtn();
-      // 自动刷新被批注页:content-script 重读配置接入协同(免用户手动刷新)
-      const tab = await getActiveTab();
-      if (tab && tab.id) { try { await chrome.tabs.reload(tab.id); } catch (e) { /* 非关键 */ } }
-      showToast("登录成功,已接入协同");
-    } catch (e) {
-      loginState.textContent = "登录失败:" + (e && e.message ? e.message : e);
-    }
-  });
-  checkSession();
+  silentReauth();
 
   // 初始化
   sendToContent({ type: "get-annotations" }).then((resp) => {

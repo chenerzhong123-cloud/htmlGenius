@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -50,6 +50,22 @@ def health():
 @app.get("/")
 def root():
     return {"status": "ok", "viewer": "/static/viewer.html?doc=01_token"}
+
+
+@app.get("/join")
+def join_page(code: str):
+    """加入链接落地页。扩展的 content-script 检测 ?code → 自动塞进侧边栏。"""
+    return HTMLResponse(
+        f"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<title>加入团队 · htmlGenius</title></head>
+<body style="font-family:sans-serif;padding:40px;line-height:1.6">
+<h3>加入 htmlGenius 团队</h3>
+<p>邀请码:<code style="font-size:1.2em">{code}</code></p>
+<p>已自动填入扩展侧边栏 → 点「Google 登录」→「加入」即可。</p>
+<p style="color:#888;font-size:13px">若没弹出,打开 htmlGenius 侧边栏,在「加入团队」粘贴上面的码。</p>
+</body></html>""",
+        media_type="text/html; charset=utf-8",
+    )
 
 
 # === 鉴权 (v0.5 lark-oauth) ===

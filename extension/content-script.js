@@ -65,6 +65,14 @@
   window.addEventListener("beforeunload", () => { if (_sync) _sync.stop(); });
 
 
+  // join 链接页:路径 /join 带 ?code → 通知 sidepanel 预填邀请码
+  try {
+    if (location.pathname.endsWith("/join")) {
+      var _jc = new URLSearchParams(location.search).get("code");
+      if (_jc) chrome.runtime.sendMessage({ type: "join-code", code: _jc }).catch(function () {});
+    }
+  } catch (e) { /* 非关键 */ }
+
   // === 双模式判断 ===
   const isLocal = ["file:", "data:", "blob:"].includes(location.protocol)
     || ["localhost", "127.0.0.1", "0.0.0.0"].includes(location.hostname);
