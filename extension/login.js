@@ -49,19 +49,29 @@ window.Login = (function () {
     return r.json();
   }
 
-  // 档3:Google 登录(getAuthToken 拿 idToken → /auth/google 验 JWT → session)
+  // 档3:Google 登录(launchWebAuthFlow 隐式 id_token 流 → 后端 JWKS 离线验签)
+  // 不用 getAuthToken(部分 Chrome 不返回 idToken)。用 launchWebAuthFlow 直接拿 id_token。
   async function googleStart(opts) {
     opts = opts || {};
     var backend = (window.HG_CONFIG && window.HG_CONFIG.backend) || "";
-    // getAuthToken promise 形式(Chrome 116+)→ {accessToken, idToken, grantedScopes}
-    var result = await chrome.identity.getAuthToken({ interactive: opts.interactive !== false });
-    console.log("[hg] getAuthToken →", result);
-    var idToken = result && result.idToken;
+    var clientId = (window.HG_CONFIG && window.HG_CONFIG.google_client_id) || "";
+    if (!clientId) throw new Error("config 缺 google_client_id");
+    var redirect = chrome.identity.getRedirectURL();  // https://<ext-id>.chromiumapp.org/
+    var nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    var authUrl = "https://accounts.google.com/o/oauth2/v2/auth?"
+      + "client_id=" + encodeURIComponent(clientId)
+      + "&response_type=id_token"
+      + "&redirect_uri=" + encodeURIComponent(redirect)
+      + "&scope=" + encodeURIComponent("openid email profile")
+      + "&nonce=" + encodeURIComponent(nonce);
+    var respUrl = await chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: opts.interactive !== false });
+    if (!respUrl) throw new Error("Google 授权取消");
+    // 回调 URL:https://<ext-id>.chromiumapp.org/#id_token=<jwt>&...
+    var params = new URLSearchParams(respUrl.split("#")[1] || "");
+    var idToken = params.get("id_token");
     if (!idToken) {
-      var _info = result && typeof result === "object"
-        ? ("返回字段:" + Object.keys(result).join(","))
-        : ("返回类型:" + typeof result);
-      throw new Error("getAuthToken 未返回 id_token(" + _info + ")。多半 openid scope 未授予 → 去 https://myaccount.google.com/permissions 移除 htmlGenius 授权,再重试(强制重新授权含 openid)");
+      var err = params.get("error");
+      throw new Error("Google 未返回 id_token" + (err ? "(" + err + ": " + (params.get("error_description") || "") + ")" : ""));
     }
     var body = { id_token: idToken };
     if (opts.action) body.action = opts.action;
