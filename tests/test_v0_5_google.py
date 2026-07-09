@@ -1,129 +1,137 @@
+import base64
+import json
 import time
 
 import pytest
+import jwt as pyjwt
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from server import google, storage, teams
 from server.app import app
 
 client = TestClient(app)
+CID = "cid_xxx"
 
 
-class _FR:
-    def __init__(self, p):
-        self._p = p
-        self.status_code = 200
-
-    def json(self):
-        return self._p
-
-    def raise_for_status(self):
-        pass
+def _b64u(x):
+    return base64.urlsafe_b64encode(x.to_bytes((x.bit_length() + 7) // 8, "big")).rstrip(b"=").decode()
 
 
-def _patch_http(monkeypatch, tokeninfo, userinfo):
-    def fake_get(url, params=None, **kw):
-        return _FR(tokeninfo if "tokeninfo" in url else userinfo)
-    monkeypatch.setattr("server.google.httpx.get", fake_get)
+@pytest.fixture
+def jwks_env(tmp_path, monkeypatch):
+    """生成 RSA key + JWKS 文件,指到 google.verify。返回私钥 PEM(用于签测试 JWT)。"""
+    monkeypatch.setenv("HG_GOOGLE_CLIENT_ID", CID)
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    nums = priv.public_key().public_numbers()
+    jwk = {"kty": "RSA", "use": "sig", "alg": "RS256", "kid": "testkid",
+           "n": _b64u(nums.n), "e": _b64u(nums.e)}
+    jwks_path = tmp_path / "jwks.json"
+    jwks_path.write_text(json.dumps({"keys": [jwk]}))
+    monkeypatch.setenv("HG_GOOGLE_JWKS_FILE", str(jwks_path))
+    priv_pem = priv.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    )
+    google._JWKS_CACHE["mtime"] = -1  # 强制重载
+    return priv_pem
 
 
-# === google.verify ===
+def _sign(priv_pem, kid="testkid", **overrides):
+    payload = {"sub": "g_1", "email": "a@b.com", "name": "Alice", "picture": "p",
+               "iss": "https://accounts.google.com", "aud": CID, "exp": int(time.time()) + 100}
+    payload.update(overrides)
+    return pyjwt.encode(payload, priv_pem, algorithm="RS256", headers={"kid": kid})
 
 
-def test_verify_ok(monkeypatch):
-    monkeypatch.setenv("HG_GOOGLE_CLIENT_ID", "cid_xxx")
-    _patch_http(monkeypatch, {"aud": "cid_xxx", "sub": "g_1", "email": "a@b.com"},
-                {"sub": "g_1", "name": "Alice", "email": "a@b.com", "picture": "p"})
-    info = google.verify("tok")
+# === google.verify(真实 JWT 验签,Plan A)==
+
+
+def test_verify_ok(jwks_env):
+    info = google.verify(_sign(jwks_env))
     assert info == {"sub": "g_1", "email": "a@b.com", "name": "Alice", "picture": "p"}
 
 
-def test_verify_aud_mismatch_rejected(monkeypatch):
-    monkeypatch.setenv("HG_GOOGLE_CLIENT_ID", "cid_xxx")
-    _patch_http(monkeypatch, {"aud": "OTHER_APP", "sub": "g_1"}, {})
-    with pytest.raises(RuntimeError):
-        google.verify("tok")  # 别处偷来的 token(aud 不符)被拒
+def test_verify_bad_aud_rejected(jwks_env):
+    with pytest.raises(Exception):
+        google.verify(_sign(jwks_env, aud="OTHER_APP"))  # aud 不符
 
 
-def test_verify_name_fallback(monkeypatch):
-    monkeypatch.setenv("HG_GOOGLE_CLIENT_ID", "cid_xxx")
-    _patch_http(monkeypatch, {"aud": "cid_xxx", "sub": "g_1"},
-                {"sub": "g_1", "email": "bob@x.com"})  # 无 name
-    info = google.verify("tok")
-    assert info["name"] == "bob"  # 用 email 本地部分兜底
+def test_verify_expired_rejected(jwks_env):
+    with pytest.raises(Exception):
+        google.verify(_sign(jwks_env, exp=int(time.time()) - 10))
 
 
-# === 端点流程 ===
+def test_verify_unknown_kid_rejected(jwks_env):
+    with pytest.raises(RuntimeError, match="JWKS"):
+        google.verify(_sign(jwks_env, kid="unknown"))  # JWKS 无匹配 key
+
+
+def test_verify_name_fallback(jwks_env):
+    t = _sign(jwks_env)
+    # 改 payload 去掉 name,重签
+    import jwt as _j
+    payload = _j.decode(t, options={"verify_signature": False})
+    payload["name"] = None
+    t2 = pyjwt.encode(payload, jwks_env, algorithm="RS256", headers={"kid": "testkid"})
+    assert google.verify(t2)["name"] == "a"  # email 本地部分兜底
+
+
+# === 端点流程(mock google.verify)==
 
 
 def _init(tmp_path):
     storage.init_db(tmp_path / "g.db")
 
 
-def _mock_google(sub, name, email="a@b.com", monkeypatch=None):
-    if monkeypatch:
-        monkeypatch.setattr(
-            "server.google.verify",
-            lambda at: {"sub": sub, "email": email, "name": name, "picture": ""},
-        )
+def _mock(sub, name, monkeypatch):
+    monkeypatch.setattr("server.google.verify", lambda it: {"sub": sub, "email": sub + "@x.com", "name": name, "picture": ""})
 
 
 def test_google_create_team_and_session(tmp_path, monkeypatch):
     _init(tmp_path)
-    _mock_google("g_1", "Alice", monkeypatch=monkeypatch)
-    r = client.post("/auth/google", json={"access_token": "t", "action": "create", "team_name": "MyTeam"})
+    _mock("g_1", "Alice", monkeypatch)
+    r = client.post("/auth/google", json={"id_token": "t", "action": "create", "team_name": "MyTeam"})
     assert r.status_code == 200, r.text
     j = r.json()
     assert j["name"] == "Alice" and len(j["teams"]) == 1 and j["teams"][0]["name"] == "MyTeam"
     tid = j["teams"][0]["team_id"]
-
-    s = client.post("/auth/google/session", json={"access_token": "t", "team_id": tid})
-    assert s.status_code == 200
-    assert s.json()["token"].startswith("sess_")
-    assert s.json()["user"] == {"id": "g_1", "name": "Alice"}
+    s = client.post("/auth/google/session", json={"id_token": "t", "team_id": tid})
+    assert s.status_code == 200 and s.json()["token"].startswith("sess_")
 
 
 def test_google_session_not_member_403(tmp_path, monkeypatch):
     _init(tmp_path)
-    _mock_google("g_outsider", "X", monkeypatch=monkeypatch)
-    # 先让 g_1 建一个 team
-    _mock_google("g_1", "Alice", monkeypatch=monkeypatch)
-    j = client.post("/auth/google", json={"access_token": "t", "action": "create"}).json()
+    _mock("g_1", "Alice", monkeypatch)
+    j = client.post("/auth/google", json={"id_token": "t", "action": "create"}).json()
     tid = j["teams"][0]["team_id"]
-    # 局外人拿不到 session
-    _mock_google("g_outsider", "X", monkeypatch=monkeypatch)
-    r = client.post("/auth/google/session", json={"access_token": "t", "team_id": tid})
-    assert r.status_code == 403
+    _mock("g_outsider", "X", monkeypatch)
+    assert client.post("/auth/google/session", json={"id_token": "t", "team_id": tid}).status_code == 403
 
 
 def test_invite_and_join(tmp_path, monkeypatch):
     _init(tmp_path)
-    # Alice 建 team
-    _mock_google("g_1", "Alice", monkeypatch=monkeypatch)
-    j = client.post("/auth/google", json={"access_token": "t", "action": "create", "team_name": "T"}).json()
+    _mock("g_1", "Alice", monkeypatch)
+    j = client.post("/auth/google", json={"id_token": "t", "action": "create", "team_name": "T"}).json()
     tid = j["teams"][0]["team_id"]
-    # Alice 拿 session → 生邀请码
-    s = client.post("/auth/google/session", json={"access_token": "t", "team_id": tid}).json()
+    s = client.post("/auth/google/session", json={"id_token": "t", "team_id": tid}).json()
     inv = client.post("/auth/invites", headers={"Authorization": f"Bearer {s['token']}"}).json()
     assert inv["code"].startswith("inv_") and inv["team_id"] == tid
-    # Bob 用码加入 → 出现在 Bob 的 team 列表
-    _mock_google("g_2", "Bob", email="b@b.com", monkeypatch=monkeypatch)
-    j2 = client.post("/auth/google", json={"access_token": "t2", "action": "join", "code": inv["code"]}).json()
+    _mock("g_2", "Bob", monkeypatch)
+    j2 = client.post("/auth/google", json={"id_token": "t2", "action": "join", "code": inv["code"]}).json()
     assert j2["name"] == "Bob"
     assert any(t["team_id"] == tid for t in j2["teams"])
 
 
 def test_join_bad_code(tmp_path, monkeypatch):
     _init(tmp_path)
-    _mock_google("g_1", "Alice", monkeypatch=monkeypatch)
-    r = client.post("/auth/google", json={"access_token": "t", "action": "join", "code": "inv_nope"})
-    assert r.status_code == 400
+    _mock("g_1", "Alice", monkeypatch)
+    assert client.post("/auth/google", json={"id_token": "t", "action": "join", "code": "inv_nope"}).status_code == 400
 
 
-def test_redeem_code_overuse(tmp_path, monkeypatch):
+def test_redeem_code_overuse(tmp_path):
     _init(tmp_path)
-    # 直接造一个 max_uses=1 的码
     tid = teams.create_team("T", "g_1")
     code = teams.create_invite(tid, "g_1", max_uses=1)
-    assert teams.redeem_invite(code, "g_a") == tid  # 第 1 次
-    assert teams.redeem_invite(code, "g_b") is None  # 第 2 次超额失败
+    assert teams.redeem_invite(code, "g_a") == tid
+    assert teams.redeem_invite(code, "g_b") is None

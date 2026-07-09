@@ -147,14 +147,14 @@ def dev_login(payload: DevLoginIn):
 
 
 class GoogleIn(BaseModel):
-    access_token: str
+    id_token: str
     action: Optional[str] = None  # "join" | "create"
     code: Optional[str] = None
     team_name: Optional[str] = None
 
 
 class GoogleSessionIn(BaseModel):
-    access_token: str
+    id_token: str
     team_id: str
 
 
@@ -165,7 +165,7 @@ def auth_google(payload: GoogleIn):
     无 action 时是纯"身份 + 我的团队列表"查询(侧栏静默重登用它)。
     """
     try:
-        info = google.verify(payload.access_token)
+        info = google.verify(payload.id_token)
     except Exception as e:  # token 无效/aud 不符
         print(f"[auth_google] verify failed: {e!r}", flush=True)
         raise HTTPException(status_code=401, detail=f"google verify failed: {e}")
@@ -189,7 +189,7 @@ def auth_google(payload: GoogleIn):
 def auth_google_session(payload: GoogleSessionIn):
     """选一个 team → 校验 membership → 发协同用 session token(复用 sessions)。"""
     try:
-        info = google.verify(payload.access_token)
+        info = google.verify(payload.id_token)
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"google verify failed: {e}")
     if not teams.is_member(info["sub"], payload.team_id):

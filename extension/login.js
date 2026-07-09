@@ -49,17 +49,15 @@ window.Login = (function () {
     return r.json();
   }
 
-  // 档3:Google 登录(getAuthToken → /auth/google → /auth/google/session)
+  // 档3:Google 登录(getAuthToken 拿 idToken → /auth/google 验 JWT → session)
   async function googleStart(opts) {
     opts = opts || {};
     var backend = (window.HG_CONFIG && window.HG_CONFIG.backend) || "";
-    var at = await new Promise(function (resolve, reject) {
-      chrome.identity.getAuthToken({ interactive: opts.interactive !== false }, function (token) {
-        if (chrome.runtime.lastError || !token) reject(chrome.runtime.lastError || new Error("no token"));
-        else resolve(token);
-      });
-    });
-    var body = { access_token: at };
+    // getAuthToken promise 形式(Chrome 116+)→ {accessToken, idToken}
+    var result = await chrome.identity.getAuthToken({ interactive: opts.interactive !== false });
+    var idToken = result && result.idToken;
+    if (!idToken) throw new Error("getAuthToken 未返回 id_token(确认 manifest oauth2 含 openid)");
+    var body = { id_token: idToken };
     if (opts.action) body.action = opts.action;
     if (opts.code) body.code = opts.code;
     if (opts.team_name) body.team_name = opts.team_name;
@@ -72,7 +70,7 @@ window.Login = (function () {
     var team = j.teams[0]; // 默认最近加入的
     var sr = await fetch(backend + "/auth/google/session", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ access_token: at, team_id: team.team_id }),
+      body: JSON.stringify({ id_token: idToken, team_id: team.team_id }),
     });
     if (!sr.ok) throw new Error("session failed " + sr.status);
     var sj = await sr.json();
