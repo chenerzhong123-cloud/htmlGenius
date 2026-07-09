@@ -53,10 +53,16 @@ window.Login = (function () {
   async function googleStart(opts) {
     opts = opts || {};
     var backend = (window.HG_CONFIG && window.HG_CONFIG.backend) || "";
-    // getAuthToken promise 形式(Chrome 116+)→ {accessToken, idToken}
+    // getAuthToken promise 形式(Chrome 116+)→ {accessToken, idToken, grantedScopes}
     var result = await chrome.identity.getAuthToken({ interactive: opts.interactive !== false });
+    console.log("[hg] getAuthToken →", result);
     var idToken = result && result.idToken;
-    if (!idToken) throw new Error("getAuthToken 未返回 id_token(确认 manifest oauth2 含 openid)");
+    if (!idToken) {
+      var _info = result && typeof result === "object"
+        ? ("返回字段:" + Object.keys(result).join(","))
+        : ("返回类型:" + typeof result);
+      throw new Error("getAuthToken 未返回 id_token(" + _info + ")。多半 openid scope 未授予 → 去 https://myaccount.google.com/permissions 移除 htmlGenius 授权,再重试(强制重新授权含 openid)");
+    }
     var body = { id_token: idToken };
     if (opts.action) body.action = opts.action;
     if (opts.code) body.code = opts.code;
