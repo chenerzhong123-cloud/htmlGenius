@@ -329,6 +329,34 @@ def delete_annotation(aid: str, team_id: str, actor_id: str) -> list[dict]:
         c.close()
 
 
+def update_annotation(aid: str, team_id: str, actor_id: str, body_patch: dict) -> dict | None:
+    """作者校验 + 合并 body 更新(保留 id / selector / parent_id / author)。
+
+    - 行不存在 → 返回 ``None``。
+    - ``team_id`` 不符(跨团队)或 ``author.id != actor_id``(非作者) → ``PermissionError``。
+    - 通过: 现有 body dict 合并 body_patch,写回 body + 更新 updated_at,返回最新行。
+    """
+    c = _connect()
+    try:
+        row = c.execute(
+            "SELECT team_id, author, body FROM annotations WHERE id=?", (aid,)
+        ).fetchone()
+        if row is None:
+            return None
+        if row["team_id"] != team_id:
+            raise PermissionError("wrong team")
+        if json.loads(row["author"]).get("id") != actor_id:
+            raise PermissionError("not owner")
+        merged = {**json.loads(row["body"]), **(body_patch or {})}
+        c.execute(
+            "UPDATE annotations SET body=?, updated_at=? WHERE id=?",
+            (json.dumps(merged, ensure_ascii=False), _now(), aid),
+        )
+    finally:
+        c.close()
+    return get_annotation(aid)  # type: ignore[return-value]
+
+
 def list_annotations(document_id: str, team_id: str = "default") -> list[dict]:
     c = _connect()
     try:

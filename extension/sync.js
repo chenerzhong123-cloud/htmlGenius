@@ -17,6 +17,7 @@ window.Sync = (function () {
 
   // 纯函数：SSE event 名 + data JSON 字符串 → delta 或 null（hello/未知/坏 JSON）
   //  - {op:"create", annotation}    annotation:created
+  //  - {op:"update", annotation}    annotation:updated
   //  - {op:"delete", id}            annotation:deleted
   //  - {op:"presence", users}       presence
   function parseEvent(event, dataStr) {
@@ -27,6 +28,7 @@ window.Sync = (function () {
       data = {};
     }
     if (event === "annotation:created") return { op: "create", annotation: data };
+    if (event === "annotation:updated") return { op: "update", annotation: data };
     if (event === "annotation:deleted") return { op: "delete", id: data.id };
     if (event === "presence") return { op: "presence", users: data.users || [] };
     return null; // hello / 未知事件忽略
@@ -34,6 +36,7 @@ window.Sync = (function () {
 
   // 纯函数:把 delta 原地应用到 list,返回 list。
   //   op:"create" — id 不存在才 push(幂等:重复 create 同 id 不重复入列)
+  //   op:"update" — 按 id 替换(不存在则 push)
   //   op:"delete" — 移除该 id 及其所有子孙(parent_id === 被删 id 的项级联删除)
   //   其余 op 静默无副作用。
   // 不触碰 DOM / chrome.*;content-script 调它后再自行重渲染 overlay。
@@ -44,6 +47,10 @@ window.Sync = (function () {
       if (!list.find(function (a) { return a && a.id === ann.id; })) {
         list.push(ann);
       }
+    } else if (delta.op === "update") {
+      var upd = delta.annotation || {};
+      var ui = list.findIndex(function (a) { return a && a.id === upd.id; });
+      if (ui >= 0) list[ui] = upd; else list.push(upd);
     } else if (delta.op === "delete") {
       var id = delta.id;
       // 先删目标
@@ -64,6 +71,7 @@ window.Sync = (function () {
     var docId = opts.docId || "";
     var user = opts.user || {};
     var onCreate = opts.onCreate || null;
+    var onUpdate = opts.onUpdate || null;
     var onDelete = opts.onDelete || null;
     var onPresence = opts.onPresence || null;
     // v0.4 §5.3:重连(及首连)时回调一次,供 content-script 跑 GET /api/annotations
@@ -109,6 +117,14 @@ window.Sync = (function () {
       "annotation:created",
       function (e) {
         dispatch(e.type, e.data, onCreate, function (d) {
+          return d.annotation;
+        });
+      }
+    );
+    es.addEventListener(
+      "annotation:updated",
+      function (e) {
+        dispatch(e.type, e.data, onUpdate, function (d) {
           return d.annotation;
         });
       }

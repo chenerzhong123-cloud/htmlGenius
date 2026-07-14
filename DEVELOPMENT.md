@@ -18,10 +18,10 @@ uv run uvicorn server.app:app --port 8000 --reload
 ## 测试
 
 ```bash
-uv run pytest -v          # 全量 91 项（Python 3.9）
+uv run pytest -v          # 全量 110 项（Python 3.9）
 ```
 
-覆盖：健康检查 / 数据模型 / SQLite 存储 / HTTP API / 定位算法 / 端到端重定位 / UI e2e / 编辑器·工具栏·序列化·sanitize / 版本管理 / v0.4 协同（schema 迁移 · SSE 房间 · 写后广播 · presence GC · 仅作者删除级联）/ v0.5 飞书 OAuth（sessions · lark 客户端 · require_session · /auth 端点 · 硬身份作者）。
+覆盖：健康检查 / 数据模型 / SQLite 存储 / HTTP API / 定位算法 / 端到端重定位 / UI e2e / 编辑器·工具栏·序列化·sanitize / 版本管理 / v0.4 协同（schema 迁移 · SSE 房间 · 写后广播 · presence GC · 仅作者删除级联）/ v0.5 飞书 OAuth（sessions · lark 客户端 · require_session · /auth 端点 · 硬身份作者）/ v0.5.1 评论编辑（PATCH 作者校验 · 跨团队/非作者 403 · 不存在 404）。
 
 ## 架构（骨架决策）
 
@@ -44,7 +44,7 @@ uv run uvicorn server.app:app --port 8000 --reload
 | `HG_SESSION_TTL` | session 有效期（秒） | `604800`（7 天） |
 | `HG_LARK_BASE` | 飞书 API 域名（国际版 Larksuite 改之） | `https://open.feishu.cn` |
 
-鉴权：扩展走 `chrome.identity.launchWebAuthFlow` → `/auth/lark/login` → 飞书授权 → `/auth/lark/callback` 换 session token；后续请求带 `Authorization: Bearer <session_token>`。批注 author = 飞书 `open_id`（后端 session 注入，硬身份）。所有数据自存自管（SQLite），不用 SaaS。
+鉴权：扩展走 `chrome.identity.launchWebAuthFlow` → `/auth/lark/login` → 飞书授权 → `/auth/lark/callback` 换 session token；后续请求带 `Authorization: Bearer <session_token>`。批注 author = 飞书 `open_id`（后端 session 注入，硬身份）。批注写后经 SSE 广播 `annotation:created` / `annotation:updated` / `annotation:deleted`；作者可编辑（`PATCH /api/annotations/:id`，跨团队/非作者 403）、删除（级联子树）自己的批注。所有数据自存自管（SQLite），不用 SaaS。
 
 完整部署（Nginx SSE 关 buffering、HTTP/2、env 文件、manifest `host_permissions`、飞书后台重定向 URI、稳定 URL 约束、集成验收矩阵、常见坑）：见 [`docs/2026-07-05-v0.4-deploy.md`](docs/2026-07-05-v0.4-deploy.md)（含 v0.5 补充）。
 

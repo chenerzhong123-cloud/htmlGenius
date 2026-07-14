@@ -3,32 +3,70 @@
 </head><body>
 <div id="header">
   <span class="brand">htmlGenius</span>
-  <span class="mode-badge">本地模式</span>
+  <div class="header-right">
+    <button id="theme-btn" class="theme-btn" data-i18n-title="theme.title"></button>
+    <button id="lang-btn" class="lang-btn" data-i18n-title="lang.title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg><span id="lang-code">EN</span>
+    </button>
+    <button id="avatar" class="avatar" data-i18n-title="avatar.title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    </button>
+  </div>
 </div>
-<div id="collab">
+
+<div id="tabbar">
+  <button id="tab-edit" class="active">
+    <svg class="hg-tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span class="tab-label" data-i18n="tab.edit">编辑</span>
+  </button>
+  <button id="tab-comment">
+    <svg class="hg-tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="tab-label" data-i18n="tab.comment">批注</span>
+  </button>
+</div>
+
+<!-- 编辑视图(默认主视图) -->
+<div id="view-edit" class="view show">
+  <div id="mode-indicator" data-i18n="mode.connecting">正在连接当前页面…</div>
+  <button id="edit-btn" hidden>切换编辑模式</button>
+  <div class="edit-tips" data-i18n-html="tips.html">选中文字可<b>加批注</b>;点「<b>开始编辑</b>」后,选中文字可改<b>样式 / 颜色 / 字号 / 对齐</b>(Ctrl+Z 撤销)</div>
+  <div class="reload-hint" data-i18n="reloadHint">若批注或编辑长时间无响应,刷新当前页面即可恢复</div>
+</div>
+
+<!-- 批注视图(次级) -->
+<div id="view-comment" class="view">
+  <div id="presence"></div>
+  <div id="draft-host"></div>
+  <div id="annotations"></div>
+  <button id="export-btn" data-i18n="export.btn">一键复制所有评论</button>
+</div>
+
+<!-- 语言切换浮层(点 🌐 展开;选项始终以各自母语显示) -->
+<div id="lang-sheet" class="sheet lang-sheet">
+  <button class="lang-opt" data-lang="zh"><span class="lang-opt-name">中文</span></button>
+  <button class="lang-opt" data-lang="en"><span class="lang-opt-name">English</span></button>
+  <button class="lang-opt" data-lang="ja"><span class="lang-opt-name">日本語</span></button>
+</div>
+
+<!-- 账号浮层(点头像展开) -->
+<div id="account-sheet" class="sheet">
+  <div class="sheet-title" data-i18n="sheet.title">登录后开启团队协作</div>
+  <div class="sheet-sub" data-i18n="sheet.sub">实时共享批注 · 作者身份绑定账号 · 仅本人可删自己的批注</div>
   <div id="login-area" class="collab-row">
-    <button id="lark-login-btn">飞书登录</button>
-    <button id="google-login-btn">Google 登录</button>
+    <button id="lark-login-btn" data-i18n="login.lark">飞书登录</button>
+    <button id="google-login-btn" data-i18n="login.google">Google 登录</button>
   </div>
   <div id="team-setup" hidden>
     <div class="collab-row">
-      <input id="invite-code-input" placeholder="邀请码" />
-      <button id="join-btn">加入团队</button>
+      <input id="invite-code-input" data-i18n-placeholder="team.invitePh" placeholder="邀请码" />
+      <button id="join-btn" data-i18n="team.join">加入团队</button>
     </div>
-    <button id="create-team-btn" class="link-btn">+ 新建团队</button>
+    <button id="create-team-btn" class="link-btn" data-i18n="team.create">+ 新建团队</button>
   </div>
   <div id="login-state"></div>
 </div>
-<div id="mode-indicator">加载中…</div>
-<div id="presence"></div>
-<div id="draft-host"></div>
-<div id="annotations"></div>
-<div id="actions">
-  <button id="export-btn">一键复制所有评论</button>
-  <button id="edit-btn" hidden>切换编辑模式</button>
-</div>
+
 <script src="config.js"></script>
 <script src="buildprompt.js"></script>
 <script src="login.js"></script>
+<script src="i18n.js"></script>
 <script src="sidepanel.js"></script>
 </body></html>

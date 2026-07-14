@@ -82,6 +82,13 @@ window.RemoteStore = (function () {
         if (!r.ok && r.status !== 403) throw new Error("delete failed " + r.status);
         return r.ok;
       },
+      async updateAnnotation(id, bodyPatch) {
+        // PATCH /api/annotations/:id {body};作者校验由后端做,403→返回 false(非作者)
+        const url = cfg.backend + "/api/annotations/" + encodeURIComponent(id);
+        const r = await fetch(url, { method: "PATCH", headers: authHeaders(cfg), body: JSON.stringify({ body: bodyPatch }) });
+        if (!r.ok && r.status !== 403) throw new Error("update failed " + r.status);
+        return r.ok;
+      },
     };
   }
 

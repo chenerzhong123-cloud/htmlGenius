@@ -33,7 +33,7 @@ storage.init_db(DB_PATH)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -300,6 +300,28 @@ async def delete_annotation(aid: str, session: Session = Depends(require_session
     for d in deleted:
         await rooms.broadcast(session.team_id, d["document_id"], "annotation:deleted", {"id": d["id"]})
     return {"ok": True, "deleted": [d["id"] for d in deleted]}
+
+
+class AnnotationUpdate(BaseModel):
+    """PATCH /api/annotations/:id 请求体。body 为部分字段(如 {comment: ...}),与现有 body 合并。"""
+
+    body: dict
+
+
+@app.patch("/api/annotations/{aid}")
+async def update_annotation(
+    aid: str, payload: AnnotationUpdate, session: Session = Depends(require_session)
+):
+    # 作者校验由 storage 做(跨团队/非作者 → PermissionError → 403);仅作者可改自己留下的评论。
+    try:
+        ann = storage.update_annotation(aid, session.team_id, session.open_id, payload.body)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="not owner")
+    if ann is None:
+        raise HTTPException(status_code=404, detail="annotation not found")
+    print(f"[ann] UPDATE team={session.team_id} doc={ann['document_id']} id={aid} author={session.open_id}", flush=True)
+    await rooms.broadcast(session.team_id, ann["document_id"], "annotation:updated", ann)
+    return ann
 
 
 def _sse_chunk(event: str, data: dict) -> str:

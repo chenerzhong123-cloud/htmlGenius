@@ -31,6 +31,16 @@ async function dbPut(store, value) {
   });
 }
 
+async function dbGet(store, key) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, "readonly");
+    const req = tx.objectStore(store).get(key);
+    req.onsuccess = () => res(req.result || null);
+    req.onerror = () => rej(req.error);
+  });
+}
+
 async function dbGetAllByIndex(store, indexName, value) {
   const db = await openDB();
   return new Promise((res, rej) => {
@@ -69,8 +79,17 @@ const LocalStore = {
   async deleteAnnotation(id) {
     return dbDelete("annotations", id);
   },
-  async saveVersion(docId, html) {
-    return dbPut("versions", { document_id: docId, html_content: html, created_at: new Date().toISOString(), source: "edit" });
+  async updateAnnotation(id, bodyPatch) {
+    // 按 id 读出 → 合并 body → 写回(保留 id / parent_id 回复链 / author / selector)
+    const ann = await dbGet("annotations", id);
+    if (!ann) return false;
+    ann.body = Object.assign({}, ann.body || {}, bodyPatch);
+    await dbPut("annotations", ann);
+    return true;
+  },
+  async saveVersion(docId, html, baseHash) {
+    // base_hash:本次编辑所基于的「原始文件」正文哈希;重开时用它判断磁盘文件是否被外部改动过
+    return dbPut("versions", { document_id: docId, html_content: html, created_at: new Date().toISOString(), source: "edit", base_hash: baseHash || null });
   },
   async listVersions(docId) {
     return dbGetAllByIndex("versions", "document_id", docId);
@@ -94,8 +113,9 @@ const Storage = {
   saveAnnotation(a) { return _store.saveAnnotation(a); },
   listAnnotations(d) { return _store.listAnnotations(d); },
   deleteAnnotation(id) { return _store.deleteAnnotation(id); },
+  updateAnnotation(id, bodyPatch) { return _store.updateAnnotation(id, bodyPatch); },
   // 版本永远本地(IndexedDB),与 mode 无关
-  saveVersion(docId, html) { return LocalStore.saveVersion(docId, html); },
+  saveVersion(docId, html, baseHash) { return LocalStore.saveVersion(docId, html, baseHash); },
   listVersions(docId) { return LocalStore.listVersions(docId); },
 };
 window.Storage = Storage;

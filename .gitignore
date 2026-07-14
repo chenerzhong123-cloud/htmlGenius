@@ -7,3 +7,5 @@ node_modules/
 .DS_Store
 .superpowers/
 extension.pem
+# Google OAuth 客户端密钥(敏感,严禁提交)
+docs/client_secret_*.json
