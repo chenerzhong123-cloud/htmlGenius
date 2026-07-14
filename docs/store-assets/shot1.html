@@ -1,0 +1,45 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<style>
+  html,body{margin:0;padding:0;width:1280px;height:800px;overflow:hidden;background:#080a12}
+  *{box-sizing:border-box}
+  .bg{position:fixed;inset:0;background:
+    radial-gradient(60% 80% at 92% 6%, rgba(124,140,255,.26), transparent 55%),
+    radial-gradient(50% 70% at 4% 100%, rgba(121,233,242,.14), transparent 55%),
+    linear-gradient(125deg,#0c1020 0%,#080a12 55%,#0a0d18 100%)}
+  .wrap{position:relative;width:1280px;height:800px;display:flex;flex-direction:column;
+    font-family:"Inter","PingFang SC","Microsoft YaHei",-apple-system,sans-serif;color:#f6f7fb}
+  .bar{height:88px;display:flex;align-items:center;gap:20px;padding:0 48px;flex:none}
+  .logo{width:48px;height:48px;border-radius:13px;object-fit:cover;display:block;
+    box-shadow:0 8px 26px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.12)}
+  .word{font-size:23px;font-weight:700;letter-spacing:-.01em}
+  .word .g{background:linear-gradient(120deg,#8492ff,#a88bff 60%,#79e9f7);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .div{width:1px;height:34px;background:rgba(255,255,255,.14);margin:0 6px}
+  .title{display:flex;flex-direction:column;gap:5px;margin-right:auto}
+  .h1{font-size:41px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
+  .h1 .em{background:linear-gradient(120deg,#aeb9ff,#79e9f7);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:18px;color:#8d95aa;font-weight:500}
+  .pill{font-size:15px;color:#c7ccdc;background:rgba(124,140,255,.12);border:1px solid rgba(124,140,255,.30);
+    padding:10px 18px;border-radius:30px;font-weight:600;white-space:nowrap;align-self:center}
+  .pill .num{color:#79e9f7;margin-right:8px;font-weight:700}
+  .stage{flex:1;display:flex;align-items:center;justify-content:center;padding:0 48px;min-height:0}
+  .shot{width:1184px;height:auto;flex:none;display:block;border-radius:14px;border:1px solid rgba(255,255,255,.14);
+    box-shadow:0 34px 90px rgba(0,0,0,.62),0 0 0 1px rgba(124,140,255,.08)}
+</style></head>
+<body>
+  <div class="bg"></div>
+  <div class="wrap">
+    <div class="bar">
+      <img class="logo" src="../../extension/icons/icon-512.png" alt="htmlGenius">
+      <div class="word">html<span class="g">Genius</span></div>
+      <div class="div"></div>
+      <div class="title">
+        <div class="h1">选中文字，即可<span class="em">划词批注</span></div>
+        <div class="sub">在任意网页留下评论，支持多级回复，讨论自带上下文</div>
+      </div>
+      <div class="pill"><span class="num">01</span>划词批注</div>
+    </div>
+    <div class="stage">
+      <img class="shot" src="htmlGenius-添加评论@1184.png" alt="划词批注">
+    </div>
+  </div>
+</body></html>
