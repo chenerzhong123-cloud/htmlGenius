@@ -45,7 +45,7 @@
     <section class="feature wrap" id="team"><div class="feature-copy"><div class="number">03 / TEAM CONTEXT</div><h2>Keep comments<br><span class="gradient">within your team.</span></h2><p>Share feedback with the people who need it—and no one else. Sign in naturally with your Lark or Google account, then keep every decision connected.</p><p class="cn">仅与团队共享批注，安全可控。原生支持飞书与 Chrome 账号生态。</p></div><div class="stage"><div class="team-grid"><div class="team-card"><small>PRODUCT TEAM</small><div class="members"><i></i><i></i><i></i></div><p>3 teammates are reviewing this page.</p></div><div class="team-card"><small>COMMENT</small><p>Can we tighten the CTA and move it above the fold?</p></div></div><span class="lock"><b>⌑</b> team only</span></div></section>
     <section class="final wrap"><span class="pill"><span class="dot"></span> BUILT FOR THE NEXT WEB</span><h2>The next-gen workflow is <span class="gradient">one click away.</span></h2><p>Bring the naturalness of a document editor to every HTML page you work with.</p><div class="checks"><span>Open Source</span><span>Free</span><span>Chrome Extension</span></div><a class="button" href="https://chromewebstore.google.com/" target="_blank" rel="noreferrer">Add htmlGenius to Chrome ↗</a></section>
   </main>
-  <footer class="wrap"><span>© 2026 htmlGenius</span><span class="footer-links"><a href="https://github.com/chenerzhong123-cloud/htmlGenius" target="_blank" rel="noreferrer">GitHub ↗</a><a href="#">Privacy</a><a href="#top">Back to top ↑</a></span></footer>
+  <footer class="wrap"><span>© 2026 htmlGenius</span><span class="footer-links"><a href="https://github.com/chenerzhong123-cloud/htmlGenius" target="_blank" rel="noreferrer">GitHub ↗</a><a href="privacy.html">Privacy</a><a href="#top">Back to top ↑</a></span></footer>
   <script>
     (() => {
       const storeKey = 'htmlgenius-language';
@@ -133,7 +133,7 @@
       const browserLanguage = (navigator.languages || [navigator.language || 'en']).find((language) => language.toLowerCase().startsWith('zh')) ? 'zh' : 'en';
       const initial = ['zh', 'en'].includes(requested) ? requested : (['zh', 'en'].includes(saved) ? saved : browserLanguage);
       const menu = qs('#language-menu'); const toggle = qs('#language-toggle');
-      applyLanguage(initial, false);
+      applyLanguage(initial, true);
       toggle.addEventListener('click', () => { const open = menu.classList.toggle('open'); toggle.setAttribute('aria-expanded', open); });
       document.querySelectorAll('.language-option').forEach((option) => option.addEventListener('click', () => { applyLanguage(option.dataset.language); menu.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); }));
       document.addEventListener('click', (event) => { if (!event.target.closest('.language')) { menu.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); } });
