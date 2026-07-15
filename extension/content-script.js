@@ -86,6 +86,12 @@
   // Fix #3/#2: content-script 是编辑态的唯一真相源,sidepanel 经 get-annotations 同步。
   // 页面始终以「查看」模式启动(含刷新);进入编辑需显式 enable-edit。
   let _editing = false;
+  // #2/#3a: 编辑历史(线性模型,支持 undo/redo/reset;本地/远程均可)+ 侧栏取色用的最近选区
+  let _history = [];
+  let _histIdx = -1;
+  let _lastRange = null;
+  let _undoDebounce = 0;
+  let _versionTimer = 0;
   let _activated = false;          // 侧边栏激活前:不显示工具栏/高亮/编辑(避免对所有网页打扰)
   let _refreshDialogShown = false; // 本页面会话内只弹一次编辑确认窗(刷新后随页面重载重置)
   let _baseHash = null;            // #3: 当前会话的「原始文件」正文哈希(判定磁盘文件是否被外部改动)
@@ -227,6 +233,7 @@
     document.body.contentEditable = on ? "true" : "false";
     _editing = on;
     toolbar.classList.toggle("editing", on);
+    if (on) initUndoBaseline(); // #2: 进入编辑时记下原始基线(本地/远程均可撤销)
     if (!on) closeAllPopovers();
     try { chrome.runtime.sendMessage({ type: "edit-state", editing: on, isLocal: isLocal }).catch(() => {}); } catch (e) {}
   }
@@ -320,6 +327,22 @@
       setEditing(true); sendResponse({ ok: true });
     } else if (msg.type === "disable-edit") {
       setEditing(false); sendResponse({ ok: true });
+    } else if (msg.type === "undo") {
+      doUndo(); sendResponse({ ok: true });
+    } else if (msg.type === "redo") {
+      doRedo(); sendResponse({ ok: true });
+    } else if (msg.type === "reset-edit") {
+      resetEdit(); sendResponse({ ok: true });
+    } else if (msg.type === "save-html") {
+      saveHtml(); sendResponse({ ok: true });
+    } else if (msg.type === "apply-color") {
+      // #3b: 侧边栏取色 → 还原最近选区 → 复用浮窗的 applyStyle 施色
+      if (_editing && _lastRange) {
+        const sel = document.getSelection();
+        sel.removeAllRanges(); sel.addRange(_lastRange);
+        applyStyle(msg.kind === "highlight" ? "background" : "color", msg.color);
+      }
+      sendResponse({ ok: true });
     } else if (msg.type === "activate") {
       // sidepanel 触发:打开侧边栏(showDialog=true,弹确认窗)/ 切标签或刷新(showDialog=false,静默激活)
       const showDialog = msg.showDialog !== false;
@@ -494,10 +517,11 @@
       if (range) {
         ann._status = "open";
         if (_activated) { // 未激活时不渲染高亮(数据照载,供侧边栏卡片用)
-          const entry = { divs: [], range };
+          const entry = { divs: [], range, id: ann.id }; // #4: 记 id,供点击命中检测
           for (const r of range.getClientRects()) {
             const div = document.createElement("div");
             div.className = "hg-hl";
+            div.dataset.annId = ann.id; // #4: 点击命中后定位批注
             div.style.left = r.left + "px";
             div.style.top = r.top + "px";
             div.style.width = r.width + "px";
@@ -530,6 +554,7 @@
           for (const r of rects) {
             const div = document.createElement("div");
             div.className = "hg-hl";
+            div.dataset.annId = entry.id; // #4: 重建时保留 annId
             div.style.left = r.left + "px";
             div.style.top = r.top + "px";
             div.style.width = r.width + "px";
@@ -551,62 +576,106 @@
   window.addEventListener("scroll", updatePositions, true);
   window.addEventListener("resize", updatePositions);
 
-  // === 本地模式:版本管理 + 撤销 + 粘贴 ===
-  if (isLocal) {
-    const undoStack = [];
-    const MAX_UNDO = 50;
-    let undoDebounce = 0;
-
-    function pushUndo() {
-      undoStack.push(captureBodyForSave()); // clean 快照(无 toolbar/overlay),撤销时才保得住工具栏
-      if (undoStack.length > MAX_UNDO) undoStack.shift();
-    }
-
-    function doUndo() {
-      if (!undoStack.length) return;
-      applyRestoredBody(undoStack.pop()); // 重建正文 + 保留同一 toolbar 节点(监听不丢)
-      if (_editing) document.body.contentEditable = "true"; // Fix #2: undo 后保持编辑态
-      loadAnnotations();
-    }
-
-    document.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
-        e.preventDefault();
-        doUndo();
+  // #4: 点击页面高亮 → 命中检测(高亮 pointer-events:none 不挡文字/编辑,故用坐标命中)→ 通知侧边栏聚焦评论
+  document.addEventListener("click", (e) => {
+    if (_editing) return;                 // 编辑态放行(让编辑正常)
+    const sel = document.getSelection();
+    if (sel && !sel.isCollapsed) return;  // 用户在框选文字,不算"点高亮"
+    const x = e.clientX, y = e.clientY;
+    for (const entry of overlayData) {
+      for (const d of entry.divs) {
+        const r = d.getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+          d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), 800);
+          try { chrome.runtime.sendMessage({ type: "annotation-clicked", id: d.dataset.annId }); } catch (er) {}
+          return;
+        }
       }
-    });
+    }
+  });
 
-    let versionTimer = 0;
-    document.body.addEventListener("input", () => {
-      clearTimeout(undoDebounce);
-      undoDebounce = setTimeout(pushUndo, 1000);
-      clearTimeout(versionTimer);
-      versionTimer = setTimeout(async () => {
+  // === 编辑历史:线性模型(undo/redo/reset),本地/远程均可 ===
+  const MAX_UNDO = 50;
+  function applyHistState(s) { applyRestoredBody(s); if (_editing) document.body.contentEditable = "true"; loadAnnotations(); }
+  function initUndoBaseline() { _history = [captureBodyForSave()]; _histIdx = 0; } // 进入编辑:原始正文为基线(index 0)
+  function pushUndo() {
+    if (_histIdx < 0) return;
+    const cur = captureBodyForSave();
+    if (cur === _history[_histIdx]) return;
+    _history = _history.slice(0, _histIdx + 1); // 新编辑 → 截断 redo 分支
+    _history.push(cur); _histIdx = _history.length - 1;
+    if (_history.length > MAX_UNDO) { _history.shift(); _histIdx--; }
+  }
+  function doUndo() {
+    if (_histIdx < 0) return;
+    const cur = captureBodyForSave();
+    if (cur !== _history[_histIdx]) { applyHistState(_history[_histIdx]); return; } // 撤回防抖窗口内未提交的变更
+    if (_histIdx > 0) { _histIdx--; applyHistState(_history[_histIdx]); }
+  }
+  function doRedo() {
+    if (_histIdx >= 0 && _histIdx < _history.length - 1) { _histIdx++; applyHistState(_history[_histIdx]); }
+  }
+  function resetEdit() { // #3a: 还原到本次编辑初始版本(基线),截断历史
+    if (_histIdx < 0 || !_history.length) return;
+    applyHistState(_history[0]);
+    _history = [_history[0]]; _histIdx = 0;
+  }
+  // #3a: 当前 HTML 另存为(下载 .html;本地/远程均可,扩展无法覆盖原文件)
+  function saveHtml() {
+    const clone = document.documentElement.cloneNode(true);
+    clone.querySelectorAll("#hg-toolbar, .hg-hl").forEach((e) => e.remove());
+    const html = "<!doctype html>\n" + clone.outerHTML;
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = (document.title || "htmlgenius-page") + ".html";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+  // #3b: 记下最近非空选区,供侧边栏取色后还原再施色
+  document.addEventListener("selectionchange", () => {
+    if (!_editing) return;
+    const sel = document.getSelection();
+    if (sel && sel.rangeCount && !sel.isCollapsed) _lastRange = sel.getRangeAt(0).cloneRange();
+  });
+
+  // 撤销 + 粘贴:本地/远程均可编辑 → 全局注册(仅 _editing 时拦截,免得抢页面原生快捷键);版本持久化仅本地。
+  document.addEventListener("keydown", (e) => {
+    if (!_editing) return; // 非编辑态不拦截,保留页面原生 Cmd/Ctrl+Z
+    if ((e.ctrlKey || e.metaKey) && e.key && e.key.toLowerCase() === "z") { e.preventDefault(); doUndo(); }
+  });
+  document.body.addEventListener("input", () => {
+    if (!_editing) return;
+    clearTimeout(_undoDebounce);
+    _undoDebounce = setTimeout(pushUndo, 700);
+    if (isLocal) {
+      clearTimeout(_versionTimer);
+      _versionTimer = setTimeout(async () => {
         const docId = await Storage.getDocumentId();
         // 只存正文,剥离扩展注入的 toolbar/overlay,避免还原时重复或错位
         const html = captureBodyForSave();
         try { await Storage.saveVersion(docId, html, _baseHash); } catch (e) { /* 存失败不阻塞编辑 */ }
       }, 1500);
-    });
-
-    document.body.addEventListener("paste", (e) => {
-      e.preventDefault();
-      const cd = e.clipboardData || {};
-      const html = cd.getData("text/html") || "";
-      const text = cd.getData("text/plain") || "";
-      const sel = document.getSelection();
-      if (!sel || sel.rangeCount === 0) return;
-      const range = sel.getRangeAt(0);
-      range.deleteContents();
-      if (html && window.DOMPurify) {
-        const clean = window.DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
-        range.insertNode(range.createContextualFragment(clean));
-      } else {
-        range.insertNode(document.createTextNode(text));
-      }
-      range.collapse(false);
-    });
-  }
+    }
+  });
+  document.body.addEventListener("paste", (e) => {
+    if (!_editing) return;
+    e.preventDefault();
+    const cd = e.clipboardData || {};
+    const html = cd.getData("text/html") || "";
+    const text = cd.getData("text/plain") || "";
+    const sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    if (html && window.DOMPurify) {
+      const clean = window.DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+      range.insertNode(range.createContextualFragment(clean));
+    } else {
+      range.insertNode(document.createTextNode(text));
+    }
+    range.collapse(false);
+  });
 
   // Fix #1: body 被编辑时(任意模式),延迟重锚定 overlay 高亮,使其跟随文字移动。
   // 放在 isLocal 块之外 —— 远程页若也开了 contentEditable 同样生效。与上面的

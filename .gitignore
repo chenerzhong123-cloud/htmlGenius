@@ -7,5 +7,7 @@ node_modules/
 .DS_Store
 .superpowers/
 extension.pem
+# pack.sh 产物(商店上传 zip),不入库
+dist/
 # Google OAuth 客户端密钥(敏感,严禁提交)
 docs/client_secret_*.json

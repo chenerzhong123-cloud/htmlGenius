@@ -27,6 +27,7 @@
   --success: #83efd7;
   --warning: #f5c86b;
   --warning-soft: rgba(245,200,107,.14);
+  --success-soft: rgba(131,239,215,.13);
   --danger: #ff8d98;
   /* 圆角 */
   --r-sm: 6px; --r-md: 9px; --r-lg: 12px; --r-xl: 16px; --r-pill: 999px;
@@ -178,16 +179,19 @@ body {
 .view.show { display: block; }
 
 /* === 编辑视图 === */
+/* 标准 alert 气泡(图标 + 文案;经典控件):本地=success 绿(持久) / 远程=warning 黄(临时) */
 #mode-indicator {
-  padding: 8px 11px 8px 26px; border-radius: var(--r-md); margin-bottom: 12px;
-  font-size: 12px; font-weight: 500; position: relative;
-  background: var(--bg-surface); color: var(--text-secondary);
-  border: 1px solid var(--line-subtle);
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 9px 11px; border-radius: var(--r-md); margin-bottom: 12px;
+  font-size: 12px; line-height: 1.45; font-weight: 500;
+  border: 1px solid transparent;
 }
-#mode-indicator::before { /* 状态点 */
-  content: ""; position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
-  width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 8px rgba(131,239,215,.6);
-}
+#mode-indicator svg { width: 14px; height: 14px; flex: none; margin-top: 1px; }
+#mode-indicator.alert-success { background: var(--success-soft); border-color: rgba(131,239,215,.4); color: var(--success); }
+#mode-indicator.alert-warning { background: var(--warning-soft); border-color: rgba(245,200,107,.4); color: var(--warning); }
+/* 浅色主题:alert 用标准暖黄/浅绿(深色主题的 mint/gold 在白底发灰,不像标准 alert) */
+[data-theme="light"] #mode-indicator.alert-warning { background: #fef3c7; border-color: #f59e0b; color: #92400e; }
+[data-theme="light"] #mode-indicator.alert-success { background: #dcfce7; border-color: #22c55e; color: #166534; }
 #edit-btn { /* 唯一主 CTA(深色=靛蓝渐变 / 浅色=近黑实色) */
   width: 100%; height: 40px; margin-bottom: 12px;
   background: var(--cta-bg);
@@ -211,8 +215,34 @@ body {
   text-align: center;
 }
 
+/* #3a/#3b: 编辑会话动作 + 取色(仅编辑态显示) */
+.edit-tools { margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
+.edit-actions { display: flex; gap: 6px; }
+.edit-actions .act {
+  flex: 1; height: 34px; display: grid; place-items: center;
+  background: var(--bg-surface); color: var(--text-secondary);
+  border: 1px solid var(--line-subtle); border-radius: var(--r-md);
+  cursor: pointer; transition: background .15s, border-color .15s, color .15s;
+}
+.edit-actions .act:hover { background: var(--bg-surface-raised); border-color: var(--line-default); color: var(--text-primary); }
+.edit-actions .act:active { transform: translateY(1px); }
+.edit-actions .act svg { width: 16px; height: 16px; }
+.edit-colors { display: flex; gap: 8px; }
+.color-pick {
+  flex: 1; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted);
+  background: var(--bg-surface); border: 1px solid var(--line-subtle); border-radius: var(--r-md);
+  padding: 5px 8px; cursor: pointer;
+}
+.color-pick input[type="color"] { width: 24px; height: 24px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.color-pick input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.color-pick input[type="color"]::-webkit-color-swatch { border: 1px solid var(--line-default); border-radius: 6px; }
+
 /* === 批注视图 === */
-#presence { font-size: 12px; color: var(--text-muted); padding: 0 2px 8px; }
+/* 身份入口里的在线人数(#1:从评论区移出,只显示人数) */
+.presence-count { font-size: 11.5px; color: var(--text-muted); margin-top: 8px; display: flex; align-items: center; gap: 6px; }
+.presence-count::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px rgba(121,233,247,.6); }
+/* #4: 页面点高亮跳转时卡片的高亮反馈 */
+.card.flash { outline: 2px solid var(--brand); outline-offset: 2px; }
 #annotations { margin-bottom: 12px; }
 #export-btn {
   width: 100%; height: 40px;
