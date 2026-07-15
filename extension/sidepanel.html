@@ -38,9 +38,16 @@
       <label class="color-pick"><input type="color" id="color-text" value="#7c8cff"><span data-i18n="color.text">文字色</span></label>
       <label class="color-pick"><input type="color" id="color-hl" value="#ffe14d"><span data-i18n="color.highlight">高亮色</span></label>
     </div>
+    <button id="act-emoji" class="emoji-toggle" type="button"><span>😊</span> <span data-i18n="emoji.title">插入表情</span></button>
+    <div id="emoji-panel" class="emoji-panel" hidden></div>
+  </div>
+  <div id="element-panel" class="element-panel" hidden>
+    <div class="ep-hint">高级模式已开启</div>
+    <div class="ep-sub">在页面上悬停看元素框、点选元素(M2);删除 / 复制 / 拖拽重排(M3-M4)</div>
   </div>
   <div class="edit-tips" data-i18n-html="tips.html">选中文字可<b>加批注</b>;点「<b>开始编辑</b>」后,选中文字可改<b>样式 / 颜色 / 字号 / 对齐</b>(Ctrl+Z 撤销)</div>
   <div class="reload-hint" data-i18n="reloadHint">若批注或编辑长时间无响应,刷新当前页面即可恢复</div>
+  <button id="adv-mode-btn" class="adv-mode-btn" data-i18n="adv.enter" hidden>切换高级模式</button>
 </div>
 
 <!-- 批注视图(次级) -->

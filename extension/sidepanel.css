@@ -236,6 +236,43 @@ body {
 .color-pick input[type="color"] { width: 24px; height: 24px; padding: 0; border: 0; background: transparent; cursor: pointer; }
 .color-pick input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 .color-pick input[type="color"]::-webkit-color-swatch { border: 1px solid var(--line-default); border-radius: 6px; }
+.emoji-toggle { width: 100%; height: 30px; display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--bg-surface); color: var(--text-secondary); border: 1px solid var(--line-subtle); border-radius: var(--r-md); font: 600 11.5px/1 var(--font-sans); cursor: pointer; }
+.emoji-toggle:hover { background: var(--bg-surface-raised); color: var(--text-primary); }
+
+/* v0.6: 切换高级模式 按钮(右下角浮动)+ 元素面板占位 */
+.adv-mode-btn {
+  position: fixed; right: 14px; bottom: 14px; z-index: 20;
+  background: var(--bg-surface-raised); color: var(--text-secondary);
+  border: 1px solid var(--line-default); border-radius: var(--r-pill);
+  padding: 8px 14px; font: 600 11.5px/1 var(--font-sans); cursor: pointer;
+  box-shadow: var(--shadow-float); transition: background .15s, color .15s, border-color .15s;
+}
+.adv-mode-btn:hover { background: var(--brand-soft); color: var(--text-primary); border-color: var(--brand); }
+.adv-mode-btn.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.element-panel { background: var(--brand-soft); border: 1px solid rgba(124,140,255,.3); border-radius: var(--r-md); padding: 12px; margin-bottom: 12px; }
+.element-panel .ep-hint { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.element-panel .ep-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+.element-panel .ep-head { display: flex; align-items: center; gap: 8px; }
+.element-panel code { font-family: var(--font-mono); font-size: 11.5px; }
+.element-panel .ep-tag { color: var(--brand); font-weight: 600; }
+.element-panel .ep-size { font-size: 11px; color: var(--text-muted); }
+.element-panel .ep-sib { margin-left: auto; font-size: 10.5px; color: var(--text-faint); background: rgba(255,255,255,.06); padding: 2px 7px; border-radius: var(--r-pill); }
+.element-panel .ep-cls { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.element-panel .ep-c { color: var(--cyan); background: rgba(121,233,247,.10); padding: 1px 6px; border-radius: 5px; }
+.element-panel .ep-text { margin-top: 7px; font-size: 11.5px; color: var(--text-secondary); line-height: 1.5; }
+.element-panel .ep-acts { display: flex; gap: 6px; margin-top: 10px; }
+.element-panel .ep-btn { flex: 1; height: 30px; background: var(--bg-surface); color: var(--text-secondary); border: 1px solid var(--line-subtle); border-radius: var(--r-md); font: 600 11.5px/1 var(--font-sans); cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+.element-panel .ep-btn:hover { background: var(--bg-surface-raised); color: var(--text-primary); }
+.element-panel .ep-danger:hover { color: var(--danger); border-color: var(--danger); }
+.element-panel .ep-ghost { flex: 0 0 auto; padding: 0 10px; }
+.element-panel .ep-draghint { margin-top: 8px; font-size: 10.5px; color: var(--text-faint); text-align: center; }
+.element-panel .ep-styles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; margin-top: 10px; }
+.element-panel .ep-style { display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: var(--text-muted); }
+.element-panel .ep-style select { height: 26px; background: var(--bg-input); color: var(--text-secondary); border: 1px solid var(--line-subtle); border-radius: var(--r-sm); font: 11px/1 var(--font-sans); padding: 0 4px; cursor: pointer; }
+/* v0.6 M7: emoji 面板 */
+.emoji-panel { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; max-height: 150px; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--line-subtle); border-radius: var(--r-md); padding: 6px; }
+.emoji-panel .emoji-i { font-size: 17px; background: transparent; border: 0; cursor: pointer; padding: 3px 0; border-radius: 5px; line-height: 1; }
+.emoji-panel .emoji-i:hover { background: var(--brand-soft); }
 
 /* === 批注视图 === */
 /* 身份入口里的在线人数(#1:从评论区移出,只显示人数) */

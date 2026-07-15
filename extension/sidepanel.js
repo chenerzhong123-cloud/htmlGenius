@@ -76,6 +76,10 @@
       _editing = !!msg.editing;
       if (msg.isLocal !== undefined) isLocal = msg.isLocal;
       renderMode();
+    } else if (msg.type === "element-mode-changed") {
+      _elementMode = !!msg.on; updateAdvModeBtn(); // v0.6: 模式翻转 → 按钮 + 互斥显隐
+    } else if (msg.type === "element-selected") {
+      renderElementPanel(msg.info); // v0.6 M2: 渲染选中元素信息
     } else if (msg.type === "annotation-clicked") {
       // #4: 页面点高亮 → 切到批注 tab + 滚到卡片 + 聚焦回复输入
       switchTab("comment");
@@ -90,6 +94,7 @@
   });
 
   let _editing = false;
+  let _elementMode = false; // v0.6: 高级(元素)模式
 
   // 标准 alert 图标(success=对勾圆 / warning=三角感叹号),用经典控件不手画
   const ICON_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>';
@@ -106,7 +111,64 @@
     el.innerHTML = (isLocal ? ICON_OK : ICON_WARN) + "<span>" + esc(text) + "</span>";
     btn.textContent = _editing ? t("edit.exit") : t("edit.start");
     const tools = document.getElementById("edit-tools");
-    if (tools) tools.hidden = !_editing; // #3a: 会话动作仅编辑态显示
+    if (tools) tools.hidden = !_editing || _elementMode; // 元素模式时让位给元素面板
+    const epanel = document.getElementById("element-panel");
+    if (epanel) epanel.hidden = !_elementMode; // v0.6: 元素面板(M3 填内容)
+    const adv = document.getElementById("adv-mode-btn");
+    if (adv) adv.hidden = !_editing; // v0.6: 仅编辑态显示「切换高级模式」
+  }
+  // v0.6: 高级模式按钮文案/高亮 + 互斥显隐
+  function updateAdvModeBtn() {
+    const b = document.getElementById("adv-mode-btn");
+    if (!b) return;
+    b.textContent = t(_elementMode ? "adv.exit" : "adv.enter");
+    b.classList.toggle("active", _elementMode);
+    renderMode();
+  }
+  // v0.6 M6: 元素样式预设(fontFamily/letterSpacing/lineHeight/padding)
+  const FONT_OPTS = [["", "默认"], ["sans-serif", "无衬线"], ["serif", "衬线"], ["monospace", "等宽"], ['"PingFang SC",sans-serif', "苹方"], ['"Microsoft YaHei",sans-serif', "微软雅黑"], ["Arial,sans-serif", "Arial"], ["Georgia,serif", "Georgia"]];
+  const LS_OPTS = [["", "默认"], ["-0.02em", "紧凑"], ["0.05em", "略松"], ["0.1em", "宽松"], ["0.15em", "很宽"]];
+  const LH_OPTS = [["", "默认"], ["1", "1.0"], ["1.3", "1.3"], ["1.5", "1.5"], ["1.7", "1.7"], ["2", "2.0"]];
+  const PAD_OPTS = [["", "默认"], ["0", "0"], ["6px", "6"], ["12px", "12"], ["18px", "18"], ["24px", "24"]];
+  function styleSelect(prop, label, opts, cur) {
+    const oh = opts.map((o) => '<option value="' + esc(o[0]) + '"' + (o[0] === (cur || "") ? " selected" : "") + ">" + esc(o[1]) + "</option>").join("");
+    return '<label class="ep-style"><span>' + esc(label) + '</span><select data-style="' + prop + '">' + oh + "</select></label>";
+  }
+  // v0.6 M7: Emoji 库
+  const EMOJIS = ["😀","😄","😁","🙂","😊","😍","🤩","😘","😎","🤔","😐","😴","😭","😡","👍","👎","👌","✌️","🤝","👏","🙌","💪","🙏","💯","✅","❌","⭐","🔥","💡","❤️","🎉","🎊","🚀","✨","📌","📎","📷","📊","📈","🔑","⏰","📅","🌍","🎯","🏆","💰","📝","✏️","🔍","⚙️","🎨","🎵","📱","💻","🌐","🔗","💬","💭","⚠️","❓","❗","➕","➖","✖️","✔️"];
+  function buildEmojiPanel() {
+    const p = document.getElementById("emoji-panel");
+    if (!p || p.dataset.built) return;
+    p.dataset.built = "1";
+    p.innerHTML = EMOJIS.map((e) => '<button class="emoji-i" type="button" data-e="' + e + '">' + e + "</button>").join("");
+  }
+  // v0.6 M2: 渲染选中元素信息到元素面板(M3 加操作按钮)
+  function renderElementPanel(info) {
+    const el = document.getElementById("element-panel");
+    if (!el) return;
+    if (!info) {
+      el.innerHTML = '<div class="ep-hint">' + esc(t("adv.enter")) + '</div><div class="ep-sub">' + esc(t("ep.noSel")) + '</div>';
+      return;
+    }
+    const cls = (info.classes || "").trim().split(/\s+/).filter(Boolean)
+      .map((c) => '<code class="ep-c">.' + esc(c) + '</code>').join(" ");
+    el.innerHTML =
+      '<div class="ep-head"><code class="ep-tag">' + esc(info.tag) + (info.id ? '#' + esc(info.id) : '') + '</code>' +
+      '<span class="ep-size">' + info.w + '×' + info.h + '</span>' +
+      '<span class="ep-sib">' + (info.siblingIndex + 1) + '/' + info.siblingCount + '</span></div>' +
+      (cls ? '<div class="ep-cls">' + cls + '</div>' : '') +
+      (info.textPreview ? '<div class="ep-text">' + esc(info.textPreview) + '</div>' : '') +
+      '<div class="ep-styles">' +
+      styleSelect("fontFamily", t("style.font"), FONT_OPTS, (info.styles || {}).fontFamily) +
+      styleSelect("letterSpacing", t("style.letter"), LS_OPTS, (info.styles || {}).letterSpacing) +
+      styleSelect("lineHeight", t("style.line"), LH_OPTS, (info.styles || {}).lineHeight) +
+      styleSelect("padding", t("style.padding"), PAD_OPTS, (info.styles || {}).padding) +
+      '</div>' +
+      '<div class="ep-acts"><button id="el-parent" class="ep-btn ep-ghost">↑ ' + esc(t("ep.parent")) + '</button>' +
+      '<button id="el-textedit" class="ep-btn ep-ghost">' + esc(t("ep.editText")) + '</button>' +
+      '<button id="el-dup" class="ep-btn">' + esc(t("ep.duplicate")) + '</button>' +
+      '<button id="el-del" class="ep-btn ep-danger">' + esc(t("ep.delete")) + '</button></div>' +
+      '<div class="ep-draghint">' + esc(t("ep.dragHint")) + '</div>';
   }
 
   function renderCards(items) {
@@ -347,11 +409,46 @@
     renderMode();
   });
 
+  // v0.6: 切换高级(元素)模式
+  document.getElementById("adv-mode-btn").addEventListener("click", () => sendToContent({ type: "toggle-element-mode" }));
+  // v0.6 M3: 元素面板操作(事件委托;面板 innerHTML 会随选中重建)
+  document.getElementById("element-panel").addEventListener("click", (e) => {
+    if (e.target.id === "el-del") sendToContent({ type: "element-delete" });
+    else if (e.target.id === "el-dup") sendToContent({ type: "element-duplicate" });
+    else if (e.target.id === "el-parent") sendToContent({ type: "element-select-parent" });
+    else if (e.target.id === "el-textedit") sendToContent({ type: "element-edit-text" });
+  });
+  // v0.6 M6: 元素样式 select 改动 → element-style
+  document.getElementById("element-panel").addEventListener("change", (e) => {
+    const s = e.target.closest("select[data-style]");
+    if (s) sendToContent({ type: "element-style", prop: s.dataset.style, value: s.value });
+  });
+  // v0.6 M7: Emoji 库 — 按钮开关面板 + 点 emoji 插入
+  document.getElementById("act-emoji").addEventListener("click", () => {
+    const p = document.getElementById("emoji-panel");
+    buildEmojiPanel();
+    p.hidden = !p.hidden;
+  });
+  document.getElementById("emoji-panel").addEventListener("click", (e) => {
+    const b = e.target.closest(".emoji-i");
+    if (b) sendToContent({ type: "insert-text", text: b.dataset.e });
+  });
   // #3a/#3b: 侧边栏会话动作 + 取色 → 发消息给 content-script(content-script 在页面施效)
   document.getElementById("act-undo").addEventListener("click", () => sendToContent({ type: "undo" }));
   document.getElementById("act-redo").addEventListener("click", () => sendToContent({ type: "redo" }));
   document.getElementById("act-reset").addEventListener("click", () => sendToContent({ type: "reset-edit" }));
-  document.getElementById("act-save").addEventListener("click", () => sendToContent({ type: "save-html" }));
+  document.getElementById("act-save").addEventListener("click", async () => {
+    // #2: 下载在 side panel 触发(content-script 只回传 HTML,避免异步消息丢用户手势被拦)
+    const r = await sendToContent({ type: "save-html" });
+    if (r && r.html) {
+      const blob = new Blob([r.html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = r.name || "page.html";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+  });
   // change(而非 input):取色确认后一次性施效,避免连续触发时选区 range 失效
   document.getElementById("color-text").addEventListener("change", (e) => sendToContent({ type: "apply-color", kind: "text", color: e.target.value }));
   document.getElementById("color-hl").addEventListener("change", (e) => sendToContent({ type: "apply-color", kind: "highlight", color: e.target.value }));

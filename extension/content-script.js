@@ -86,10 +86,12 @@
   // Fix #3/#2: content-script 是编辑态的唯一真相源,sidepanel 经 get-annotations 同步。
   // 页面始终以「查看」模式启动(含刷新);进入编辑需显式 enable-edit。
   let _editing = false;
-  // #2/#3a: 编辑历史(线性模型,支持 undo/redo/reset;本地/远程均可)+ 侧栏取色用的最近选区
-  let _history = [];
-  let _histIdx = -1;
-  let _lastRange = null;
+  let _elementMode = false; // v0.6: 高级(元素)模式 —— 与文字编辑互斥
+  let _selectedEl = null;   // v0.6: 当前选中控件
+  let _textEditingEl = null; // v0.6 #5: 元素模式下正在编辑文字的控件
+  // #2/#3a: 编辑历史(线性模型,undo/redo/reset;核心状态机在 undo.js)+ 侧栏取色/emoji 用的最近选区
+  let _lastRange = null;  // 非折叠选区(取色用)
+  let _lastCursor = null; // 任意光标位(emoji 插入用)
   let _undoDebounce = 0;
   let _versionTimer = 0;
   let _activated = false;          // 侧边栏激活前:不显示工具栏/高亮/编辑(避免对所有网页打扰)
@@ -119,6 +121,13 @@
     }
     .hg-hl{ position:fixed; background:var(--hl); pointer-events:none; z-index:2147483646; border-radius:2px; }
     .hg-hl.flash{ background:var(--hl-flash); }
+    .hg-inspect,.hg-select{ position:fixed; pointer-events:none; z-index:2147483645; border-radius:3px; }
+    .hg-inspect{ background:rgba(124,140,255,.14); border:1px solid rgba(124,140,255,.7); }
+    .hg-select{ background:rgba(121,233,247,.12); border:2px solid var(--hg-brand); }
+    .hg-tip{ position:fixed; pointer-events:none; z-index:2147483647; transform:translateY(-100%); margin-top:-4px;
+      background:var(--hg-bg); color:var(--hg-fg); border:1px solid var(--hg-line); border-radius:6px;
+      padding:3px 7px; font:11px ui-monospace,SFMono-Regular,Menlo,monospace; box-shadow:var(--hg-shadow); white-space:nowrap; }
+    .hg-drop{ position:fixed; pointer-events:none; z-index:2147483645; height:2px; background:var(--hg-brand); box-shadow:0 0 6px rgba(124,140,255,.8); border-radius:1px; }
     #hg-toolbar{ position:fixed; z-index:2147483647; display:none; background:var(--hg-bg); color:var(--hg-fg);
       border:1px solid var(--hg-line); border-radius:9px; padding:4px; gap:1px; align-items:center;
       box-shadow:var(--hg-shadow); font-size:13px;
@@ -230,6 +239,7 @@
 
   // 统一开关编辑态:设 contentEditable + 工具栏 editing 类 + 广播给侧边栏同步按钮
   function setEditing(on) {
+    if (!on && _elementMode) setElementMode(false); // 退出编辑前先关元素模式(v0.6)
     document.body.contentEditable = on ? "true" : "false";
     _editing = on;
     toolbar.classList.toggle("editing", on);
@@ -237,6 +247,195 @@
     if (!on) closeAllPopovers();
     try { chrome.runtime.sendMessage({ type: "edit-state", editing: on, isLocal: isLocal }).catch(() => {}); } catch (e) {}
   }
+
+  // v0.6: 高级(元素)模式 —— 与文字编辑互斥。开:关 contentEditable + 隐藏文字工具栏;关:恢复。
+  function setElementMode(on) {
+    if (on === _elementMode) return;
+    _elementMode = on;
+    if (on) {
+      if (_editing) document.body.contentEditable = "false"; // 让点击选元素而非进文字编辑态
+      toolbar.classList.remove("show"); // 元素模式不弹文字工具栏
+      closeAllPopovers();
+      ensureElOverlays();
+      document.body.style.userSelect = "none"; // 元素模式禁止框选文字(拖拽时不误选)
+      document.addEventListener("mousemove", onElInspect);
+      document.addEventListener("click", onElClick, true); // capture:吞页面默认点击 + 选元素
+      document.addEventListener("pointerdown", onElPointerDown, true);
+      document.addEventListener("pointermove", onElPointerMove);
+      document.addEventListener("pointerup", onElPointerUp);
+    } else {
+      document.removeEventListener("mousemove", onElInspect);
+      document.removeEventListener("click", onElClick, true);
+      document.removeEventListener("pointerdown", onElPointerDown, true);
+      document.removeEventListener("pointermove", onElPointerMove);
+      document.removeEventListener("pointerup", onElPointerUp);
+      if (_textEditingEl) { _textEditingEl.contentEditable = "false"; _textEditingEl = null; }
+      _selectedEl = null; _elDrag = null;
+      hideElOverlays();
+      document.body.style.userSelect = "";
+      if (_editing) document.body.contentEditable = "true"; // 恢复文字编辑
+    }
+    try { chrome.runtime.sendMessage({ type: "element-mode-changed", on: on }).catch(() => {}); } catch (e) {}
+  }
+
+  // === v0.6 M2: 元素 inspect(悬停画框)+ 点选 ===
+  let _elInspectBox = null, _elSelectBox = null, _elTip = null, _elDrop = null, _elRAF = 0;
+  function ensureElOverlays() {
+    if (_elInspectBox) return;
+    _elInspectBox = document.createElement("div"); _elInspectBox.className = "hg-inspect"; _elInspectBox.style.display = "none"; document.body.appendChild(_elInspectBox);
+    _elSelectBox = document.createElement("div"); _elSelectBox.className = "hg-select"; _elSelectBox.style.display = "none"; document.body.appendChild(_elSelectBox);
+    _elTip = document.createElement("div"); _elTip.className = "hg-tip"; _elTip.style.display = "none"; document.body.appendChild(_elTip);
+    _elDrop = document.createElement("div"); _elDrop.className = "hg-drop"; _elDrop.style.display = "none"; document.body.appendChild(_elDrop);
+  }
+  function hideElOverlays() {
+    if (_elInspectBox) _elInspectBox.style.display = "none";
+    if (_elSelectBox) _elSelectBox.style.display = "none";
+    if (_elTip) _elTip.style.display = "none";
+    if (_elDrop) _elDrop.style.display = "none";
+  }
+  function elSkipped(el) {
+    if (!el || el === document.body || el === document.documentElement) return true;
+    if (el.closest && el.closest("#hg-toolbar,.hg-inspect,.hg-select,.hg-tip,.hg-hl")) return true;
+    return false;
+  }
+  function pickEl(x, y) { const el = document.elementFromPoint(x, y); return elSkipped(el) ? null : el; }
+  function elLabel(el) {
+    const tag = el.tagName.toLowerCase();
+    const id = el.id ? "#" + el.id : "";
+    let cls = "";
+    if (typeof el.className === "string" && el.className) cls = "." + el.className.trim().split(/\s+/)[0];
+    const r = el.getBoundingClientRect();
+    return tag + id + cls + " · " + Math.round(r.width) + "×" + Math.round(r.height);
+  }
+  function elInfo(el) {
+    const r = el.getBoundingClientRect();
+    const parent = el.parentElement;
+    let idx = -1, count = 0;
+    if (parent) { idx = Array.prototype.indexOf.call(parent.children, el); count = parent.children.length; }
+    const s = el.style;
+    return {
+      tag: el.tagName.toLowerCase(), id: el.id || "",
+      classes: (typeof el.className === "string" ? el.className : ""),
+      w: Math.round(r.width), h: Math.round(r.height),
+      siblingIndex: idx, siblingCount: count,
+      textPreview: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80),
+      styles: { fontFamily: s.fontFamily || "", letterSpacing: s.letterSpacing || "", lineHeight: s.lineHeight || "", padding: s.padding || "" },
+    };
+  }
+  function positionBox(box, r) {
+    box.style.left = r.left + "px"; box.style.top = r.top + "px";
+    box.style.width = r.width + "px"; box.style.height = r.height + "px"; box.style.display = "block";
+  }
+  function onElInspect(e) {
+    if (!_elementMode) return;
+    if (_elDrag && _elDrag.moved) { _elInspectBox.style.display = "none"; _elTip.style.display = "none"; return; } // 拖拽中不显示 inspect
+    if (_elRAF) return;
+    _elRAF = requestAnimationFrame(() => {
+      _elRAF = 0;
+      const el = pickEl(e.clientX, e.clientY);
+      if (el) {
+        positionBox(_elInspectBox, el.getBoundingClientRect());
+        const r = el.getBoundingClientRect();
+        _elTip.textContent = elLabel(el);
+        _elTip.style.left = r.left + "px"; _elTip.style.top = r.top + "px"; _elTip.style.display = "block";
+        if (_selectedEl) positionBox(_elSelectBox, _selectedEl.getBoundingClientRect()); // 滚动/移动时选区框跟随
+      } else { _elInspectBox.style.display = "none"; _elTip.style.display = "none"; }
+    });
+  }
+  function selectEl(el) {
+    _selectedEl = el;
+    positionBox(_elSelectBox, el.getBoundingClientRect());
+    try { chrome.runtime.sendMessage({ type: "element-selected", info: elInfo(el) }).catch(() => {}); } catch (er) {}
+  }
+  function deselectEl() {
+    _selectedEl = null;
+    if (_elSelectBox) _elSelectBox.style.display = "none";
+    try { chrome.runtime.sendMessage({ type: "element-selected", info: null }).catch(() => {}); } catch (er) {}
+  }
+  function deleteSelectedEl() { // v0.6 #6: 删除选中控件(按钮 + Delete/Backspace 键共用)
+    if (!_selectedEl || _selectedEl === document.body || !_selectedEl.parentElement) return;
+    _selectedEl.remove(); _selectedEl = null;
+    if (_elSelectBox) _elSelectBox.style.display = "none";
+    try { chrome.runtime.sendMessage({ type: "element-selected", info: null }).catch(() => {}); } catch (er) {}
+    pushUndo();
+  }
+  // v0.6 #5: 元素模式下编辑选中控件的文字(子态:该控件 contentEditable=true,内部点击放行)
+  function enterTextEdit() {
+    if (!_selectedEl || _selectedEl === document.body) return;
+    _textEditingEl = _selectedEl;
+    _textEditingEl.contentEditable = "true";
+    _textEditingEl.focus();
+    try { const r = document.createRange(); r.selectNodeContents(_textEditingEl); r.collapse(false); const s = document.getSelection(); s.removeAllRanges(); s.addRange(r); } catch (e) {}
+  }
+  function exitTextEdit() {
+    if (!_textEditingEl) return;
+    _textEditingEl.contentEditable = "false";
+    _textEditingEl = null;
+    pushUndo();
+  }
+  // 元素模式:capture 吞掉页面默认点击(链接/按钮)+ 选元素;点空白 → 取消选择
+  function onElClick(e) {
+    if (!_elementMode) return;
+    if (_textEditingEl && _textEditingEl.contains(e.target)) return; // 文字编辑子态:控件内部放行(原生光标)
+    if (_textEditingEl) exitTextEdit(); // 点到别处 → 先退出文字编辑
+    const el = pickEl(e.clientX, e.clientY);
+    if (!el) { deselectEl(); return; }
+    e.preventDefault(); e.stopPropagation();
+    selectEl(el);
+  }
+  // v0.6 M4: 同级拖拽重排。pointerdown 记起点;移动>5px 判定为拖拽;up 时按指针越过的同级中点 insertBefore。
+  let _elDrag = null;
+  function onElPointerDown(e) {
+    if (!_elementMode) return;
+    if (_textEditingEl && _textEditingEl.contains(e.target)) return; // 文字编辑中放行
+    const el = pickEl(e.clientX, e.clientY);
+    if (!el) return;
+    _elDrag = { el: el, startX: e.clientX, startY: e.clientY, moved: false, parent: null, dropBefore: null };
+  }
+  function onElPointerMove(e) {
+    if (!_elementMode || !_elDrag) return;
+    if (!_elDrag.moved) {
+      const dx = e.clientX - _elDrag.startX, dy = e.clientY - _elDrag.startY;
+      if (dx * dx + dy * dy < 25) return; // <5px:仍是点击
+      _elDrag.moved = true;
+      _elDrag.parent = _elDrag.el.parentElement;
+      _elDrag.el.style.opacity = "0.4";
+    }
+    if (!_elDrag.parent) return;
+    const sibs = Array.prototype.filter.call(_elDrag.parent.children, (c) => c !== _elDrag.el && !elSkipped(c));
+    let before = null;
+    for (const s of sibs) {
+      const r = s.getBoundingClientRect();
+      if (e.clientY < r.top + r.height / 2) { before = s; break; } // 指针在该级上半 → 插它前面
+    }
+    _elDrag.dropBefore = before; // null = 移到末尾
+    showDropIndicator(_elDrag.parent, before, _elDrag.el);
+  }
+  function onElPointerUp() {
+    if (!_elementMode || !_elDrag) return;
+    const d = _elDrag; _elDrag = null;
+    d.el.style.opacity = "";
+    if (d.moved && d.parent) {
+      hideDropIndicator();
+      d.parent.insertBefore(d.el, d.dropBefore);
+      selectEl(d.el);
+      pushUndo();
+    }
+  }
+  function showDropIndicator(parent, before, dragEl) {
+    ensureElOverlays();
+    let top;
+    if (before) top = before.getBoundingClientRect().top;
+    else {
+      const kids = Array.prototype.filter.call(parent.children, (c) => c !== dragEl && !elSkipped(c));
+      const last = kids[kids.length - 1];
+      top = last ? last.getBoundingClientRect().bottom : parent.getBoundingClientRect().top;
+    }
+    const pr = parent.getBoundingClientRect();
+    _elDrop.style.left = pr.left + "px"; _elDrop.style.top = (top - 1) + "px";
+    _elDrop.style.width = pr.width + "px"; _elDrop.style.display = "block";
+  }
+  function hideDropIndicator() { if (_elDrop) _elDrop.style.display = "none"; }
 
   // 编辑确认弹窗(页面级,激活侧边栏时弹一次):刷新→进入编辑;取消→保留查看(侧边栏显示「开始编辑」)
   function showRefreshDialog() {
@@ -327,6 +526,46 @@
       setEditing(true); sendResponse({ ok: true });
     } else if (msg.type === "disable-edit") {
       setEditing(false); sendResponse({ ok: true });
+    } else if (msg.type === "toggle-element-mode") {
+      setElementMode(!_elementMode); sendResponse({ ok: true, on: _elementMode });
+    } else if (msg.type === "element-delete") {
+      deleteSelectedEl(); sendResponse({ ok: true });
+    } else if (msg.type === "element-edit-text") {
+      if (_elementMode && _selectedEl) { if (_textEditingEl) exitTextEdit(); else enterTextEdit(); }
+      sendResponse({ ok: true });
+    } else if (msg.type === "element-duplicate") {
+      if (_selectedEl && _selectedEl !== document.body && _selectedEl.parentElement) {
+        const clone = _selectedEl.cloneNode(true);
+        _selectedEl.after(clone); _selectedEl = clone;
+        positionBox(_elSelectBox, clone.getBoundingClientRect());
+        try { chrome.runtime.sendMessage({ type: "element-selected", info: elInfo(clone) }).catch(() => {}); } catch (er) {}
+        pushUndo();
+        sendResponse({ ok: true });
+      } else sendResponse({ ok: false });
+    } else if (msg.type === "element-select-parent") {
+      if (_selectedEl && _selectedEl.parentElement && _selectedEl.parentElement !== document.body) selectEl(_selectedEl.parentElement);
+      sendResponse({ ok: true });
+    } else if (msg.type === "element-style") {
+      // v0.6: 改选中元素的行内样式(fontFamily/letterSpacing/lineHeight/padding);value="" 清除
+      if (_selectedEl && _selectedEl !== document.body) {
+        _selectedEl.style[msg.prop] = msg.value;
+        try { chrome.runtime.sendMessage({ type: "element-selected", info: elInfo(_selectedEl) }).catch(() => {}); } catch (er) {}
+        pushUndo();
+      }
+      sendResponse({ ok: true });
+    } else if (msg.type === "insert-text") {
+      // v0.6: 在最近光标处插入文本(emoji)。优先 _lastCursor。
+      const r = _lastCursor || _lastRange;
+      if (_editing && r && msg.text) {
+        const sel = document.getSelection();
+        sel.removeAllRanges(); sel.addRange(r);
+        r.deleteContents();
+        r.insertNode(document.createTextNode(msg.text));
+        r.collapse(false);
+        sel.removeAllRanges(); sel.addRange(r);
+        pushUndo();
+      }
+      sendResponse({ ok: true });
     } else if (msg.type === "undo") {
       doUndo(); sendResponse({ ok: true });
     } else if (msg.type === "redo") {
@@ -334,13 +573,14 @@
     } else if (msg.type === "reset-edit") {
       resetEdit(); sendResponse({ ok: true });
     } else if (msg.type === "save-html") {
-      saveHtml(); sendResponse({ ok: true });
+      sendResponse({ ok: true, html: buildExportHtml(), name: (document.title || "htmlgenius-page") + ".html" });
     } else if (msg.type === "apply-color") {
-      // #3b: 侧边栏取色 → 还原最近选区 → 复用浮窗的 applyStyle 施色
+      // #3b: 侧边栏取色 → 还原最近选区 → 复用浮窗的 applyStyle 施色 → 入历史(否则颜色改动无法撤销/重做)
       if (_editing && _lastRange) {
         const sel = document.getSelection();
         sel.removeAllRanges(); sel.addRange(_lastRange);
         applyStyle(msg.kind === "highlight" ? "background" : "color", msg.color);
+        pushUndo();
       }
       sendResponse({ ok: true });
     } else if (msg.type === "activate") {
@@ -595,54 +835,38 @@
   });
 
   // === 编辑历史:线性模型(undo/redo/reset),本地/远程均可 ===
-  const MAX_UNDO = 50;
+  // 核心状态机在 extension/undo.js(createHistory,可单测);此处注入 DOM 读写。
+  const MAX_UNDO = 100; // 撤销/重做步数上限(每步存一份完整正文快照,非 diff;大页面注意内存)
   function applyHistState(s) { applyRestoredBody(s); if (_editing) document.body.contentEditable = "true"; loadAnnotations(); }
-  function initUndoBaseline() { _history = [captureBodyForSave()]; _histIdx = 0; } // 进入编辑:原始正文为基线(index 0)
-  function pushUndo() {
-    if (_histIdx < 0) return;
-    const cur = captureBodyForSave();
-    if (cur === _history[_histIdx]) return;
-    _history = _history.slice(0, _histIdx + 1); // 新编辑 → 截断 redo 分支
-    _history.push(cur); _histIdx = _history.length - 1;
-    if (_history.length > MAX_UNDO) { _history.shift(); _histIdx--; }
-  }
-  function doUndo() {
-    if (_histIdx < 0) return;
-    const cur = captureBodyForSave();
-    if (cur !== _history[_histIdx]) { applyHistState(_history[_histIdx]); return; } // 撤回防抖窗口内未提交的变更
-    if (_histIdx > 0) { _histIdx--; applyHistState(_history[_histIdx]); }
-  }
-  function doRedo() {
-    if (_histIdx >= 0 && _histIdx < _history.length - 1) { _histIdx++; applyHistState(_history[_histIdx]); }
-  }
-  function resetEdit() { // #3a: 还原到本次编辑初始版本(基线),截断历史
-    if (_histIdx < 0 || !_history.length) return;
-    applyHistState(_history[0]);
-    _history = [_history[0]]; _histIdx = 0;
-  }
-  // #3a: 当前 HTML 另存为(下载 .html;本地/远程均可,扩展无法覆盖原文件)
-  function saveHtml() {
+  const _hist = window.HgUndo.createHistory(captureBodyForSave, applyHistState, MAX_UNDO);
+  function initUndoBaseline() { _hist.init(); }
+  function pushUndo() { _hist.push(); }
+  function doUndo() { _hist.undo(); }
+  function doRedo() { _hist.redo(); }
+  function resetEdit() { _hist.reset(); }
+  // #3a/#2: 构造导出 HTML(剥离扩展注入);下载改在 side panel 触发(content-script 异步消息已失用户手势,直接 a.click 会被拦)
+  function buildExportHtml() {
     const clone = document.documentElement.cloneNode(true);
-    clone.querySelectorAll("#hg-toolbar, .hg-hl").forEach((e) => e.remove());
-    const html = "<!doctype html>\n" + clone.outerHTML;
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = (document.title || "htmlgenius-page") + ".html";
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    clone.querySelectorAll("#hg-toolbar, .hg-hl, .hg-inspect, .hg-select, .hg-tip, .hg-drop").forEach((e) => e.remove());
+    return "<!doctype html>\n" + clone.outerHTML;
   }
-  // #3b: 记下最近非空选区,供侧边栏取色后还原再施色
+  // #3b/v0.6: _lastRange=非折叠选区(取色);_lastCursor=任意位(emoji 插入)。分开存,避免光标覆盖取色选区。
   document.addEventListener("selectionchange", () => {
     if (!_editing) return;
     const sel = document.getSelection();
-    if (sel && sel.rangeCount && !sel.isCollapsed) _lastRange = sel.getRangeAt(0).cloneRange();
+    if (!sel || !sel.rangeCount) return;
+    const r = sel.getRangeAt(0).cloneRange();
+    if (sel.isCollapsed) _lastCursor = r; else { _lastRange = r; _lastCursor = r; }
   });
 
   // 撤销 + 粘贴:本地/远程均可编辑 → 全局注册(仅 _editing 时拦截,免得抢页面原生快捷键);版本持久化仅本地。
   document.addEventListener("keydown", (e) => {
     if (!_editing) return; // 非编辑态不拦截,保留页面原生 Cmd/Ctrl+Z
-    if ((e.ctrlKey || e.metaKey) && e.key && e.key.toLowerCase() === "z") { e.preventDefault(); doUndo(); }
+    const k = e.key && e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); if (e.shiftKey) doRedo(); else doUndo(); } // Z=撤销 / Shift+Z=重做(此前 Shift 被当撤销 → 重做键失效)
+    else if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); doRedo(); } // Windows: Ctrl+Y 重做
+    else if (_elementMode && e.key === "Escape") { if (_textEditingEl) exitTextEdit(); else deselectEl(); } // v0.6: Esc 退文字编辑/取消选控件
+    else if (_elementMode && _selectedEl && !_textEditingEl && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelectedEl(); } // v0.6 #6: Delete 键删控件
   });
   document.body.addEventListener("input", () => {
     if (!_editing) return;
