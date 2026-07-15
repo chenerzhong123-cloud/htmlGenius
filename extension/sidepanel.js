@@ -76,22 +76,37 @@
       _editing = !!msg.editing;
       if (msg.isLocal !== undefined) isLocal = msg.isLocal;
       renderMode();
+    } else if (msg.type === "annotation-clicked") {
+      // #4: 页面点高亮 → 切到批注 tab + 滚到卡片 + 聚焦回复输入
+      switchTab("comment");
+      const card = document.querySelector('.card[data-id="' + msg.id + '"]');
+      const ann = (_lastItems || []).find((a) => a.id === msg.id);
+      if (card && ann) {
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        card.classList.add("flash"); setTimeout(() => card.classList.remove("flash"), 1400);
+        doReply(ann, card);
+      }
     }
   });
 
   let _editing = false;
 
+  // 标准 alert 图标(success=对勾圆 / warning=三角感叹号),用经典控件不手画
+  const ICON_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>';
+  const ICON_WARN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
   function renderMode() {
     const el = document.getElementById("mode-indicator");
     const btn = document.getElementById("edit-btn");
     btn.hidden = false;
-    if (_editing) {
-      btn.textContent = t("edit.exit");
-      el.textContent = isLocal ? t("mode.editingLocal") : t("mode.editingRemote");
-    } else {
-      btn.textContent = t("edit.start");
-      el.textContent = isLocal ? t("mode.idleLocal") : t("mode.idleRemote");
-    }
+    // 本地=绿(持久保存) / 远程=黄(临时,刷新丢失)
+    el.className = "alert " + (isLocal ? "alert-success" : "alert-warning");
+    const text = _editing
+      ? (isLocal ? t("mode.editingLocal") : t("mode.editingRemote"))
+      : (isLocal ? t("mode.idleLocal") : t("mode.idleRemote"));
+    el.innerHTML = (isLocal ? ICON_OK : ICON_WARN) + "<span>" + esc(text) + "</span>";
+    btn.textContent = _editing ? t("edit.exit") : t("edit.start");
+    const tools = document.getElementById("edit-tools");
+    if (tools) tools.hidden = !_editing; // #3a: 会话动作仅编辑态显示
   }
 
   function renderCards(items) {
@@ -110,6 +125,7 @@
     function buildCard(ann, depth, stale) {
       const card = document.createElement("div");
       card.className = "card" + (stale ? " stale" : "");
+      card.dataset.id = ann.id; // #4: 页面点高亮跳转时定位卡片
       if (depth) card.style.marginLeft = (depth * 14) + "px";
       const quote = (ann.quote || "").slice(0, 60);
       const comment = (ann.body && ann.body.comment) || t("card.noComment");
@@ -331,10 +347,26 @@
     renderMode();
   });
 
+  // #3a/#3b: 侧边栏会话动作 + 取色 → 发消息给 content-script(content-script 在页面施效)
+  document.getElementById("act-undo").addEventListener("click", () => sendToContent({ type: "undo" }));
+  document.getElementById("act-redo").addEventListener("click", () => sendToContent({ type: "redo" }));
+  document.getElementById("act-reset").addEventListener("click", () => sendToContent({ type: "reset-edit" }));
+  document.getElementById("act-save").addEventListener("click", () => sendToContent({ type: "save-html" }));
+  // change(而非 input):取色确认后一次性施效,避免连续触发时选区 range 失效
+  document.getElementById("color-text").addEventListener("change", (e) => sendToContent({ type: "apply-color", kind: "text", color: e.target.value }));
+  document.getElementById("color-hl").addEventListener("change", (e) => sendToContent({ type: "apply-color", kind: "highlight", color: e.target.value }));
+
+  // #1: 在线人数从评论区移到「身份入口」(账号浮层)显示,只显示人数、不显示姓名(评论卡片已有姓名)
   function renderPresence(users) {
-    const el = document.getElementById("presence");
-    if (!users || users.length === 0) { el.textContent = ""; return; }
-    el.textContent = t("presence.online") + users.map((u) => u.name || u.id).join(", ");
+    const el = document.getElementById("presence-count");
+    if (!el) return;
+    const n = (users && users.length) || 0;
+    if (n > 0 && _sessionUser) {
+      el.hidden = false;
+      el.textContent = t("presence.count").replace("{n}", n);
+    } else {
+      el.hidden = true;
+    }
   }
 
   // === 协同登录(飞书 + Google 档3,后端地址烤在 config.js) ===
@@ -385,6 +417,7 @@
     _sessionUser = null;
     loginState.textContent = t("state.loggedOut");
     ["logout-btn", "invite-btn"].forEach((id) => { const e = document.getElementById(id); if (e) e.remove(); });
+    renderPresence([]); // 登出:清掉在线人数
   }
   async function doInvite() {
     const cfg = await getCfg(["session_token"]);
