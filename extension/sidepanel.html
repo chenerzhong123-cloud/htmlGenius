@@ -54,7 +54,7 @@
 <div id="view-comment" class="view">
   <div id="draft-host"></div>
   <div id="annotations"></div>
-  <button id="export-btn" data-i18n="export.btn">一键复制所有评论</button>
+  <button id="export-btn" data-i18n="export.taskBtn">生成修改任务</button>
 </div>
 
 <!-- 语言切换浮层(点 🌐 展开;选项始终以各自母语显示) -->
@@ -83,8 +83,48 @@
   <div id="presence-count" class="presence-count" hidden></div>
 </div>
 
+<!-- v0.6.1 修改契约 Composer(覆盖式 sheet;role=dialog/aria-modal) -->
+<div id="contract-sheet" class="sheet contract-sheet" role="dialog" aria-modal="true" aria-labelledby="contract-title" hidden>
+  <div class="contract-head">
+    <div id="contract-title" class="sheet-title" data-i18n="contract.title">生成修改任务</div>
+    <button id="contract-close" class="contract-close" data-i18n-title="contract.close" aria-label="">✕</button>
+  </div>
+  <div id="contract-source-summary" class="contract-summary"></div>
+  <div id="contract-source-list" class="contract-source-list"></div>
+
+  <div class="contract-section-label" data-i18n="contract.modeTitle">修改模式</div>
+  <div class="contract-modes" role="radiogroup" aria-labelledby="contract-title">
+    <label class="mode-card"><input type="radio" name="contract-mode" value="precise_patch" checked><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.precise_patch.name">精准修补</div><div class="mode-desc" data-i18n="contract.mode.precise_patch.desc">只改被批注精确定位到的内容；其他内容完全不动。</div></div></label>
+    <label class="mode-card"><input type="radio" name="contract-mode" value="local_optimize"><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.local_optimize.name">局部优化</div><div class="mode-desc" data-i18n="contract.mode.local_optimize.desc">只优化批注所在的局部内容；页面其他部分不动。</div></div></label>
+    <label class="mode-card"><input type="radio" name="contract-mode" value="restructure"><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.restructure.name">结构重组</div><div class="mode-desc" data-i18n="contract.mode.restructure.desc">重新规划章节、顺序或局部结构；先产出计划，不直接改文件。</div></div></label>
+    <label class="mode-card"><input type="radio" name="contract-mode" value="regenerate"><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.regenerate.name">重新生成</div><div class="mode-desc" data-i18n="contract.mode.regenerate.desc">基于新的完整说明重写整份页面/报告；允许改全文。</div></div></label>
+  </div>
+
+  <label class="contract-field">
+    <span class="contract-label"><span data-i18n="contract.brief">补充说明</span> <span id="contract-brief-req" class="contract-req" hidden data-i18n="contract.briefRequired"></span></span>
+    <textarea id="contract-brief" rows="3" maxlength="2000" data-i18n-placeholder="contract.briefPh" placeholder="补充背景、目标、风格要求（可选）"></textarea>
+    <div id="contract-brief-error" class="contract-error" hidden></div>
+  </label>
+  <label class="contract-field">
+    <span class="contract-label" data-i18n="contract.preserve">必须保留</span>
+    <textarea id="contract-preserve" rows="3" maxlength="2000" data-i18n-placeholder="contract.preservePh" placeholder="每行一条，必须原样保留的内容"></textarea>
+  </label>
+  <div id="contract-plan-hint" class="contract-plan-hint" hidden data-i18n="contract.planHint"></div>
+
+  <div id="contract-output-fallback" class="contract-fallback" hidden>
+    <div class="contract-fallback-label" data-i18n="contract.fallbackLabel"></div>
+    <textarea id="contract-fallback-text" readonly rows="6"></textarea>
+  </div>
+
+  <div class="contract-actions">
+    <button id="contract-copy-prompt" class="contract-primary"></button>
+    <button id="contract-copy-json" class="contract-secondary" data-i18n="contract.copyJson">复制 JSON</button>
+  </div>
+</div>
+
 <script src="config.js"></script>
 <script src="buildprompt.js"></script>
+<script src="change-contract.js"></script>
 <script src="login.js"></script>
 <script src="i18n.js"></script>
 <script src="sidepanel.js"></script>

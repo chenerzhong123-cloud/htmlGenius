@@ -604,7 +604,12 @@
       deactivateNow();
       sendResponse({ ok: true });
     } else if (msg.type === "get-export") {
-      sendResponse({ type: "export-data", items: window.__hgAnnotations || [] });
+      // v0.6.1:附带 artifact 元数据(标题/地址/是否本地)给 ChangeContract;不读文件内容或敏感数据。
+      sendResponse({
+        type: "export-data",
+        items: window.__hgAnnotations || [],
+        artifact: { title: document.title || "Untitled HTML", url: location.href, isLocal: isLocal }
+      });
     } else if (msg.type === "reply") {
       // 复用父批注的 selector 上下文(回复无独立选区)
       const parent = (window.__hgAnnotations || []).find((a) => a.id === msg.parentId);

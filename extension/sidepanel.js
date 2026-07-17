@@ -10,6 +10,12 @@
   let _toastTimer = 0;
   let _lastItems = []; // 上次渲染的批注(供切换语言时重绘)
   let _sessionUser = null; // 已登录用户(供切换语言时重绘登录态文案)
+  // v0.6.1 修改契约 Composer 临时状态(不持久化)
+  let _contractItems = [];        // 打开 Composer 时的批注快照(供校验/渲染,不随列表变化)
+  let _contractSourceRootIds = [];
+  let _contractArtifact = null;
+  let _contractOpen = false;
+  let _contractTriggerEl = null;  // 关闭 Composer 后恢复焦点
 
   async function getActiveTab() {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -201,6 +207,20 @@
         reply.textContent = t("card.reply"); reply.title = t("card.reply");
         reply.addEventListener("click", (e) => { e.stopPropagation(); doReply(ann, card); });
         acts.appendChild(reply);
+        if (!depth) {
+          // v0.6.1:仅顶层非 stale 卡片可「生成任务」(回复卡片不出现,避免失去上下文)
+          const gen = document.createElement("button");
+          gen.textContent = t("card.genTask"); gen.title = t("card.genTask");
+          gen.addEventListener("click", (e) => {
+            e.stopPropagation();
+            _contractTriggerEl = gen;
+            sendToContent({ type: "get-export" }).then((resp) => {
+              if (!resp || resp.type !== "export-data") { showToast(t("contract.copyFail")); return; }
+              openContract([ann.id], resp.items || [], resp.artifact);
+            });
+          });
+          acts.appendChild(gen);
+        }
       }
       chrome.storage.sync.get(["user", "mode"], (cfg) => {
         const me = cfg.user && cfg.user.id;
@@ -241,6 +261,9 @@
       c.appendChild(sec);
     }
     updateCommentCount((byParent[null] || []).length);
+    // v0.6.1:无未失效顶层批注时,底部「生成修改任务」disabled 且不打开空 Composer
+    const _exportBtn = document.getElementById("export-btn");
+    if (_exportBtn) _exportBtn.disabled = !((byParent[null] || []).length > 0);
   }
 
   // #2: 一键删除所有失效评论(原文已不在当前页面)
@@ -387,18 +410,145 @@
     return safe.replace(/https?:\/\/[^\s<]+/g, (u) => '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>');
   }
 
+  // === v0.6.1 修改契约 Composer(批注 → 带允许范围/保护规则/验收条件的任务)===
+  const contractSheet = document.getElementById("contract-sheet");
+  const contractCloseBtn = document.getElementById("contract-close");
+  const contractSummary = document.getElementById("contract-source-summary");
+  const contractSourceList = document.getElementById("contract-source-list");
+  const contractBrief = document.getElementById("contract-brief");
+  const contractBriefError = document.getElementById("contract-brief-error");
+  const contractBriefReq = document.getElementById("contract-brief-req");
+  const contractPreserve = document.getElementById("contract-preserve");
+  const contractPlanHint = document.getElementById("contract-plan-hint");
+  const contractCopyPrompt = document.getElementById("contract-copy-prompt");
+  const contractCopyJson = document.getElementById("contract-copy-json");
+  const contractFallback = document.getElementById("contract-output-fallback");
+  const contractFallbackText = document.getElementById("contract-fallback-text");
+
+  function countReplies(rootId, allItems) {
+    const kids = {};
+    (allItems || []).forEach((a) => { const p = a.parent_id || null; (kids[p] = kids[p] || []).push(a.id); });
+    let n = 0; const stack = (kids[rootId] || []).slice();
+    while (stack.length) { const id = stack.pop(); n += 1; (kids[id] || []).forEach((c) => stack.push(c)); }
+    return n;
+  }
+  function getContractMode() {
+    const checked = document.querySelector('input[name="contract-mode"]:checked');
+    return checked ? checked.value : "precise_patch";
+  }
+  function getContractDraft() {
+    return {
+      mode: getContractMode(),
+      rootIds: _contractSourceRootIds.slice(),
+      brief: contractBrief.value,
+      preserveText: contractPreserve.value,
+      artifact: _contractArtifact || { title: "", url: "", isLocal: false }
+    };
+  }
+  function renderContractSource() {
+    const items = _contractItems;
+    const roots = items.filter((a) => _contractSourceRootIds.indexOf(a.id) !== -1 && a.parent_id == null && a._status !== "stale");
+    contractSummary.textContent = t("contract.source").replace("{n}", String(roots.length));
+    if (!roots.length) {
+      contractSourceList.innerHTML = '<div class="src-item" style="color:var(--text-faint)">' + esc(t("contract.empty")) + "</div>";
+      return;
+    }
+    contractSourceList.innerHTML = roots.map((a) => {
+      const q = (a.quote || "").slice(0, 48);
+      const reps = countReplies(a.id, items);
+      return '<div class="src-item"><span class="src-quote">' + esc(q) + '</span><span class="src-meta">' + reps + " " + esc(t("contract.replies")) + "</span></div>";
+    }).join("");
+  }
+  function refreshContractUI() {
+    if (!_contractOpen) return;
+    const draft = getContractDraft();
+    const meta = (window.ChangeContract.MODES || []).find((m) => m.id === draft.mode);
+    const req = !!(meta && meta.briefRequired);
+    if (contractBriefReq) contractBriefReq.hidden = !req;
+    if (contractPlanHint) contractPlanHint.hidden = draft.mode !== "restructure";
+    if (contractCopyPrompt) contractCopyPrompt.textContent = (draft.mode === "restructure") ? t("contract.copyPlan") : t("contract.copyPrompt");
+    if (contractCloseBtn) contractCloseBtn.setAttribute("aria-label", t("contract.close")); // i18n aria-label(禁硬编码)
+    // 选中态:给当前选中模式卡加 .selected(:has 的 JS 兜底,旧 Chromium 也能正确高亮)
+    document.querySelectorAll(".mode-card").forEach((c) => {
+      const inp = c.querySelector("input"); c.classList.toggle("selected", !!(inp && inp.checked));
+    });
+    const v = window.ChangeContract.validateDraft(draft, _contractItems);
+    if (v.errors.brief) { contractBriefError.textContent = t("contract.briefRequired"); contractBriefError.hidden = false; }
+    else { contractBriefError.hidden = true; }
+    const disable = !v.ok;
+    contractCopyPrompt.disabled = disable;
+    contractCopyJson.disabled = disable;
+  }
+  function openContract(rootIds, items, artifact) {
+    _contractItems = items || [];
+    _contractSourceRootIds = (rootIds || []).slice();
+    _contractArtifact = artifact || { title: "", url: "", isLocal: false };
+    _contractOpen = true;
+    const precise = document.querySelector('input[name="contract-mode"][value="precise_patch"]');
+    if (precise) precise.checked = true;
+    contractBrief.value = "";
+    contractPreserve.value = "";
+    contractBriefError.hidden = true;
+    contractFallback.hidden = true;
+    contractFallbackText.value = "";
+    accountSheet.classList.remove("show");
+    avatarBtn.classList.remove("active");
+    closeLangSheet();
+    renderContractSource();
+    refreshContractUI();
+    contractSheet.hidden = false;
+    contractSheet.classList.add("show");
+    setTimeout(() => { try { contractBrief.focus(); } catch (e) {} }, 0);
+  }
+  function closeContract() {
+    _contractOpen = false;
+    contractSheet.classList.remove("show");
+    contractSheet.hidden = true;
+    const el = _contractTriggerEl;
+    _contractTriggerEl = null;
+    if (el && el.focus) { try { el.focus(); } catch (e) {} }
+  }
+  function showContractFallback(out) {
+    contractFallback.hidden = false;
+    contractFallbackText.value = out;
+    try { contractFallbackText.focus(); contractFallbackText.select(); } catch (e) {}
+    showToast(t("contract.copyFail"));
+  }
+  function copyContract(kind) {
+    const draft = getContractDraft();
+    let task;
+    try { task = window.ChangeContract.buildTask(draft, _contractItems); }
+    catch (e) { showToast(t("contract.copyFail")); return; }
+    const out = (kind === "json") ? window.ChangeContract.serialize(task) : window.ChangeContract.renderPrompt(task);
+    const btn = (kind === "json") ? contractCopyJson : contractCopyPrompt;
+    const orig = btn.textContent;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(out).then(() => {
+        btn.textContent = t("contract.copied");
+        showToast(t("contract.copied"));
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      }).catch(() => showContractFallback(out));
+    } else {
+      showContractFallback(out);
+    }
+  }
+
+  if (contractCloseBtn) contractCloseBtn.addEventListener("click", closeContract);
+  document.querySelectorAll('input[name="contract-mode"]').forEach((r) => r.addEventListener("change", refreshContractUI));
+  if (contractBrief) contractBrief.addEventListener("input", refreshContractUI);
+  if (contractCopyPrompt) contractCopyPrompt.addEventListener("click", () => copyContract("prompt"));
+  if (contractCopyJson) contractCopyJson.addEventListener("click", () => copyContract("json"));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && _contractOpen) { e.preventDefault(); closeContract(); } });
+
+  // 底部「生成修改任务」:取全部未失效顶层批注 → 打开 Composer(无顶层批注时按钮已 disabled)
   document.getElementById("export-btn").addEventListener("click", () => {
     sendToContent({ type: "get-export" }).then((resp) => {
-      if (resp && resp.type === "export-data") {
-        const items = resp.items || [];
-        if (!items.length) { showToast(t("export.empty")); return; }
-        const prompt = (window.BuildPrompt ? BuildPrompt.fromAnnotations(items) : "");
-        navigator.clipboard.writeText(prompt).then(() => {
-          const btn = document.getElementById("export-btn");
-          btn.textContent = t("export.copied");
-          setTimeout(() => (btn.textContent = t("export.btn")), 1500);
-        });
-      }
+      if (!resp || resp.type !== "export-data") return;
+      const items = resp.items || [];
+      const roots = window.ChangeContract.getRoots(items);
+      if (!roots.length) { showToast(t("contract.empty")); return; }
+      _contractTriggerEl = document.getElementById("export-btn");
+      openContract(roots.map((r) => r.id), items, resp.artifact);
     });
   });
 
@@ -673,6 +823,7 @@
     refreshLangUI();
     renderMode();
     renderCards(_lastItems);
+    if (_contractOpen) { renderContractSource(); refreshContractUI(); } // Composer 打开时跟随语言刷新
     refreshLoginState();
     closeLangSheet();
   }

@@ -1,0 +1,183 @@
+<!doctype html>
+<!-- change-contract-test.html — v0.6.1 ChangeContract 纯函数测试(§8.1)
+     打开后 document.title 为 "PASS" 或 "FAIL: <reason>"。页内显示每条用例结果。
+     覆盖:模式契约/验证/回复树/prompt 渲染/preserve 拆分/stale-root 拒绝/顺序/序列化。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>RUNNING…</title>
+<style>
+  body { font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; padding: 16px; white-space: pre-wrap; }
+  .pass { color: #1a7f37; } .fail { color: #cf222e; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="out"></div>
+<script src="change-contract.js"></script>
+<script>
+(function () {
+  "use strict";
+  var CC = window.ChangeContract;
+  var log = document.getElementById("out");
+  var fails = [];
+
+  function line(text, cls) {
+    var d = document.createElement("div");
+    if (cls) d.className = cls;
+    d.textContent = text;
+    log.appendChild(d);
+  }
+  function ok(cond, msg) {
+    if (cond) { line("  ✓ " + msg, "pass"); }
+    else { line("  ✗ " + msg, "fail"); fails.push(msg); }
+  }
+  function eq(a, b, msg) { ok(a === b, msg + "  (got " + JSON.stringify(a) + ", want " + JSON.stringify(b) + ")"); }
+
+  // —— 样例批注:a1(顶层,含 a2→a3 两级回复)、b1(顶层,无回复)、s1(stale 顶层) ——
+  var anns = [
+    { id: "a1", parent_id: null, quote: "原文一", selector: { type: "TextQuoteSelector", exact: "原文一", prefix: "前文", suffix: "后文" }, body: { comment: "把这句改短" }, author: { id: "u1", name: "张三" } },
+    { id: "a2", parent_id: "a1", quote: "", selector: {}, body: { comment: "同意,再温和点" }, author: { id: "u2", name: "李四" } },
+    { id: "a3", parent_id: "a2", quote: "", selector: {}, body: { comment: "好的" }, author: { id: "u1", name: "张三" } },
+    { id: "b1", parent_id: null, quote: "原文二", selector: { exact: "原文二" }, body: { comment: "加个例子" }, author: { id: "u2", name: "李四" } },
+    { id: "s1", parent_id: null, quote: "失效的", selector: { exact: "失效的" }, body: { comment: "旧评论" }, author: { id: "u1", name: "张三" }, _status: "stale" }
+  ];
+
+  var artifact = { title: "季度报告", url: "file:///tmp/report.html", isLocal: true };
+
+  // T1 precise_patch:1 root + 多级 replies + 精确 selector + 强制「目标外不修改」语句
+  line("T1 precise_patch 含 root/多级回复/selector/强制语句");
+  (function () {
+    var task = CC.buildTask({ mode: "precise_patch", rootIds: ["a1"], brief: "", preserveText: "", artifact: artifact }, anns);
+    eq(task.annotations.length, 1, "T1 1 个 root");
+    eq(task.annotations[0].id, "a1", "T1 root=a1");
+    eq(task.annotations[0].replies.length, 1, "T1 a1 有 1 条直接回复 a2");
+    eq(task.annotations[0].replies[0].id, "a2", "T1 回复 a2");
+    eq(task.annotations[0].replies[0].replies.length, 1, "T1 a2 有 1 条子回复 a3");
+    eq(task.annotations[0].replies[0].replies[0].id, "a3", "T1 子回复 a3");
+    eq(task.annotations[0].selector.exact, "原文一", "T1 selector.exact=原文一");
+    eq(task.contract.write_scope, "target_only", "T1 write_scope=target_only");
+    eq(task.contract.locked_outside_scope, true, "T1 locked=true");
+    var p = CC.renderPrompt(task);
+    ok(p.indexOf("禁止修改任何未被本任务定位") !== -1, "T1 prompt 含强制「目标外不修改」语句");
+    ok(p.indexOf("原文一") !== -1 && p.indexOf("前文") !== -1 && p.indexOf("后文") !== -1, "T1 prompt 含定位前/原/后文");
+    ok(p.indexOf("[李四] 同意,再温和点") !== -1, "T1 prompt 含回复 a2");
+  })();
+
+  // T2 local_optimize:prompt 只承诺局部范围
+  line("T2 local_optimize 承诺局部范围");
+  (function () {
+    var task = CC.buildTask({ mode: "local_optimize", rootIds: ["a1"], brief: "", preserveText: "", artifact: artifact }, anns);
+    eq(task.contract.write_scope, "annotated_local_areas", "T2 write_scope=annotated_local_areas");
+    var p = CC.renderPrompt(task);
+    ok(p.indexOf("每条批注所在的局部内容") !== -1, "T2 prompt 允许范围=局部");
+    ok(p.indexOf("只能在每条批注定位到的局部内容中修改") !== -1, "T2 prompt 含局部强制语句");
+  })();
+
+  // T3 restructure / regenerate:brief<10 验证失败;≥10 成功
+  line("T3 restructure/regenerate 的 brief 阈值校验");
+  (function () {
+    var shortDraft = { mode: "restructure", rootIds: ["a1"], brief: "短", preserveText: "", artifact: artifact };
+    var vShort = CC.validateDraft(shortDraft, anns);
+    ok(!vShort.ok && vShort.errors.brief === "too_short", "T3 restructure brief<10 → brief error");
+
+    var okDraft = { mode: "restructure", rootIds: ["a1"], brief: "把所有章节按重要性重排,合并重复段落", preserveText: "", artifact: artifact };
+    var vOk = CC.validateDraft(okDraft, anns);
+    ok(vOk.ok, "T3 restructure brief≥10 → ok");
+
+    var regShort = CC.validateDraft({ mode: "regenerate", rootIds: ["a1"], brief: "重写", preserveText: "", artifact: artifact }, anns);
+    ok(!regShort.ok && regShort.errors.brief === "too_short", "T3 regenerate brief<10 → brief error");
+
+    var regOk = CC.validateDraft({ mode: "regenerate", rootIds: ["a1"], brief: "用更专业的语气重写整份报告,面向技术读者", preserveText: "", artifact: artifact }, anns);
+    ok(regOk.ok, "T3 regenerate brief≥10 → ok");
+
+    // restructure task:contract 表明本轮不改文件
+    var t = CC.buildTask(okDraft, anns);
+    eq(t.contract.write_scope, "document_structure", "T3 restructure write_scope=document_structure");
+    eq(t.contract.locked_outside_scope, false, "T3 restructure locked=false");
+  })();
+
+  // T4 preserve textarea:拆分/trim/去空行 → task 与 prompt
+  line("T4 preserve 拆分/trim/去空行");
+  (function () {
+    var task = CC.buildTask({
+      mode: "precise_patch", rootIds: ["a1"], brief: "",
+      preserveText: "  公司名 \n\n  关键数据  \n  ", artifact: artifact
+    }, anns);
+    eq(JSON.stringify(task.preserve), JSON.stringify(["公司名", "关键数据"]), "T4 preserve 拆分+trim+去空行");
+    var p = CC.renderPrompt(task);
+    ok(p.indexOf("「公司名」") !== -1 && p.indexOf("「关键数据」") !== -1, "T4 prompt 含必须保留项");
+  })();
+
+  // T5 stale root / reply id / 不存在 id 不能作为 rootIds
+  line("T5 非法 rootIds 被拒");
+  (function () {
+    var vStale = CC.validateDraft({ mode: "precise_patch", rootIds: ["s1"], brief: "", preserveText: "", artifact: artifact }, anns);
+    ok(!vStale.ok && vStale.errors.rootIds, "T5 stale root s1 → rootIds error");
+
+    var vReply = CC.validateDraft({ mode: "precise_patch", rootIds: ["a2"], brief: "", preserveText: "", artifact: artifact }, anns);
+    ok(!vReply.ok && vReply.errors.rootIds, "T5 reply id a2 → rootIds error");
+
+    var vMiss = CC.validateDraft({ mode: "precise_patch", rootIds: ["x1"], brief: "", preserveText: "", artifact: artifact }, anns);
+    ok(!vMiss.ok && vMiss.errors.rootIds, "T5 不存在 id x1 → rootIds error");
+
+    var vEmpty = CC.validateDraft({ mode: "precise_patch", rootIds: [], brief: "", preserveText: "", artifact: artifact }, anns);
+    ok(!vEmpty.ok && vEmpty.errors.rootIds === "empty", "T5 空 rootIds → rootIds=empty");
+  })();
+
+  // T6 两个 root 输出顺序 = 输入 annotations 顺序;每个含完整 DFS 回复树
+  line("T6 多 root 顺序 + 完整 DFS");
+  (function () {
+    var tree = CC.buildReplyTree(anns, ["b1", "a1"]); // 故意倒序传入
+    eq(tree.length, 2, "T6 2 个 root");
+    eq(tree[0].id, "a1", "T6 第 1 个 root=a1(按原始顺序,非传入顺序)");
+    eq(tree[1].id, "b1", "T6 第 2 个 root=b1");
+    eq(tree[0].replies.length, 1, "T6 a1 含回复 a2");
+    eq(tree[0].replies[0].replies.length, 1, "T6 a2 含子回复 a3");
+    eq(tree[1].replies.length, 0, "T6 b1 无回复");
+  })();
+
+  // T7 无效 mode → 验证错误;buildTask 不静默产生 task
+  line("T7 无效 mode");
+  (function () {
+    var v = CC.validateDraft({ mode: "foo", rootIds: ["a1"], brief: "", preserveText: "", artifact: artifact }, anns);
+    ok(!v.ok && v.errors.mode === "invalid_mode", "T7 无效 mode → mode error");
+    var threw = false;
+    try { CC.buildTask({ mode: "foo", rootIds: ["a1"], brief: "", preserveText: "", artifact: artifact }, anns); }
+    catch (e) { threw = true; ok(/Invalid change contract/.test(e.message), "T7 buildTask 抛 Invalid change contract"); }
+    ok(threw, "T7 buildTask 不静默产生 task");
+  })();
+
+  // T8 serialize 可 JSON.parse,含 schema_version:1
+  line("T8 serialize");
+  (function () {
+    var task = CC.buildTask({ mode: "precise_patch", rootIds: ["a1"], brief: "", preserveText: "保留A", artifact: artifact }, anns);
+    var s = CC.serialize(task);
+    var parsed;
+    try { parsed = JSON.parse(s); } catch (e) { ok(false, "T8 serialize 可 JSON.parse"); return; }
+    ok(true, "T8 serialize 可 JSON.parse");
+    eq(parsed.schema_version, 1, "T8 schema_version=1");
+    eq(parsed.kind, "htmlgenius_change_contract", "T8 kind 正确");
+    eq(parsed.contract.on_ambiguous_target, "ask_or_stop", "T8 on_ambiguous_target=ask_or_stop");
+  })();
+
+  // 兜底:孤儿/循环引用不抛异常(§4.4)
+  line("T9 防御:孤儿回复 / 循环引用不抛异常");
+  (function () {
+    var cyclic = [
+      { id: "c1", parent_id: null, quote: "q", selector: { exact: "q" }, body: { comment: "m" }, author: { name: "X" } },
+      { id: "c2", parent_id: "c3", quote: "", selector: {}, body: { comment: "孤儿" }, author: { name: "Y" } } // 父 c3 不存在 → 孤儿
+    ];
+    var tree = CC.buildReplyTree(cyclic, ["c1"]);
+    eq(tree.length, 1, "T9 仅 c1 入树,孤儿 c2 不入");
+    eq(tree[0].replies.length, 0, "T9 c1 无可达回复");
+  })();
+
+  // 结论
+  var title;
+  if (fails.length) { title = "FAIL: " + fails[0]; line("\nFAIL(" + fails.length + "): " + fails.join(" | "), "fail"); }
+  else { title = "PASS"; line("\nPASS — all cases ok", "pass"); }
+  document.title = title;
+})();
+</script>
+</body>
+</html>
