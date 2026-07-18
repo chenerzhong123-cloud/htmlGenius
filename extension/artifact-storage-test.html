@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><title>artifact-storage-test</title></head><body>
+<script src="storage.js"></script><script>
+  (async function () {
+    try {
+      const suffix = Date.now().toString(36);
+      const firstUri = "http://localhost/__hg_artifact_" + suffix + ".html#section";
+      const secondUri = "http://localhost/__hg_artifact_" + suffix + "-v2.html";
+      const thirdUri = "http://localhost/__hg_artifact_" + suffix + "-manual.html";
+      const legacyId = Storage.legacyDocumentIdForUri(firstUri);
+      await Storage.saveAnnotation({ id: "ann_" + suffix, document_id: legacyId, selector: { type: "TextQuoteSelector", exact: "x" }, quote: "x", body: { comment: "keep reply tree" } });
+      await Storage.saveAnnotation({ id: "reply_" + suffix, document_id: legacyId, parent_id: "ann_" + suffix, selector: { type: "TextQuoteSelector", exact: "x" }, quote: "x", body: { comment: "reply" } });
+      const doc = await Storage.getOrCreateLocalDocument(firstUri);
+      const repeat = await Storage.getOrCreateLocalDocument(firstUri.split("#")[0]);
+      if (doc.logical_document_id !== repeat.logical_document_id) throw new Error("binding was not idempotent");
+      const moved = await Storage.listAnnotations(doc.logical_document_id);
+      if (moved.length !== 2 || moved.some((a) => a.document_id !== doc.logical_document_id)) throw new Error("legacy annotations were not moved exactly once");
+      if ((await Storage.listAnnotations(legacyId)).length !== 0) throw new Error("legacy annotations were copied instead of moved");
+      await Storage.linkArtifactUri(doc.logical_document_id, secondUri);
+      const linked = await Storage.getDocumentByUri(secondUri);
+      if (!linked || linked.logical_document_id !== doc.logical_document_id) throw new Error("explicit URI link failed");
+      if (await Storage.getDocumentByUri(thirdUri)) throw new Error("uncontrolled URI inherited a document");
+      const remoteLegacy = Storage.legacyDocumentIdForUri("https://example.test/report.html");
+      await Storage.saveAnnotation({ id: "remote_" + suffix, document_id: remoteLegacy, selector: {}, quote: "r", body: {} });
+      if (await Storage.getDocumentId("https://example.test/report.html") !== remoteLegacy) throw new Error("remote ID semantics changed");
+      if ((await Storage.listAnnotations(remoteLegacy)).length !== 1) throw new Error("remote annotation migrated unexpectedly");
+      document.title = "PASS";
+    } catch (e) { document.title = "FAIL: " + (e && e.message || e); }
+  })();
+</script></body></html>

@@ -1,6 +1,6 @@
-// storage.js — IndexedDB 封装(annotations + versions)
+// storage.js — IndexedDB 封装(annotations + legacy versions + artifact versions)
 const DB_NAME = "htmlgenius";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -14,6 +14,15 @@ function openDB() {
       if (!db.objectStoreNames.contains("versions")) {
         const v = db.createObjectStore("versions", { keyPath: "id", autoIncrement: true });
         v.createIndex("document_id", "document_id", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("documents")) {
+        const d = db.createObjectStore("documents", { keyPath: "logical_document_id" });
+        d.createIndex("canonical_uri", "canonical_uri", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("artifact_versions")) {
+        const a = db.createObjectStore("artifact_versions", { keyPath: "id", autoIncrement: true });
+        a.createIndex("logical_document_id", "logical_document_id", { unique: false });
+        a.createIndex("artifact_hash", "artifact_hash", { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -61,10 +70,61 @@ async function dbDelete(store, key) {
   });
 }
 
+function canonicalArtifactUri(uri) {
+  const value = String(uri || "");
+  try { const u = new URL(value); u.hash = ""; return u.href; } catch (e) { return value.split("#")[0]; }
+}
+function legacyDocumentIdForUri(uri) {
+  try { const u = new URL(uri); return u.origin + u.pathname; } catch (e) { return String(uri || "").split("#")[0]; }
+}
+
+function isManagedLocalUri(uri) {
+  try {
+    const u = new URL(uri);
+    return u.protocol === "file:" || ["localhost", "127.0.0.1", "0.0.0.0"].includes(u.hostname);
+  } catch (e) { return false; }
+}
+
+function newLogicalDocumentId() {
+  if (window.crypto && typeof window.crypto.randomUUID === "function") return "hgd_" + window.crypto.randomUUID();
+  return "hgd_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 12);
+}
+
+async function getDocumentByUri(uri) {
+  const canonical = canonicalArtifactUri(uri);
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction("documents", "readonly");
+    const req = tx.objectStore("documents").getAll();
+    req.onsuccess = () => res((req.result || []).find((doc) => doc.canonical_uri === canonical || (doc.known_uris || []).includes(canonical)) || null);
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function migrateLegacyAnnotations(logicalDocumentId, uri) {
+  const legacyId = legacyDocumentIdForUri(uri);
+  if (legacyId === logicalDocumentId) return;
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction("annotations", "readwrite");
+    const store = tx.objectStore("annotations");
+    const req = store.index("document_id").getAll(legacyId);
+    req.onsuccess = () => (req.result || []).forEach((ann) => {
+      // put 覆盖原记录，幂等且不复制回复、selector 或 id。
+      ann.document_id = logicalDocumentId;
+      store.put(ann);
+    });
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
 // 本地 IndexedDB 实现(原 Storage 对象,行为保持完全一致 —— 仅重命名)
 const LocalStore = {
-  async getDocumentId() {
-    return location.origin + location.pathname;
+  async getDocumentId(uri) {
+    const value = canonicalArtifactUri(uri || location.href);
+    if (!isManagedLocalUri(value)) return legacyDocumentIdForUri(value);
+    return (await this.getOrCreateLocalDocument(value)).logical_document_id;
   },
   async saveAnnotation(ann) {
     ann.id = ann.id || "ann_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
@@ -94,6 +154,52 @@ const LocalStore = {
   async listVersions(docId) {
     return dbGetAllByIndex("versions", "document_id", docId);
   },
+  async getOrCreateLocalDocument(uri) {
+    const canonical = canonicalArtifactUri(uri);
+    if (!isManagedLocalUri(canonical)) throw new Error("Not a managed local artifact URI");
+    const existing = await getDocumentByUri(canonical);
+    if (existing) return existing;
+    const now = new Date().toISOString();
+    const doc = { logical_document_id: newLogicalDocumentId(), canonical_uri: canonical, known_uris: [canonical], created_at: now, updated_at: now };
+    await dbPut("documents", doc);
+    await migrateLegacyAnnotations(doc.logical_document_id, canonical);
+    return doc;
+  },
+  getDocumentByUri,
+  async linkArtifactUri(logicalDocumentId, uri) {
+    const canonical = canonicalArtifactUri(uri);
+    const doc = await dbGet("documents", logicalDocumentId);
+    if (!doc) throw new Error("Unknown logical document");
+    if (!isManagedLocalUri(canonical)) throw new Error("Not a managed local artifact URI");
+    if (!(doc.known_uris || []).includes(canonical)) doc.known_uris = (doc.known_uris || []).concat(canonical);
+    doc.updated_at = new Date().toISOString();
+    await dbPut("documents", doc);
+    return doc;
+  },
+  async getLatestArtifactVersion(logicalDocumentId, source) {
+    const versions = await dbGetAllByIndex("artifact_versions", "logical_document_id", logicalDocumentId);
+    return versions.filter((v) => !source || v.source === source)
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || ((a.id || 0) - (b.id || 0))).pop() || null;
+  },
+  async getLatestArtifactVersionForUri(logicalDocumentId, uri, source) {
+    const canonical = canonicalArtifactUri(uri);
+    const versions = await dbGetAllByIndex("artifact_versions", "logical_document_id", logicalDocumentId);
+    return versions.filter((v) => v.artifact_uri === canonical && (!source || v.source === source))
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || ((a.id || 0) - (b.id || 0))).pop() || null;
+  },
+  async saveArtifactVersion(record) {
+    const now = new Date().toISOString();
+    const saved = Object.assign({}, record, { created_at: record.created_at || now });
+    await dbPut("artifact_versions", saved);
+    return saved;
+  },
+  async markLatestArtifactVersionExported(logicalDocumentId) {
+    const latest = await this.getLatestArtifactVersion(logicalDocumentId, "local_edit");
+    if (!latest) return null;
+    latest.exported_at = new Date().toISOString();
+    await dbPut("artifact_versions", latest);
+    return latest;
+  },
 };
 
 // === mode 分派器 ===
@@ -109,7 +215,7 @@ const Storage = {
       _store = LocalStore;
     }
   },
-  getDocumentId() { return _store.getDocumentId(); },
+  getDocumentId(uri) { return _store.getDocumentId(uri); },
   saveAnnotation(a) { return _store.saveAnnotation(a); },
   listAnnotations(d) { return _store.listAnnotations(d); },
   deleteAnnotation(id) { return _store.deleteAnnotation(id); },
@@ -117,5 +223,15 @@ const Storage = {
   // 版本永远本地(IndexedDB),与 mode 无关
   saveVersion(docId, html, baseHash) { return LocalStore.saveVersion(docId, html, baseHash); },
   listVersions(docId) { return LocalStore.listVersions(docId); },
+  getOrCreateLocalDocument(uri) { return LocalStore.getOrCreateLocalDocument(uri); },
+  getDocumentByUri(uri) { return LocalStore.getDocumentByUri(uri); },
+  linkArtifactUri(logicalDocumentId, uri) { return LocalStore.linkArtifactUri(logicalDocumentId, uri); },
+  getLatestArtifactVersion(logicalDocumentId, source) { return LocalStore.getLatestArtifactVersion(logicalDocumentId, source); },
+  getLatestArtifactVersionForUri(logicalDocumentId, uri, source) { return LocalStore.getLatestArtifactVersionForUri(logicalDocumentId, uri, source); },
+  saveArtifactVersion(record) { return LocalStore.saveArtifactVersion(record); },
+  markLatestArtifactVersionExported(logicalDocumentId) { return LocalStore.markLatestArtifactVersionExported(logicalDocumentId); },
+  canonicalArtifactUri,
+  isManagedLocalUri,
+  legacyDocumentIdForUri,
 };
 window.Storage = Storage;

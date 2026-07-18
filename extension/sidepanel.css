@@ -187,6 +187,13 @@ body {
   border: 1px solid transparent;
 }
 #mode-indicator svg { width: 14px; height: 14px; flex: none; margin-top: 1px; }
+.artifact-status, .artifact-reload-result, .artifact-reload-confirm { margin: 9px 0; padding: 8px 10px; border: 1px solid var(--line-subtle); border-radius: var(--r-md); background: var(--bg-surface); color: var(--text-muted); font-size: 11.5px; line-height: 1.45; }
+.artifact-reload-result { color: var(--success); background: var(--success-soft); }
+.artifact-reload-btn { width: 100%; height: 32px; border-radius: var(--r-md); border: 1px solid var(--line-default); background: var(--bg-surface-raised); color: var(--text-secondary); font: 500 12px var(--font-sans); cursor: pointer; }
+.artifact-reload-btn:hover { border-color: var(--brand); color: var(--text-primary); }
+.artifact-reload-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 8px; }
+.artifact-reload-actions button { height: 28px; padding: 0 10px; border-radius: var(--r-sm); border: 1px solid var(--line-default); background: transparent; color: var(--text-secondary); cursor: pointer; font: 500 11.5px var(--font-sans); }
+.artifact-reload-actions #artifact-reload-confirm-btn { background: var(--cta-bg); color: #fff; border-color: transparent; }
 #mode-indicator.alert-success { background: var(--success-soft); border-color: rgba(131,239,215,.4); color: var(--success); }
 #mode-indicator.alert-warning { background: var(--warning-soft); border-color: rgba(245,200,107,.4); color: var(--warning); }
 /* 浅色主题:alert 用标准暖黄/浅绿(深色主题的 mint/gold 在白底发灰,不像标准 alert) */

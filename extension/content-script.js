@@ -82,6 +82,21 @@
   // === 双模式判断 ===
   const isLocal = ["file:", "data:", "blob:"].includes(location.protocol)
     || ["localhost", "127.0.0.1", "0.0.0.0"].includes(location.hostname);
+  // 仅 file/localhost artifact 进入 v0.6.2 的逻辑文档协议；data/blob 保持旧本地编辑语义。
+  const isManagedArtifact = !!(window.Storage && Storage.isManagedLocalUri && Storage.isManagedLocalUri(location.href));
+  const _artifactUri = window.Storage && Storage.canonicalArtifactUri ? Storage.canonicalArtifactUri(location.href) : location.href.split("#")[0];
+  let _logicalDocumentId = null;
+  let _loadedArtifactHash = null;
+  let _renderedArtifactHash = null;
+  let _hasUnsavedLocalSnapshot = false;
+  let _lastReconcileStatus = "clean";
+  let _artifactVerificationError = false;
+  // 该 clone 在 UI 注入之前同步完成；digest 异步不影响其输入。
+  const _loadedArtifactHashReady = (isManagedArtifact && window.HgArtifactVersion)
+    ? window.HgArtifactVersion.sha256Hex(window.HgArtifactVersion.serializeCurrentArtifact(document.documentElement))
+      .then((hash) => { _loadedArtifactHash = hash; _renderedArtifactHash = hash; return hash; })
+      .catch((error) => { _lastReconcileStatus = "error"; console.error("[hg] artifact hash unavailable", error); throw error; })
+    : Promise.resolve(null);
 
   // Fix #3/#2: content-script 是编辑态的唯一真相源,sidepanel 经 get-annotations 同步。
   // 页面始终以「查看」模式启动(含刷新);进入编辑需显式 enable-edit。
@@ -96,13 +111,14 @@
   let _versionTimer = 0;
   let _activated = false;          // 侧边栏激活前:不显示工具栏/高亮/编辑(避免对所有网页打扰)
   let _refreshDialogShown = false; // 本页面会话内只弹一次编辑确认窗(刷新后随页面重载重置)
-  let _baseHash = null;            // #3: 当前会话的「原始文件」正文哈希(判定磁盘文件是否被外部改动)
+  let _baseHash = null;            // 兼容旧变量名；v0.6.2 中为完整 artifact SHA-256 基线。
   let _lastPingAt = 0;             // #1: 最近一次收到侧边栏心跳的时间;超时则失活(收起侧边栏)
   // Fix #1: 编辑输入后延迟重锚定 overlay 高亮。
   let reanchorTimer = 0;
 
   // === 注入样式(浮动工具栏 + 高亮 + 确认弹窗;用 --hg-* 变量,深色默认 / [data-hg-theme=light] 浅色) ===
   const style = document.createElement("style");
+  style.dataset.hgInjected = "ui";
   style.textContent = `
     :root{
       --hg-bg:#171b2a; --hg-fg:#f6f7fb; --hg-line:rgba(255,255,255,.12); --hg-hover:rgba(255,255,255,.07);
@@ -514,7 +530,9 @@
   // side panel → content script: chrome.tabs.sendMessage
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === "get-annotations") {
-      sendResponse({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing });
+      getArtifactState().then((artifact_state) => sendResponse({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing, artifact_state }))
+        .catch(() => sendResponse({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing, artifact_state: artifactStateSnapshot() }));
+      return true;
     } else if (msg.type === "scroll-to") {
       const ann = (window.__hgAnnotations || []).find((a) => a.id === msg.id);
       if (ann) {
@@ -603,13 +621,33 @@
       // #1: 侧边栏收起 → 立即失活(隐藏浮窗/高亮,退出编辑)
       deactivateNow();
       sendResponse({ ok: true });
+    } else if (msg.type === "get-artifact-state") {
+      getArtifactState().then((artifact_state) => sendResponse({ ok: true, artifact_state }))
+        .catch((error) => sendResponse({ ok: false, code: "HASH_UNAVAILABLE", error: String(error && error.message || error), artifact_state: artifactStateSnapshot() }));
+      return true;
+    } else if (msg.type === "prepare-artifact-reload") {
+      if (!isLocal) { sendResponse({ ok: false, code: "NOT_LOCAL" }); }
+      else if (_editing || _hasUnsavedLocalSnapshot) { sendResponse({ ok: true, status: "needs_confirmation" }); }
+      else { sendResponse({ ok: true, status: "ready" }); }
+    } else if (msg.type === "mark-artifact-snapshot-exported") {
+      if (_logicalDocumentId) Storage.markLatestArtifactVersionExported(_logicalDocumentId).then(() => {
+        _hasUnsavedLocalSnapshot = false; sendResponse({ ok: true });
+      }).catch(() => sendResponse({ ok: false }));
+      else sendResponse({ ok: false });
+      return true;
+    } else if (msg.type === "artifact-update-ready") {
+      handleArtifactUpdateReady(msg, sender).then(sendResponse).catch((error) => sendResponse({ ok: false, code: "VALIDATION_ERROR", error: String(error && error.message || error) }));
+      return true;
     } else if (msg.type === "get-export") {
       // v0.6.1:附带 artifact 元数据(标题/地址/是否本地)给 ChangeContract;不读文件内容或敏感数据。
-      sendResponse({
-        type: "export-data",
-        items: window.__hgAnnotations || [],
-        artifact: { title: document.title || "Untitled HTML", url: location.href, isLocal: isLocal }
-      });
+      getArtifactState().then((artifact_state) => sendResponse({
+        type: "export-data", items: window.__hgAnnotations || [],
+        artifact: { title: document.title || "Untitled HTML", url: location.href, isLocal: isLocal },
+        artifact_state,
+        logicalDocumentId: _logicalDocumentId,
+        loadedArtifactHash: _loadedArtifactHash,
+      })).catch(() => sendResponse({ type: "export-data", items: window.__hgAnnotations || [], artifact: { title: document.title || "Untitled HTML", url: location.href, isLocal: isLocal }, artifact_state: artifactStateSnapshot(), logicalDocumentId: _logicalDocumentId, loadedArtifactHash: _loadedArtifactHash }));
+      return true;
     } else if (msg.type === "reply") {
       // 复用父批注的 selector 上下文(回复无独立选区)
       const parent = (window.__hgAnnotations || []).find((a) => a.id === msg.parentId);
@@ -880,10 +918,16 @@
     if (isLocal) {
       clearTimeout(_versionTimer);
       _versionTimer = setTimeout(async () => {
-        const docId = await Storage.getDocumentId();
-        // 只存正文,剥离扩展注入的 toolbar/overlay,避免还原时重复或错位
-        const html = captureBodyForSave();
-        try { await Storage.saveVersion(docId, html, _baseHash); } catch (e) { /* 存失败不阻塞编辑 */ }
+        if (!isManagedArtifact || !_logicalDocumentId || !_loadedArtifactHash || !window.HgArtifactVersion) return;
+        try {
+          const html = window.HgArtifactVersion.serializeCurrentArtifact(document.documentElement);
+          const artifactHash = await window.HgArtifactVersion.sha256Hex(html);
+          await Storage.saveArtifactVersion({ logical_document_id: _logicalDocumentId, artifact_uri: _artifactUri,
+            artifact_hash: artifactHash, parent_hash: _loadedArtifactHash, base_artifact_hash: _loadedArtifactHash,
+            source: "local_edit", html_content: html });
+          _renderedArtifactHash = artifactHash;
+          _hasUnsavedLocalSnapshot = true;
+        } catch (e) { _lastReconcileStatus = "error"; console.error("[hg] artifact snapshot failed", e); }
       }, 1500);
     }
   });
@@ -914,7 +958,7 @@
     reanchorTimer = setTimeout(() => { loadAnnotations(); }, 300);
   });
 
-  // === 本地模式:版本还原(本地文件无法写回磁盘,靠 IndexedDB 保存的正文版本恢复)===
+  // === 本地模式:undo 的 body 快照与 artifact 持久化是两条不同路径 ===
   function captureBodyForSave() {
     // 克隆 body,剥离扩展注入的 toolbar 与 overlay,只留用户正文
     const clone = document.body.cloneNode(true);
@@ -930,32 +974,87 @@
     while (tmp.firstChild) document.body.appendChild(tmp.firstChild);
     if (toolbar) document.body.appendChild(toolbar);
   }
-  // #3: 正文文本哈希(剥离扩展注入元素后,规范化空白,再 djb2)。用于判定磁盘文件是否被外部改动。
-  function hashBodyText() {
-    const clone = document.body.cloneNode(true);
-    clone.querySelectorAll("#hg-toolbar, .hg-hl").forEach((el) => el.remove());
-    const norm = (clone.textContent || "").replace(/\s+/g, " ").trim();
-    let h = 5381;
-    for (let i = 0; i < norm.length; i++) h = ((h << 5) + h + norm.charCodeAt(i)) | 0;
-    return "h" + (h >>> 0).toString(36);
+  function applyRestoredArtifact(html) {
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    const preservedToolbar = document.getElementById("hg-toolbar");
+    const preservedStyle = style.isConnected ? style : document.querySelector("style[data-hg-injected=\"ui\"]");
+    const theme = document.documentElement.getAttribute("data-hg-theme");
+    if (preservedToolbar) preservedToolbar.remove();
+    if (preservedStyle) preservedStyle.remove();
+    Array.from(document.documentElement.attributes).forEach((attr) => document.documentElement.removeAttribute(attr.name));
+    Array.from(parsed.documentElement.attributes).forEach((attr) => document.documentElement.setAttribute(attr.name, attr.value));
+    if (theme) document.documentElement.setAttribute("data-hg-theme", theme);
+    document.head.innerHTML = parsed.head.innerHTML;
+    document.body.innerHTML = parsed.body.innerHTML;
+    if (preservedStyle) document.head.appendChild(preservedStyle);
+    if (preservedToolbar) document.body.appendChild(preservedToolbar);
   }
-  // #3: 仅当磁盘文件自上次保存以来未变时,才恢复上次编辑;否则保留当前(新)文件,旧评论自然失效→stale。
+  function artifactStateSnapshot() {
+    return { logical_document_id: _logicalDocumentId, artifact_uri: _artifactUri, loaded_artifact_hash: _loadedArtifactHash,
+      rendered_artifact_hash: _renderedArtifactHash, has_unsaved_local_snapshot: _hasUnsavedLocalSnapshot,
+      last_reconcile_status: _lastReconcileStatus };
+  }
+  async function getArtifactState() {
+    if (isManagedArtifact && window.HgArtifactVersion) {
+      _renderedArtifactHash = await window.HgArtifactVersion.sha256Hex(window.HgArtifactVersion.serializeCurrentArtifact(document.documentElement));
+    }
+    return artifactStateSnapshot();
+  }
+  function legacyUriId() { try { return location.origin + location.pathname; } catch (e) { return _artifactUri; } }
+  async function recordLoadedArtifact() {
+    const latest = await Storage.getLatestArtifactVersion(_logicalDocumentId);
+    if (!latest || latest.artifact_hash !== _loadedArtifactHash || latest.artifact_uri !== _artifactUri) {
+      await Storage.saveArtifactVersion({ logical_document_id: _logicalDocumentId, artifact_uri: _artifactUri,
+        artifact_hash: _loadedArtifactHash, parent_hash: latest && latest.artifact_hash || null, source: "external_reconcile" });
+    }
+  }
+  // 只在完整 artifact 的原始 SHA-256 完全相同才恢复快照；旧 versions 永不恢复。
   async function restoreIfFresh() {
-    if (!isLocal) return;
+    if (!isManagedArtifact) return;
     try {
-      const docId = await Storage.getDocumentId();
-      const fileHash = hashBodyText(); // 此时 body 是磁盘真实内容(toolbar 已注入但会被剥离)
-      const vs = await Storage.listVersions(docId);
-      if (vs && vs.length) {
-        const latest = vs[vs.length - 1]; // 升序,末尾=最新
-        if (latest.base_hash && latest.base_hash === fileHash && latest.html_content) {
-          applyRestoredBody(latest.html_content); // 文件未变 → 安全恢复上次编辑
-        }
-        // else: 文件被外部改动(或旧记录无 base_hash)→ 不恢复,展示当前新文件
+      await _loadedArtifactHashReady;
+      if (!_loadedArtifactHash) throw new Error("No SHA-256 artifact hash");
+      _logicalDocumentId = (await Storage.getOrCreateLocalDocument(_artifactUri)).logical_document_id;
+      const expected = await Storage.getLatestArtifactVersionForUri(_logicalDocumentId, _artifactUri, "bridge");
+      if (expected && expected.artifact_uri === _artifactUri && expected.result_artifact_hash && expected.result_artifact_hash !== _loadedArtifactHash) {
+        _artifactVerificationError = true; _lastReconcileStatus = "error"; console.error("[hg] linked artifact hash did not match bridge completion"); return;
       }
-      _baseHash = fileHash; // 记下本次会话的原始基准,供后续 saveVersion 携带
-    } catch (e) { /* IndexedDB 读失败不阻塞批注功能 */ _baseHash = null; }
+      await recordLoadedArtifact();
+      const latest = await Storage.getLatestArtifactVersion(_logicalDocumentId, "local_edit");
+      if (latest && latest.html_content) {
+        _hasUnsavedLocalSnapshot = !latest.exported_at;
+        if (latest.base_artifact_hash === _loadedArtifactHash) {
+          applyRestoredArtifact(latest.html_content);
+          _renderedArtifactHash = latest.artifact_hash || await window.HgArtifactVersion.sha256Hex(latest.html_content);
+        } else _lastReconcileStatus = "conflict";
+      }
+      const legacy = await Storage.listVersions(legacyUriId());
+      if (legacy && legacy.length) console.info("[hg] legacy body-only versions were intentionally not restored during v0.6.2 migration");
+      _baseHash = _loadedArtifactHash;
+    } catch (e) { _lastReconcileStatus = "error"; _baseHash = null; console.error("[hg] artifact restore unavailable", e); }
   }
+
+  function isSha256(value) { return typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value); }
+  async function handleArtifactUpdateReady(msg, sender) {
+    if (!sender || sender.id !== chrome.runtime.id) return { ok: false, code: "VALIDATION_ERROR" };
+    if (!isManagedArtifact || !msg || msg.source !== "bridge" || !["overwrite", "new_artifact"].includes(msg.result_kind)
+      || !isSha256(msg.base_artifact_hash) || !isSha256(msg.result_artifact_hash) || !msg.logical_document_id || !msg.result_artifact_uri) return { ok: false, code: "VALIDATION_ERROR" };
+    if (!_logicalDocumentId || msg.logical_document_id !== _logicalDocumentId) return { ok: false, code: "VALIDATION_ERROR" };
+    if (_loadedArtifactHash !== msg.base_artifact_hash || _hasUnsavedLocalSnapshot) return { ok: false, code: "BASE_CONFLICT", current_hash: _loadedArtifactHash };
+    const resultUri = Storage.canonicalArtifactUri(msg.result_artifact_uri);
+    if (msg.result_kind === "overwrite" && resultUri !== _artifactUri) return { ok: false, code: "VALIDATION_ERROR" };
+    if (msg.result_kind === "new_artifact") await Storage.linkArtifactUri(_logicalDocumentId, resultUri);
+    await Storage.saveArtifactVersion({ logical_document_id: _logicalDocumentId, artifact_uri: resultUri,
+      artifact_hash: msg.result_artifact_hash, result_artifact_hash: msg.result_artifact_hash, parent_hash: msg.base_artifact_hash,
+      source: "bridge", result_kind: msg.result_kind });
+    if (msg.result_kind === "overwrite") {
+      chrome.runtime.sendMessage({ type: "artifact-reload-requested", tabIdHint: sender.tab && sender.tab.id }).catch(() => {});
+      return { ok: true, action: "reload" };
+    }
+    return { ok: true, action: "navigate_required" };
+  }
+  // 浏览器手工/扩展集成测试钩子；不暴露任何文件写入能力。
+  window.__hgArtifactVersionTest = { artifactStateSnapshot, getArtifactState, applyRestoredArtifact, handleArtifactUpdateReady };
 
   // === #5: i18n —— 读本地存储的语言偏好(覆盖浏览器检测),并监听 sidepanel 的切换实时重建工具栏 ===
   if (window.HG_I18N) {
@@ -973,9 +1072,9 @@
     // 用户在确认窗点了「刷新」→ 重载后本会话标记 hg_autoedit:自动激活并进入编辑,不再弹窗
     let autoEdit = false;
     try { autoEdit = sessionStorage.getItem("hg_autoedit") === "1"; if (autoEdit) sessionStorage.removeItem("hg_autoedit"); } catch (e) {}
-    await restoreIfFresh(); // #3: 本地——仅当磁盘文件未变才恢复上次编辑;否则保留新文件
+    await restoreIfFresh();
     if (autoEdit) { _activated = true; _refreshDialogShown = true; } // 自激活:渲染高亮 + 跳过确认窗
-    await loadAnnotations();
+    if (!_artifactVerificationError) await loadAnnotations();
     if (autoEdit) setEditing(true); // 直接进入编辑(广播 edit-state → 侧边栏同步「退出编辑」)
   })();
   console.log("htmlGenius v0.5 ready, mode:", isLocal ? "local" : "remote(editable, temporary)", "starts in view");

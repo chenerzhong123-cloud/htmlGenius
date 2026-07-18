@@ -10,6 +10,8 @@
   let _toastTimer = 0;
   let _lastItems = []; // 上次渲染的批注(供切换语言时重绘)
   let _sessionUser = null; // 已登录用户(供切换语言时重绘登录态文案)
+  let _artifactState = null;
+  let _pendingArtifactReload = false;
   // v0.6.1 修改契约 Composer 临时状态(不持久化)
   let _contractItems = [];        // 打开 Composer 时的批注快照(供校验/渲染,不随列表变化)
   let _contractSourceRootIds = [];
@@ -68,8 +70,10 @@
         if (resp && resp.type === "annotations-list") {
           isLocal = resp.isLocal;
           _editing = !!resp.editing; // 以页面实际编辑态为准(刷新后复位为查看)
+          _artifactState = resp.artifact_state || _artifactState;
           renderMode();
           renderCards(resp.items);
+          maybeShowReloadResult(resp.items);
         }
       });
     } else if (msg.type === "presence") {
@@ -82,6 +86,10 @@
       _editing = !!msg.editing;
       if (msg.isLocal !== undefined) isLocal = msg.isLocal;
       renderMode();
+    } else if (msg.type === "artifact-reload-requested") {
+      // 仅 content-script 的已验证 completion 会发此事件；这里不包含任何 Bridge/NM 调用。
+      const tabId = sender && sender.tab && sender.tab.id;
+      if (tabId) { _pendingArtifactReload = true; chrome.tabs.reload(tabId, { bypassCache: true }); }
     } else if (msg.type === "element-mode-changed") {
       _elementMode = !!msg.on; updateAdvModeBtn(); // v0.6: 模式翻转 → 按钮 + 互斥显隐
     } else if (msg.type === "element-selected") {
@@ -122,6 +130,29 @@
     if (epanel) epanel.hidden = !_elementMode; // v0.6: 元素面板(M3 填内容)
     const adv = document.getElementById("adv-mode-btn");
     if (adv) adv.hidden = !_editing; // v0.6: 仅编辑态显示「切换高级模式」
+    renderArtifactControls();
+  }
+  function renderArtifactControls() {
+    const reload = document.getElementById("artifact-reload-btn");
+    const status = document.getElementById("artifact-status");
+    if (reload) reload.hidden = !isLocal;
+    if (!status) return;
+    if (!isLocal || !_artifactState) { status.hidden = true; return; }
+    const hash = _artifactState.loaded_artifact_hash;
+    const logical = _artifactState.logical_document_id;
+    if (!hash && !logical) { status.hidden = true; return; }
+    status.textContent = t("artifact.status").replace("{id}", logical || "—").replace("{hash}", hash ? hash.slice(0, 19) + "…" : t("artifact.hashPending"));
+    status.hidden = false;
+  }
+  function maybeShowReloadResult(items) {
+    if (!_pendingArtifactReload) return;
+    _pendingArtifactReload = false;
+    const result = document.getElementById("artifact-reload-result");
+    if (!result) return;
+    const open = (items || []).filter((a) => a._status !== "stale").length;
+    const stale = (items || []).filter((a) => a._status === "stale").length;
+    result.textContent = t("artifact.reloaded").replace("{open}", open).replace("{stale}", stale);
+    result.hidden = false;
   }
   // v0.6: 高级模式按钮文案/高亮 + 互斥显隐
   function updateAdvModeBtn() {
@@ -558,6 +589,23 @@
     _editing = !_editing;
     renderMode();
   });
+  const artifactReloadBtn = document.getElementById("artifact-reload-btn");
+  const artifactReloadConfirm = document.getElementById("artifact-reload-confirm");
+  function performArtifactReload() {
+    if (artifactReloadConfirm) artifactReloadConfirm.hidden = true;
+    _pendingArtifactReload = true;
+    getActiveTab().then((tab) => { if (tab && tab.id) chrome.tabs.reload(tab.id, { bypassCache: true }); });
+  }
+  if (artifactReloadBtn) artifactReloadBtn.addEventListener("click", async () => {
+    const response = await sendToContent({ type: "prepare-artifact-reload" });
+    if (!response || !response.ok) return;
+    if (response.status === "needs_confirmation") { if (artifactReloadConfirm) artifactReloadConfirm.hidden = false; }
+    else performArtifactReload();
+  });
+  const artifactReloadCancel = document.getElementById("artifact-reload-cancel");
+  const artifactReloadConfirmBtn = document.getElementById("artifact-reload-confirm-btn");
+  if (artifactReloadCancel) artifactReloadCancel.addEventListener("click", () => { if (artifactReloadConfirm) artifactReloadConfirm.hidden = true; });
+  if (artifactReloadConfirmBtn) artifactReloadConfirmBtn.addEventListener("click", performArtifactReload);
 
   // v0.6: 切换高级(元素)模式
   document.getElementById("adv-mode-btn").addEventListener("click", () => sendToContent({ type: "toggle-element-mode" }));
@@ -597,6 +645,7 @@
       a.href = url; a.download = r.name || "page.html";
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
+      sendToContent({ type: "mark-artifact-snapshot-exported" });
     }
   });
   // change(而非 input):取色确认后一次性施效,避免连续触发时选区 range 失效
@@ -873,6 +922,7 @@
     if (resp && resp.type === "annotations-list") {
       isLocal = resp.isLocal;
       _editing = !!resp.editing;
+      _artifactState = resp.artifact_state || _artifactState;
       renderMode();
       renderCards(resp.items);
     }

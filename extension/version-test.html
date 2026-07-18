@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>version-test</title>
+  <style data-hg-injected="ui">.hg-test{display:none}</style>
 </head>
 <body>
   <div id="content">原文</div>
@@ -23,18 +24,18 @@
     }
   </script>
   <script src="storage.js"></script>
+  <script src="artifact-version.js"></script>
   <script>
     (async function () {
       try {
-        // === 1. LocalStore 往返:saveVersion -> listVersions 保持 html_content ===
-        var docId = "test://version-roundtrip";
-        var saved = '<div id="content">编辑后 DEF <b>粗</b></div>';
-        await Storage.saveVersion(docId, saved);
-        var vs = await Storage.listVersions(docId);
-        if (!vs || !vs.length) throw new Error("listVersions 空");
-        var last = vs[vs.length - 1]; // 升序,末尾=最新
-        if (last.html_content !== saved)
-          throw new Error("往返不一致: " + JSON.stringify(last.html_content));
+        // === 1. v0.6.2 artifact snapshot:完整 HTML + base artifact SHA-256（不再写 legacy versions）===
+        var docId = "hgd_version_test_" + Date.now();
+        var saved = '<!doctype html><html><head><meta name="version" content="edited"></head><body><div id="content">编辑后 DEF <b>粗</b></div></body></html>';
+        var savedHash = await HgArtifactVersion.sha256Hex(saved);
+        await Storage.saveArtifactVersion({ logical_document_id: docId, artifact_uri: "http://localhost/version-test.html", artifact_hash: savedHash, base_artifact_hash: "sha256:" + "0".repeat(64), source: "local_edit", html_content: saved });
+        var last = await Storage.getLatestArtifactVersion(docId, "local_edit");
+        if (!last || last.html_content !== saved || last.artifact_hash !== savedHash)
+          throw new Error("artifact snapshot roundtrip mismatch");
 
         // === 2. captureBodyForSave:剥离扩展 chrome,保留正文 ===
         document.body.innerHTML =
@@ -82,6 +83,20 @@
           throw new Error("撤销后 toolbar 不是原节点(监听会丢): " + document.body.innerHTML);
         if (document.querySelectorAll("#hg-toolbar").length !== 1)
           throw new Error("撤销后 toolbar 数量异常");
+
+        // === 5. 完整 artifact 恢复:head+body 都替换，原 toolbar 节点仍保留 ===
+        document.head.innerHTML = '<meta charset="utf-8"><style data-hg-injected="ui">.x{display:none}</style>';
+        document.body.innerHTML = '<div id="content">磁盘版本</div>';
+        var tb3 = document.createElement("div"); tb3.id = "hg-toolbar"; tb3.dataset.kept = "3"; document.body.appendChild(tb3);
+        var parsed = new DOMParser().parseFromString(saved, "text/html");
+        var keepStyle = document.querySelector('style[data-hg-injected="ui"]');
+        tb3.remove(); keepStyle.remove();
+        document.head.innerHTML = parsed.head.innerHTML; document.body.innerHTML = parsed.body.innerHTML;
+        document.head.appendChild(keepStyle); document.body.appendChild(tb3);
+        if (!document.head.querySelector('meta[name="version"]') || document.querySelector("#content").textContent.indexOf("编辑后") === -1)
+          throw new Error("完整 artifact 未恢复 head + body");
+        if (document.getElementById("hg-toolbar") !== tb3 || document.querySelectorAll("#hg-toolbar").length !== 1)
+          throw new Error("完整 artifact 恢复丢失 toolbar 节点");
 
         document.title = "PASS";
       } catch (e) {

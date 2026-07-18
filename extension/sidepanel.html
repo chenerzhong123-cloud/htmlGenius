@@ -46,6 +46,13 @@
     <div class="ep-sub">在页面上悬停看元素框、点选元素(M2);删除 / 复制 / 拖拽重排(M3-M4)</div>
   </div>
   <div class="edit-tips" data-i18n-html="tips.html">选中文字可<b>加批注</b>;点「<b>开始编辑</b>」后,选中文字可改<b>样式 / 颜色 / 字号 / 对齐</b>(Ctrl+Z 撤销)</div>
+  <div id="artifact-status" class="artifact-status" hidden></div>
+  <div id="artifact-reload-result" class="artifact-reload-result" hidden></div>
+  <button id="artifact-reload-btn" class="artifact-reload-btn" data-i18n="artifact.reload" hidden>重新读取文件</button>
+  <div id="artifact-reload-confirm" class="artifact-reload-confirm" hidden>
+    <div data-i18n="artifact.reloadWarning">刷新将丢弃仅存在于插件内、尚未导出的编辑快照。</div>
+    <div class="artifact-reload-actions"><button id="artifact-reload-cancel" data-i18n="artifact.cancel">取消</button><button id="artifact-reload-confirm-btn" data-i18n="artifact.confirm">继续刷新</button></div>
+  </div>
   <div class="reload-hint" data-i18n="reloadHint">若批注或编辑长时间无响应,刷新当前页面即可恢复</div>
   <button id="adv-mode-btn" class="adv-mode-btn" data-i18n="adv.enter" hidden>切换高级模式</button>
 </div>
