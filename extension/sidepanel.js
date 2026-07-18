@@ -18,6 +18,10 @@
   let _contractArtifact = null;
   let _contractOpen = false;
   let _contractTriggerEl = null;  // 关闭 Composer 后恢复焦点
+  // v0.7 Codex Local Bridge 状态
+  let _contractMeta = null;              // {isLocal, logicalDocumentId, loadedArtifactHash}
+  let _contractSessionContinueAvail = false;
+  let _contractRunning = false;
 
   async function getActiveTab() {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -247,7 +251,7 @@
             _contractTriggerEl = gen;
             sendToContent({ type: "get-export" }).then((resp) => {
               if (!resp || resp.type !== "export-data") { showToast(t("contract.copyFail")); return; }
-              openContract([ann.id], resp.items || [], resp.artifact);
+              openContract([ann.id], resp.items || [], resp.artifact, bridgeMeta(resp));
             });
           });
           acts.appendChild(gen);
@@ -455,6 +459,9 @@
   const contractCopyJson = document.getElementById("contract-copy-json");
   const contractFallback = document.getElementById("contract-output-fallback");
   const contractFallbackText = document.getElementById("contract-fallback-text");
+  const contractBridgeWrap = document.getElementById("contract-bridge-wrap");
+  const contractBridge = document.getElementById("contract-bridge");
+  const contractBridgeStatus = document.getElementById("contract-bridge-status");
 
   function countReplies(rootId, allItems) {
     const kids = {};
@@ -507,21 +514,41 @@
     if (v.errors.brief) { contractBriefError.textContent = t("contract.briefRequired"); contractBriefError.hidden = false; }
     else { contractBriefError.hidden = true; }
     const disable = !v.ok;
-    contractCopyPrompt.disabled = disable;
-    contractCopyJson.disabled = disable;
+    const lock = _contractRunning;
+    // v0.7 bridge:仅本地 managed artifact + 非 restructure 显示
+    const bridgeEligible = !!(_contractMeta && _contractMeta.isLocal && _contractMeta.logicalDocumentId
+      && _contractMeta.loadedArtifactHash && draft.mode !== "restructure");
+    if (contractBridgeWrap) contractBridgeWrap.hidden = !bridgeEligible;
+    if (bridgeEligible && contractBridge) {
+      contractBridge.textContent = (draft.mode === "regenerate") ? t("bridge.runRegenerate") : t("bridge.run");
+    }
+    const continueWrap = document.getElementById("contract-session-continue-wrap");
+    if (continueWrap) continueWrap.hidden = !_contractSessionContinueAvail;
+    contractCopyPrompt.disabled = disable || lock;
+    contractCopyJson.disabled = disable || lock;
+    if (contractBridge) contractBridge.disabled = disable || lock || !bridgeEligible;
   }
-  function openContract(rootIds, items, artifact) {
+  function openContract(rootIds, items, artifact, meta) {
     _contractItems = items || [];
     _contractSourceRootIds = (rootIds || []).slice();
     _contractArtifact = artifact || { title: "", url: "", isLocal: false };
+    _contractMeta = meta || { isLocal: !!(artifact && artifact.isLocal), logicalDocumentId: null, loadedArtifactHash: null };
+    _contractRunning = false;
+    _contractSessionContinueAvail = false;
     _contractOpen = true;
     const precise = document.querySelector('input[name="contract-mode"][value="precise_patch"]');
     if (precise) precise.checked = true;
+    const sessNew = document.querySelector('input[name="contract-session"][value="new"]');
+    if (sessNew) sessNew.checked = true;
     contractBrief.value = "";
     contractPreserve.value = "";
+    document.querySelectorAll('input[name="contract-mode"], input[name="contract-session"]').forEach((el) => { el.disabled = false; });
+    contractBrief.disabled = false;
+    contractPreserve.disabled = false;
     contractBriefError.hidden = true;
     contractFallback.hidden = true;
     contractFallbackText.value = "";
+    if (contractBridgeStatus) { contractBridgeStatus.hidden = true; contractBridgeStatus.className = "contract-bridge-status"; }
     accountSheet.classList.remove("show");
     avatarBtn.classList.remove("active");
     closeLangSheet();
@@ -529,6 +556,7 @@
     refreshContractUI();
     contractSheet.hidden = false;
     contractSheet.classList.add("show");
+    queryBridgeSession();
     setTimeout(() => { try { contractBrief.focus(); } catch (e) {} }, 0);
   }
   function closeContract() {
@@ -564,11 +592,76 @@
     }
   }
 
+  // === v0.7 Codex Local Bridge 辅助 ===
+  function bridgeMeta(resp) {
+    return {
+      isLocal: !!(resp && resp.artifact && resp.artifact.isLocal),
+      logicalDocumentId: (resp && resp.logicalDocumentId) || (resp && resp.artifact_state && resp.artifact_state.logical_document_id) || null,
+      loadedArtifactHash: (resp && resp.loadedArtifactHash) || (resp && resp.artifact_state && resp.artifact_state.loaded_artifact_hash) || null
+    };
+  }
+  function queryBridgeSession() {
+    getActiveTab().then((tab) => {
+      if (!tab || !tab.id) return;
+      chrome.runtime.sendMessage({ type: "bridge-query-session", tab_id: tab.id }).then((r) => {
+        _contractSessionContinueAvail = !!(r && r.continuable);
+        if (!_contractOpen) return;
+        const cw = document.getElementById("contract-session-continue-wrap");
+        if (cw) cw.hidden = !_contractSessionContinueAvail;
+        if (!_contractSessionContinueAvail) { const n = document.querySelector('input[name="contract-session"][value="new"]'); if (n) n.checked = true; }
+      }).catch(() => {});
+    });
+  }
+  function setBridgeStatus(text, cls) {
+    if (!contractBridgeStatus) return;
+    contractBridgeStatus.hidden = !text;
+    contractBridgeStatus.textContent = text || "";
+    contractBridgeStatus.className = "contract-bridge-status" + (cls ? " " + cls : "");
+  }
+  function bridgeFailClass(code) {
+    if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "BRIDGE_NOT_INSTALLED") return "warn";
+    if (code && code.indexOf("CODEX") === 0) return "warn";
+    return "err";
+  }
+  function tBridgeFailed(code, host) {
+    if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED") return t("bridge.sourceChanged");
+    if (code === "BRIDGE_NOT_INSTALLED") return t("bridge.notInstalled");
+    if (code && code.indexOf("CODEX") === 0) return t("bridge.checkCodex");
+    return t("bridge.failed").replace("{msg}", (host && host.message) ? host.message : (code || ""));
+  }
+  function setContractRunning(running) {
+    _contractRunning = !!running;
+    contractSheet.querySelectorAll('input[name="contract-mode"], input[name="contract-session"], textarea').forEach((el) => { el.disabled = running; });
+    refreshContractUI();
+  }
+  function startBridgeRun() {
+    if (_contractRunning) return;
+    const draft = getContractDraft();
+    let task;
+    try { task = window.ChangeContract.buildTask(draft, _contractItems); }
+    catch (e) { setBridgeStatus(t("bridge.invalid"), "err"); return; }
+    const sessEl = document.querySelector('input[name="contract-session"]:checked');
+    const session_mode = (sessEl && sessEl.value === "continue") ? "continue" : "new";
+    getActiveTab().then((tab) => {
+      if (!tab || !tab.id) { setBridgeStatus(t("bridge.failed").replace("{msg}", "no active tab"), "err"); return; }
+      chrome.runtime.sendMessage({ type: "bridge-start", tab_id: tab.id, session_mode, change_contract: task }).then((resp) => {
+        if (resp && resp.ok) { setContractRunning(true); setBridgeStatus(t("bridge.running"), "running"); }
+        else {
+          const code = resp && resp.code;
+          if (code === "BRIDGE_NOT_INSTALLED") setBridgeStatus(t("bridge.notInstalled"), "warn");
+          else if (code === "NOT_LOCAL" || code === "NO_ARTIFACT_VERSION" || code === "NO_CONTINUABLE_SESSION") setBridgeStatus(t("bridge.hint"), "warn");
+          else setBridgeStatus(tBridgeFailed(code, resp), bridgeFailClass(code));
+        }
+      }).catch(() => setBridgeStatus(t("bridge.notInstalled"), "warn"));
+    });
+  }
+
   if (contractCloseBtn) contractCloseBtn.addEventListener("click", closeContract);
   document.querySelectorAll('input[name="contract-mode"]').forEach((r) => r.addEventListener("change", refreshContractUI));
   if (contractBrief) contractBrief.addEventListener("input", refreshContractUI);
   if (contractCopyPrompt) contractCopyPrompt.addEventListener("click", () => copyContract("prompt"));
   if (contractCopyJson) contractCopyJson.addEventListener("click", () => copyContract("json"));
+  if (contractBridge) contractBridge.addEventListener("click", startBridgeRun);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && _contractOpen) { e.preventDefault(); closeContract(); } });
 
   // 底部「生成修改任务」:取全部未失效顶层批注 → 打开 Composer(无顶层批注时按钮已 disabled)
@@ -579,7 +672,7 @@
       const roots = window.ChangeContract.getRoots(items);
       if (!roots.length) { showToast(t("contract.empty")); return; }
       _contractTriggerEl = document.getElementById("export-btn");
-      openContract(roots.map((r) => r.id), items, resp.artifact);
+      openContract(roots.map((r) => r.id), items, resp.artifact, bridgeMeta(resp));
     });
   });
 
@@ -773,6 +866,12 @@
       inviteInput.value = msg.code;
       if (teamSetup) teamSetup.hidden = false;
       loginState.textContent = t("team.invitePrefill");
+    }
+    // v0.7 bridge:background 推送的 run 进度/完成/失败(仅当前 tab 且 Composer 打开时处理)
+    if (_contractOpen && msg && msg.tab_id === currentTabId) {
+      if (msg.type === "bridge-progress" && _contractRunning) setBridgeStatus(t("bridge.running"), "running");
+      else if (msg.type === "bridge-completed") { setContractRunning(false); setBridgeStatus(t("bridge.completed"), "ok"); }
+      else if (msg.type === "bridge-failed") { setContractRunning(false); setBridgeStatus(tBridgeFailed(msg.code, msg), bridgeFailClass(msg.code)); }
     }
   });
 

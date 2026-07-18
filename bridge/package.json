@@ -1,0 +1,14 @@
+{
+  "name": "htmlgenius-codex-bridge",
+  "version": "0.7.0",
+  "description": "HTML Genius Local Bridge — Chrome Native Messaging host that drives the user's local Codex App Server. Writes candidates only, never overwrites the source file.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "private": true,
+  "bin": { "htmlgenius-bridge-host": "host.mjs" },
+  "scripts": {
+    "test": "node --test test/",
+    "install:macos": "node install-macos.mjs"
+  },
+  "license": "UNLICENSED"
+}

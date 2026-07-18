@@ -127,6 +127,18 @@
     <button id="contract-copy-prompt" class="contract-primary"></button>
     <button id="contract-copy-json" class="contract-secondary" data-i18n="contract.copyJson">复制 JSON</button>
   </div>
+
+  <!-- v0.7 Codex Local Bridge:仅本地 managed artifact + 非 restructure 时显示 -->
+  <div id="contract-bridge-wrap" class="contract-bridge-wrap" hidden>
+    <div class="contract-section-label" data-i18n="bridge.sessionTitle">Codex 执行</div>
+    <div class="contract-bridge-hint" data-i18n="bridge.hint"></div>
+    <div class="contract-session">
+      <label class="session-opt"><input type="radio" name="contract-session" value="new" checked><span data-i18n="bridge.sessionNew">创建新的 Codex task</span></label>
+      <label class="session-opt" id="contract-session-continue-wrap" hidden><input type="radio" name="contract-session" value="continue"><span data-i18n="bridge.sessionContinue">继续上次创建的 Codex task</span></label>
+    </div>
+    <button id="contract-bridge" class="contract-bridge" type="button"></button>
+  </div>
+  <div id="contract-bridge-status" class="contract-bridge-status" hidden></div>
 </div>
 
 <script src="config.js"></script>

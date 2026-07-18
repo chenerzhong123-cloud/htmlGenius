@@ -1,6 +1,7 @@
-// storage.js — IndexedDB 封装(annotations + legacy versions + artifact versions)
+// storage.js — IndexedDB 封装(annotations + legacy versions + artifact versions + bridge sessions/runs)
+// 用 globalThis(而非 window)以兼容 background service worker(无 window);在 content-script/sidepanel globalThis===window,行为不变。
 const DB_NAME = "htmlgenius";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -23,6 +24,15 @@ function openDB() {
         const a = db.createObjectStore("artifact_versions", { keyPath: "id", autoIncrement: true });
         a.createIndex("logical_document_id", "logical_document_id", { unique: false });
         a.createIndex("artifact_hash", "artifact_hash", { unique: false });
+      }
+      // v0.7 bridge:每个逻辑文档至多一条 Codex 会话所有权;每次 run 一条记录。保留既有 store 与数据。
+      if (!db.objectStoreNames.contains("bridge_sessions")) {
+        db.createObjectStore("bridge_sessions", { keyPath: "logical_document_id" });
+      }
+      if (!db.objectStoreNames.contains("bridge_runs")) {
+        const br = db.createObjectStore("bridge_runs", { keyPath: "run_id" });
+        br.createIndex("logical_document_id", "logical_document_id", { unique: false });
+        br.createIndex("tab_id", "tab_id", { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -86,7 +96,7 @@ function isManagedLocalUri(uri) {
 }
 
 function newLogicalDocumentId() {
-  if (window.crypto && typeof window.crypto.randomUUID === "function") return "hgd_" + window.crypto.randomUUID();
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") return "hgd_" + globalThis.crypto.randomUUID();
   return "hgd_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 12);
 }
 
@@ -200,6 +210,30 @@ const LocalStore = {
     await dbPut("artifact_versions", latest);
     return latest;
   },
+  // === v0.7 bridge session / run(本地,扩展 IndexedDB;不进 RemoteStore)===
+  // 仅按 logical_document_id 读写会话;不提供按 thread_id 浏览/导入(§5.1)。
+  async getBridgeSession(logicalDocumentId) { return dbGet("bridge_sessions", logicalDocumentId); },
+  async saveBridgeSession(record) {
+    const now = new Date().toISOString();
+    const rec = Object.assign({}, record, { updated_at: record.updated_at || now, created_at: record.created_at || now });
+    return dbPut("bridge_sessions", rec);
+  },
+  async getBridgeRun(runId) { return dbGet("bridge_runs", runId); },
+  async getActiveBridgeRunForTab(tabId) {
+    const runs = await dbGetAllByIndex("bridge_runs", "tab_id", tabId);
+    return runs.find((r) => r.status === "starting" || r.status === "running") || null;
+  },
+  async saveBridgeRun(record) {
+    const rec = Object.assign({}, record, { created_at: record.created_at || new Date().toISOString() });
+    return dbPut("bridge_runs", rec);
+  },
+  async updateBridgeRun(runId, patch) {
+    const run = await dbGet("bridge_runs", runId);
+    if (!run) return null;
+    const updated = Object.assign({}, run, patch);
+    await dbPut("bridge_runs", updated);
+    return updated;
+  },
 };
 
 // === mode 分派器 ===
@@ -209,8 +243,8 @@ const LocalStore = {
 let _store = LocalStore;
 const Storage = {
   configure(cfg) {
-    if (cfg && cfg.mode === "synced" && window.RemoteStore) {
-      _store = window.RemoteStore.make(cfg);
+    if (cfg && cfg.mode === "synced" && globalThis.RemoteStore) {
+      _store = globalThis.RemoteStore.make(cfg);
     } else {
       _store = LocalStore;
     }
@@ -230,8 +264,15 @@ const Storage = {
   getLatestArtifactVersionForUri(logicalDocumentId, uri, source) { return LocalStore.getLatestArtifactVersionForUri(logicalDocumentId, uri, source); },
   saveArtifactVersion(record) { return LocalStore.saveArtifactVersion(record); },
   markLatestArtifactVersionExported(logicalDocumentId) { return LocalStore.markLatestArtifactVersionExported(logicalDocumentId); },
+  // v0.7 bridge:始终本地(LocalStore),与协同 mode 无关
+  getBridgeSession(logicalDocumentId) { return LocalStore.getBridgeSession(logicalDocumentId); },
+  saveBridgeSession(record) { return LocalStore.saveBridgeSession(record); },
+  getBridgeRun(runId) { return LocalStore.getBridgeRun(runId); },
+  getActiveBridgeRunForTab(tabId) { return LocalStore.getActiveBridgeRunForTab(tabId); },
+  saveBridgeRun(record) { return LocalStore.saveBridgeRun(record); },
+  updateBridgeRun(runId, patch) { return LocalStore.updateBridgeRun(runId, patch); },
   canonicalArtifactUri,
   isManagedLocalUri,
   legacyDocumentIdForUri,
 };
-window.Storage = Storage;
+globalThis.Storage = Storage;

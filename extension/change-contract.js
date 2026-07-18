@@ -5,7 +5,14 @@
 // 纯函数约束:不读取 DOM、chrome API、时间、随机数或 Clipboard,方便稳定测试(见 change-contract-test.html)。
 // 不替代 BuildPrompt;旧 BuildPrompt.fromAnnotations() 保持原样。新 UI 只能调用 ChangeContract。
 // 暴露 window.ChangeContract.{MODES, validateDraft, buildTask, renderPrompt, serialize, getRoots, buildReplyTree}
-(function () {
+// UMD:浏览器挂 window.ChangeContract;Node 走 module.exports(供 bridge/prompt.mjs 复用 renderPrompt,
+// 单一真相源,不与扩展侧漂移)。与 undo.js 同款,不改任何 schema/语义。
+(function (root, factory) {
+  "use strict";
+  const api = factory();
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  root.ChangeContract = api;
+})(typeof window !== "undefined" ? window : this, function () {
   "use strict";
 
   // mode → 固定契约元数据(§4.3,不让 UI 改写)。prompt 文本固定中文(§6)。
@@ -270,7 +277,7 @@
     return lines.join("\n");
   }
 
-  window.ChangeContract = {
+  return {
     MODES: MODES,
     validateDraft: validateDraft,
     buildTask: buildTask,
@@ -279,4 +286,4 @@
     getRoots: getRoots,
     buildReplyTree: buildReplyTree
   };
-})();
+});
