@@ -1,0 +1,121 @@
+<!doctype html>
+<!-- htmlGenius Landing · 三案索引(卡片打开整页)
+     三张卡片分别直达 landing-bauhaus / landing-memphis / landing-nebula。
+     索引页本身用中性 Nebula 深色壳(推荐基线),每张卡片用各自方向的 token 小预览。 -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>htmlGenius Landing · 三条视觉方向</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#080A12; --surface:#10131F; --raised:#151929; --line:rgba(255,255,255,.12); --line-soft:rgba(255,255,255,.08);
+      --ink:#F6F7FB; --muted:#8D95AA; --brand:#7C8CFF; --cyan:#79E9F7;
+      --sans:"Inter",system-ui,-apple-system,sans-serif; --mono:ui-monospace,SFMono-Text,Menlo,monospace;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+      -webkit-font-smoothing:antialiased;min-height:100vh;padding:64px 24px 80px;
+      background-image:radial-gradient(600px 360px at 50% -8%,rgba(124,140,255,.18),transparent 70%);}
+    a{color:inherit;text-decoration:none}
+    .wrap{max-width:1080px;margin:auto}
+    .head{text-align:center;margin-bottom:48px}
+    .pill{font:500 12px var(--mono);color:#c9ceff;border:1px solid rgba(151,163,255,.23);background:rgba(124,140,255,.14);
+      padding:7px 12px;border-radius:999px;display:inline-flex;gap:8px;align-items:center}
+    .dot{width:6px;height:6px;background:#83EFD7;border-radius:50%}
+    h1{font-weight:800;letter-spacing:-.05em;font-size:clamp(30px,4vw,44px);line-height:1.1;margin:18px auto 12px;max-width:760px}
+    .lede{color:var(--muted);font-size:15px;line-height:1.6;max-width:560px;margin:0 auto}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:8px}
+    .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;
+      transition:transform .18s,border-color .18s,box-shadow .18s}
+    .card:hover{transform:translateY(-4px);border-color:rgba(139,153,255,.5);box-shadow:0 18px 40px rgba(0,0,0,.4)}
+    .card:focus-within{border-color:rgba(139,153,255,.72);box-shadow:0 0 0 3px rgba(139,153,255,.25)}
+    .preview{height:150px;position:relative;overflow:hidden}
+    /* —— 每案迷你预览(纯 CSS,示意各方向调性) —— */
+    .preview.bauhaus{background:#EEE7DC}
+    .preview.bauhaus .b-shape1{position:absolute;width:120px;height:120px;border-radius:50%;background:#EBBD39;top:-40px;right:-30px}
+    .preview.bauhaus .b-shape2{position:absolute;width:90px;height:90px;background:#275FA0;bottom:-30px;left:-20px;transform:rotate(45deg)}
+    .preview.bauhaus .b-cta{position:absolute;left:18px;bottom:18px;background:#D6382E;color:#fff;font:700 11px var(--sans);
+      padding:7px 12px;border:1.5px solid #15263E;box-shadow:3px 3px 0 #9D241D}
+    .preview.bauhaus .b-mark{position:absolute;left:18px;top:18px;width:26px;height:26px;border-radius:50%;background:#D6382E;color:#fff;
+      display:grid;place-items:center;font-weight:800;font-size:13px}
+    .preview.memphis{background:#EEF4FF}
+    .preview.memphis .m-dots{position:absolute;width:90px;height:60px;top:18px;right:18px;border-radius:50%;
+      background:radial-gradient(circle,#FF876A 2px,transparent 2.4px);background-size:11px 11px}
+    .preview.memphis .m-ring{position:absolute;width:70px;height:70px;border:9px solid #55C9BE;border-radius:50%;top:34px;right:64px;background:transparent}
+    .preview.memphis .m-bar{position:absolute;width:60px;height:11px;background:#FFCA52;border-radius:4px;top:14px;right:120px;transform:rotate(-18deg)}
+    .preview.memphis .m-blob{position:absolute;width:110px;height:110px;bottom:-40px;left:-30px;border-radius:48% 52% 60% 40%;
+      background:repeating-linear-gradient(45deg,#55C9BE 0 7px,transparent 7px 16px);opacity:.5}
+    .preview.memphis .m-cta{position:absolute;left:18px;bottom:18px;background:#7659DF;color:#fff;font:700 11px var(--sans);
+      padding:7px 12px;border-radius:9px;box-shadow:0 4px 0 #5338BD}
+    .preview.memphis .m-mark{position:absolute;left:18px;top:18px;width:26px;height:26px;border-radius:8px;background:#FF876A;color:#fff;
+      display:grid;place-items:center;font-weight:800;font-size:13px;transform:rotate(-8deg)}
+    .preview.nebula{background:linear-gradient(145deg,#151929,#0D101A)}
+    .preview.nebula .n-orb1{position:absolute;width:150px;height:150px;border-radius:50%;background:rgba(124,140,255,.28);filter:blur(14px);top:-60px;left:30%}
+    .preview.nebula .n-orb2{position:absolute;width:110px;height:110px;border-radius:50%;background:rgba(121,233,247,.22);filter:blur(14px);bottom:-40px;right:10%}
+    .preview.nebula .n-cta{position:absolute;left:18px;bottom:18px;background:linear-gradient(120deg,#8492FF,#A88BFF);color:#fff;font:700 11px var(--sans);
+      padding:7px 12px;border-radius:8px;border:1px solid rgba(163,177,255,.35);box-shadow:0 6px 18px rgba(104,121,250,.3)}
+    .preview.nebula .n-mark{position:absolute;left:18px;top:18px;width:26px;height:26px;border-radius:8px;background:linear-gradient(120deg,#8492FF,#A88BFF);color:#fff;
+      display:grid;place-items:center;font-size:14px;box-shadow:0 4px 14px rgba(104,121,250,.3)}
+    .body{padding:20px 22px 22px;display:flex;flex-direction:column;gap:10px;flex:1}
+    .tag{font:500 10px var(--mono);color:var(--cyan);letter-spacing:.1em;text-transform:uppercase}
+    .name{font-weight:800;font-size:19px;letter-spacing:-.03em}
+    .desc{font-size:13px;line-height:1.55;color:var(--muted);flex:1}
+    .swatches{display:flex;gap:6px;margin-top:2px}
+    .swatches i{width:18px;height:18px;border-radius:5px;border:1px solid rgba(255,255,255,.14)}
+    .open{margin-top:6px;display:inline-flex;align-items:center;gap:8px;align-self:flex-start;font-weight:700;font-size:13px;color:var(--ink);
+      background:rgba(255,255,255,.04);border:1px solid var(--line);padding:9px 14px;border-radius:9px;transition:background .16s,border-color .16s}
+    .open:hover{background:rgba(124,140,255,.16);border-color:rgba(139,153,255,.5)}
+    .open:focus-visible{outline:2px solid rgba(139,153,255,.72);outline-offset:3px}
+    .foot{margin-top:40px;text-align:center;color:var(--muted);font:500 12px var(--mono);line-height:1.7}
+    .foot a{color:#c9ceff}
+    .foot a:hover{text-decoration:underline}
+    @media(max-width:860px){.grid{grid-template-columns:1fr;max-width:440px;margin:auto}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <span class="pill"><span class="dot"></span> LANDING VISUAL DIRECTIONS · 3 OPTIONS</span>
+      <h1>htmlGenius 官网 · 三条视觉方向</h1>
+      <p class="lede">基于现有信息架构的三个独立 Landing 预览。点击卡片打开完整页面(含中英双语切换、桌面/移动响应式)。正式版只会选定一条。</p>
+    </div>
+    <div class="grid">
+      <article class="card">
+        <div class="preview bauhaus" aria-hidden="true"><span class="b-mark">H</span><span class="b-shape1"></span><span class="b-shape2"></span><span class="b-cta">Add to Chrome</span></div>
+        <div class="body">
+          <span class="tag">A · BAUHAUS</span>
+          <span class="name">包豪斯</span>
+          <span class="desc">理性、结构化。2px 实线、直角、硬阴影,有限主色(红/海军蓝/黄/绿)。强调编辑工具的准确性。</span>
+          <span class="swatches"><i style="background:#EEE7DC"></i><i style="background:#15263E"></i><i style="background:#D6382E"></i><i style="background:#275FA0"></i><i style="background:#EBBD39"></i></span>
+          <a class="open" href="landing-bauhaus.html" target="_blank" rel="noreferrer">打开整页 ↗</a>
+        </div>
+      </article>
+      <article class="card">
+        <div class="preview memphis" aria-hidden="true"><span class="m-mark">H</span><span class="m-bar"></span><span class="m-dots"></span><span class="m-ring"></span><span class="m-blob"></span><span class="m-cta">Add to Chrome</span></div>
+        <div class="body">
+          <span class="tag">B · MEMPHIS</span>
+          <span class="name">企业孟菲斯</span>
+          <span class="desc">友好、有创造性。圆角白卡 + 柔影,紫主 CTA + 珊瑚/黄/薄荷几何点缀。适合产品、设计与内容团队。</span>
+          <span class="swatches"><i style="background:#EEF4FF"></i><i style="background:#7659DF"></i><i style="background:#FF876A"></i><i style="background:#55C9BE"></i><i style="background:#FFCA52"></i></span>
+          <a class="open" href="landing-memphis.html" target="_blank" rel="noreferrer">打开整页 ↗</a>
+        </div>
+      </article>
+      <article class="card">
+        <div class="preview nebula" aria-hidden="true"><span class="n-mark">✦</span><span class="n-orb1"></span><span class="n-orb2"></span><span class="n-cta">Add to Chrome</span></div>
+        <div class="body">
+          <span class="tag">C · NEBULA · 推荐基线</span>
+          <span class="name">Nebula Workspace</span>
+          <span class="desc">与 Chrome Side panel 严格统一:同套深色面层、靛蓝品牌色、圆角与边框。当前官网升级基线。</span>
+          <span class="swatches"><i style="background:#080A12"></i><i style="background:#10131F"></i><i style="background:#7C8CFF"></i><i style="background:#79E9F7"></i><i style="background:#83EFD7"></i></span>
+          <a class="open" href="landing-nebula.html" target="_blank" rel="noreferrer">打开整页 ↗</a>
+        </div>
+      </article>
+    </div>
+    <p class="foot">设计 Spec:<a href="../2026-07-17-landing-visual-directions-spec.md">2026-07-17-landing-visual-directions-spec.md</a><br>现有正式官网(未改动):<a href="../../landing/genius.html">landing/genius.html</a></p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>htmlGenius v0.5 · UI 分层方案对比</title>
+<style>
+  :root{
+    --canvas:#faf9f5;--ink:#141413;--body:#3d3d3a;--muted:#6c6a64;--muted-soft:#8e8b82;
+    --primary:#cc785c;--primary-hover:#a9583e;
+    --surface-card:#efe9de;--surface-cream:#f3ede2;--surface-cream-strong:#e8e0d2;
+    --hairline:#e6dfd8;--warning:#d4a017;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"Segoe UI",system-ui,sans-serif;background:#e9e4d8;color:var(--body);
+    min-height:100vh;padding:40px 20px;line-height:1.5}
+  .wrap{max-width:920px;margin:0 auto}
+  .eyebrow{font-size:12px;color:var(--primary);font-weight:600;letter-spacing:.8px;text-transform:uppercase}
+  h1{font-family:Georgia,"Times New Roman",serif;font-size:34px;color:var(--ink);margin:8px 0 6px;font-weight:600}
+  .lede{font-size:15px;color:var(--muted);max-width:640px;margin-bottom:8px}
+  .principles{background:var(--canvas);border:1px solid var(--hairline);border-radius:12px;padding:14px 18px;
+    margin:22px 0 30px;font-size:13.5px;color:var(--body)}
+  .principles b{color:var(--ink)}
+  .principles .p{display:flex;gap:10px;margin:5px 0}
+  .principles .k{color:var(--primary);font-weight:600;min-width:74px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--canvas);border:1px solid var(--hairline);border-radius:16px;padding:20px;
+    text-decoration:none;color:inherit;display:flex;flex-direction:column;transition:.15s}
+  .card:hover{border-color:var(--primary);box-shadow:0 10px 30px rgba(20,20,19,.1);transform:translateY(-2px)}
+  .tag{font-size:11px;font-weight:600;color:var(--primary);letter-spacing:.5px}
+  .card h2{font-family:Georgia,serif;font-size:20px;color:var(--ink);margin:6px 0 4px;font-weight:600}
+  .card .sub{font-size:12.5px;color:var(--muted);margin-bottom:14px}
+  .mini{background:var(--surface-cream);border:1px solid var(--hairline);border-radius:10px;
+    padding:12px;margin-bottom:14px;font-size:11.5px;color:var(--muted);text-align:center}
+  .mini b{color:var(--ink);display:block;margin-bottom:4px;font-size:12px}
+  .open{margin-top:auto;background:var(--primary);color:#fff;border:none;padding:10px;border-radius:9px;
+    font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;text-align:center}
+  .card:hover .open{background:var(--primary-hover)}
+  .foot{margin-top:30px;font-size:12px;color:var(--muted-soft);text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">v0.5 · 侧边栏 UI 分层重设计</div>
+  <h1>三个方案 · 批注入口怎么藏</h1>
+  <p class="lede">三个方案都遵循同一套主次:<b>整页默认是编辑</b>(绝对主角),<b>批注藏在次要入口</b>要点才出,<b>头像点开</b>是登录与团队。区别只在中间那张图 ——「批注」这个小入口长什么样、放哪里。</p>
+
+  <div class="principles">
+    <div class="p"><span class="k">主视图</span><span><b>编辑</b> · 整页都是编辑相关:模式、工具、保存版本、撤销回退</span></div>
+    <div class="p"><span class="k">次入口</span><span><b>批注 + 一键复制</b> · 不点不出现,主视图不被打扰</span></div>
+    <div class="p"><span class="k">深入口</span><span><b>头像 ▾</b> · 飞书 / Google 登录、邀请码、在线队友(原 7 个账号控件全收这里)</span></div>
+  </div>
+
+  <div class="grid">
+    <a class="card" href="a1-bottom-toggle.html">
+      <div class="tag">方案 1</div>
+      <h2>底部切换条</h2>
+      <div class="sub">[✏️ 编辑 | 💬 批注] 互斥全屏</div>
+      <div class="mini"><b>编辑态(默认)</b>整页编辑<br>───────<br>[✏️编辑] [💬批注 3]</div>
+      <button class="open">打开方案 1</button>
+    </a>
+    <a class="card" href="a2-fab-drawer.html">
+      <div class="tag">方案 2 · 推荐</div>
+      <h2>右下浮钮 + 抽屉</h2>
+      <div class="sub">编辑不被切走,批注按需召唤</div>
+      <div class="mini"><b>编辑态(默认)</b>整页编辑<br>　　　　　　[💬3]<br>点开从底部滑出抽屉</div>
+      <button class="open">打开方案 2</button>
+    </a>
+    <a class="card" href="a3-subtle-link.html">
+      <div class="tag">方案 3</div>
+      <h2>顶栏次级链接</h2>
+      <div class="sub">入口最克制,内联展开</div>
+      <div class="mini"><b>顶栏:</b>htmlGenius　💬批注(3)▾　[👤]<br>点开向下推展开面板</div>
+      <button class="open">打开方案 3</button>
+    </a>
+  </div>
+
+  <div class="foot">三个 mockup 均为静态演示,可点击切换视图 · 暖色编辑风(奶油 / 珊瑚红)· 380px 模拟侧边栏</div>
+</div>
+</body>
+</html>

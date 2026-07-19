@@ -1,6 +1,7 @@
-// storage.js — IndexedDB 封装(annotations + versions)
+// storage.js — IndexedDB 封装(annotations + legacy versions + artifact versions + bridge sessions/runs)
+// 用 globalThis(而非 window)以兼容 background service worker(无 window);在 content-script/sidepanel globalThis===window,行为不变。
 const DB_NAME = "htmlgenius";
-const DB_VERSION = 1;
+const DB_VERSION = 4;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -14,6 +15,34 @@ function openDB() {
       if (!db.objectStoreNames.contains("versions")) {
         const v = db.createObjectStore("versions", { keyPath: "id", autoIncrement: true });
         v.createIndex("document_id", "document_id", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("documents")) {
+        const d = db.createObjectStore("documents", { keyPath: "logical_document_id" });
+        d.createIndex("canonical_uri", "canonical_uri", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("artifact_versions")) {
+        const a = db.createObjectStore("artifact_versions", { keyPath: "id", autoIncrement: true });
+        a.createIndex("logical_document_id", "logical_document_id", { unique: false });
+        a.createIndex("artifact_hash", "artifact_hash", { unique: false });
+      }
+      // v0.7.1 (DB v4): bridge schema 升级为 provider-neutral(spec §5)——
+      // bridge_sessions 主键改为 "<logical_document_id>:<provider>" 复合 key(+logical_document_id/provider 索引);
+      // bridge_runs 增补 status 索引。v3(Codex 时代)的 session/run 记录直接作废:
+      // 删 store 重建(本地、临时、仅传输证据,无用户内容损失)。
+      if (e.oldVersion < 4) {
+        if (db.objectStoreNames.contains("bridge_sessions")) db.deleteObjectStore("bridge_sessions");
+        if (db.objectStoreNames.contains("bridge_runs")) db.deleteObjectStore("bridge_runs");
+      }
+      if (!db.objectStoreNames.contains("bridge_sessions")) {
+        const bs = db.createObjectStore("bridge_sessions", { keyPath: "key" });
+        bs.createIndex("logical_document_id", "logical_document_id", { unique: false });
+        bs.createIndex("provider", "provider", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("bridge_runs")) {
+        const br = db.createObjectStore("bridge_runs", { keyPath: "run_id" });
+        br.createIndex("logical_document_id", "logical_document_id", { unique: false });
+        br.createIndex("tab_id", "tab_id", { unique: false });
+        br.createIndex("status", "status", { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -61,10 +90,61 @@ async function dbDelete(store, key) {
   });
 }
 
+function canonicalArtifactUri(uri) {
+  const value = String(uri || "");
+  try { const u = new URL(value); u.hash = ""; return u.href; } catch (e) { return value.split("#")[0]; }
+}
+function legacyDocumentIdForUri(uri) {
+  try { const u = new URL(uri); return u.origin + u.pathname; } catch (e) { return String(uri || "").split("#")[0]; }
+}
+
+function isManagedLocalUri(uri) {
+  try {
+    const u = new URL(uri);
+    return u.protocol === "file:" || ["localhost", "127.0.0.1", "0.0.0.0"].includes(u.hostname);
+  } catch (e) { return false; }
+}
+
+function newLogicalDocumentId() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") return "hgd_" + globalThis.crypto.randomUUID();
+  return "hgd_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 12);
+}
+
+async function getDocumentByUri(uri) {
+  const canonical = canonicalArtifactUri(uri);
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction("documents", "readonly");
+    const req = tx.objectStore("documents").getAll();
+    req.onsuccess = () => res((req.result || []).find((doc) => doc.canonical_uri === canonical || (doc.known_uris || []).includes(canonical)) || null);
+    req.onerror = () => rej(req.error);
+  });
+}
+
+async function migrateLegacyAnnotations(logicalDocumentId, uri) {
+  const legacyId = legacyDocumentIdForUri(uri);
+  if (legacyId === logicalDocumentId) return;
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction("annotations", "readwrite");
+    const store = tx.objectStore("annotations");
+    const req = store.index("document_id").getAll(legacyId);
+    req.onsuccess = () => (req.result || []).forEach((ann) => {
+      // put 覆盖原记录，幂等且不复制回复、selector 或 id。
+      ann.document_id = logicalDocumentId;
+      store.put(ann);
+    });
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
 // 本地 IndexedDB 实现(原 Storage 对象,行为保持完全一致 —— 仅重命名)
 const LocalStore = {
-  async getDocumentId() {
-    return location.origin + location.pathname;
+  async getDocumentId(uri) {
+    const value = canonicalArtifactUri(uri || location.href);
+    if (!isManagedLocalUri(value)) return legacyDocumentIdForUri(value);
+    return (await this.getOrCreateLocalDocument(value)).logical_document_id;
   },
   async saveAnnotation(ann) {
     ann.id = ann.id || "ann_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
@@ -94,6 +174,80 @@ const LocalStore = {
   async listVersions(docId) {
     return dbGetAllByIndex("versions", "document_id", docId);
   },
+  async getOrCreateLocalDocument(uri) {
+    const canonical = canonicalArtifactUri(uri);
+    if (!isManagedLocalUri(canonical)) throw new Error("Not a managed local artifact URI");
+    const existing = await getDocumentByUri(canonical);
+    if (existing) return existing;
+    const now = new Date().toISOString();
+    const doc = { logical_document_id: newLogicalDocumentId(), canonical_uri: canonical, known_uris: [canonical], created_at: now, updated_at: now };
+    await dbPut("documents", doc);
+    await migrateLegacyAnnotations(doc.logical_document_id, canonical);
+    return doc;
+  },
+  getDocumentByUri,
+  async linkArtifactUri(logicalDocumentId, uri) {
+    const canonical = canonicalArtifactUri(uri);
+    const doc = await dbGet("documents", logicalDocumentId);
+    if (!doc) throw new Error("Unknown logical document");
+    if (!isManagedLocalUri(canonical)) throw new Error("Not a managed local artifact URI");
+    if (!(doc.known_uris || []).includes(canonical)) doc.known_uris = (doc.known_uris || []).concat(canonical);
+    doc.updated_at = new Date().toISOString();
+    await dbPut("documents", doc);
+    return doc;
+  },
+  async getLatestArtifactVersion(logicalDocumentId, source) {
+    const versions = await dbGetAllByIndex("artifact_versions", "logical_document_id", logicalDocumentId);
+    return versions.filter((v) => !source || v.source === source)
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || ((a.id || 0) - (b.id || 0))).pop() || null;
+  },
+  async getLatestArtifactVersionForUri(logicalDocumentId, uri, source) {
+    const canonical = canonicalArtifactUri(uri);
+    const versions = await dbGetAllByIndex("artifact_versions", "logical_document_id", logicalDocumentId);
+    return versions.filter((v) => v.artifact_uri === canonical && (!source || v.source === source))
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || ((a.id || 0) - (b.id || 0))).pop() || null;
+  },
+  async saveArtifactVersion(record) {
+    const now = new Date().toISOString();
+    const saved = Object.assign({}, record, { created_at: record.created_at || now });
+    await dbPut("artifact_versions", saved);
+    return saved;
+  },
+  async markLatestArtifactVersionExported(logicalDocumentId) {
+    const latest = await this.getLatestArtifactVersion(logicalDocumentId, "local_edit");
+    if (!latest) return null;
+    latest.exported_at = new Date().toISOString();
+    await dbPut("artifact_versions", latest);
+    return latest;
+  },
+  // === v0.7.1 bridge session / run(本地,扩展 IndexedDB;不进 RemoteStore)===
+  // 仅按 logical_document_id + provider 读写会话;不提供按 session_id 浏览/导入(§5.1)。
+  bridgeSessionKey(logicalDocumentId, provider) { return logicalDocumentId + ":" + provider; },
+  async getBridgeSession(logicalDocumentId, provider) {
+    return dbGet("bridge_sessions", this.bridgeSessionKey(logicalDocumentId, provider));
+  },
+  async saveBridgeSession(record) {
+    const now = new Date().toISOString();
+    const rec = Object.assign({}, record, { updated_at: record.updated_at || now, created_at: record.created_at || now });
+    if (!rec.key) rec.key = this.bridgeSessionKey(rec.logical_document_id, rec.provider); // 复合主键自动组装
+    return dbPut("bridge_sessions", rec);
+  },
+  async getBridgeRun(runId) { return dbGet("bridge_runs", runId); },
+  async getActiveBridgeRunForTab(tabId) {
+    const runs = await dbGetAllByIndex("bridge_runs", "tab_id", tabId);
+    return runs.find((r) => r.status === "starting" || r.status === "running") || null;
+  },
+  async saveBridgeRun(record) {
+    const rec = Object.assign({}, record, { created_at: record.created_at || new Date().toISOString() });
+    return dbPut("bridge_runs", rec);
+  },
+  async updateBridgeRun(runId, patch) {
+    const run = await dbGet("bridge_runs", runId);
+    if (!run) return null;
+    const updated = Object.assign({}, run, patch);
+    await dbPut("bridge_runs", updated);
+    return updated;
+  },
 };
 
 // === mode 分派器 ===
@@ -103,13 +257,13 @@ const LocalStore = {
 let _store = LocalStore;
 const Storage = {
   configure(cfg) {
-    if (cfg && cfg.mode === "synced" && window.RemoteStore) {
-      _store = window.RemoteStore.make(cfg);
+    if (cfg && cfg.mode === "synced" && globalThis.RemoteStore) {
+      _store = globalThis.RemoteStore.make(cfg);
     } else {
       _store = LocalStore;
     }
   },
-  getDocumentId() { return _store.getDocumentId(); },
+  getDocumentId(uri) { return _store.getDocumentId(uri); },
   saveAnnotation(a) { return _store.saveAnnotation(a); },
   listAnnotations(d) { return _store.listAnnotations(d); },
   deleteAnnotation(id) { return _store.deleteAnnotation(id); },
@@ -117,5 +271,22 @@ const Storage = {
   // 版本永远本地(IndexedDB),与 mode 无关
   saveVersion(docId, html, baseHash) { return LocalStore.saveVersion(docId, html, baseHash); },
   listVersions(docId) { return LocalStore.listVersions(docId); },
+  getOrCreateLocalDocument(uri) { return LocalStore.getOrCreateLocalDocument(uri); },
+  getDocumentByUri(uri) { return LocalStore.getDocumentByUri(uri); },
+  linkArtifactUri(logicalDocumentId, uri) { return LocalStore.linkArtifactUri(logicalDocumentId, uri); },
+  getLatestArtifactVersion(logicalDocumentId, source) { return LocalStore.getLatestArtifactVersion(logicalDocumentId, source); },
+  getLatestArtifactVersionForUri(logicalDocumentId, uri, source) { return LocalStore.getLatestArtifactVersionForUri(logicalDocumentId, uri, source); },
+  saveArtifactVersion(record) { return LocalStore.saveArtifactVersion(record); },
+  markLatestArtifactVersionExported(logicalDocumentId) { return LocalStore.markLatestArtifactVersionExported(logicalDocumentId); },
+  // v0.7 bridge:始终本地(LocalStore),与协同 mode 无关
+  getBridgeSession(logicalDocumentId) { return LocalStore.getBridgeSession(logicalDocumentId); },
+  saveBridgeSession(record) { return LocalStore.saveBridgeSession(record); },
+  getBridgeRun(runId) { return LocalStore.getBridgeRun(runId); },
+  getActiveBridgeRunForTab(tabId) { return LocalStore.getActiveBridgeRunForTab(tabId); },
+  saveBridgeRun(record) { return LocalStore.saveBridgeRun(record); },
+  updateBridgeRun(runId, patch) { return LocalStore.updateBridgeRun(runId, patch); },
+  canonicalArtifactUri,
+  isManagedLocalUri,
+  legacyDocumentIdForUri,
 };
-window.Storage = Storage;
+globalThis.Storage = Storage;

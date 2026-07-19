@@ -1,0 +1,14 @@
+{
+  "name": "htmlgenius-local-bridge",
+  "version": "0.7.1",
+  "description": "HTML Genius Local Bridge — Chrome Native Messaging host that hands a Change Contract to the user's locally signed-in Claude Code CLI (acknowledgement-only handoff; never writes files). Host name is provider-neutral; the Codex adapter reuses this host later.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "private": true,
+  "bin": { "htmlgenius-bridge-host": "host.mjs" },
+  "scripts": {
+    "test": "node --test test/",
+    "install:macos": "node install-macos.mjs"
+  },
+  "license": "UNLICENSED"
+}

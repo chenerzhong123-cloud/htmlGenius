@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" data-hg-theme="dark"><head><meta charset="utf-8"><title>artifact-version-test</title><style data-hg-injected="ui">.x{color:red}</style><style>.page{color:blue}</style></head>
+<body><main class="page"><p data-x="one">Original</p></main><div id="hg-toolbar">toolbar</div><div class="hg-hl"></div>
+<script src="artifact-version.js"></script>
+<script>
+  (async function () {
+    try {
+      const A = window.HgArtifactVersion;
+      const serial = A.serializeCurrentArtifact(document.documentElement);
+      const parsed = new DOMParser().parseFromString(serial, "text/html");
+      if (parsed.querySelector('#hg-toolbar, .hg-hl, style[data-hg-injected="ui"]') || parsed.documentElement.hasAttribute("data-hg-theme")) throw new Error("extension nodes leaked into artifact");
+      if (!serial.startsWith("<!doctype html>\n<html")) throw new Error("doctype serialization is unstable");
+      const h1 = await A.sha256Hex(serial);
+      const h2 = await A.sha256Hex(serial.replace(/\n/g, "\r\n"));
+      if (h1 !== h2) throw new Error("line ending normalization failed");
+      const variants = [
+        serial.replace('class="page"', 'class="page changed"'),
+        serial.replace('color:blue', 'color:green'),
+        serial.replace('<meta charset="utf-8">', '<meta charset="utf-8"><meta name="x" content="1">'),
+        serial.replace('data-x="one"', 'data-x="two"'),
+        serial.replace('<p data-x="one">', '<section><p data-x="one">').replace('</p>', '</p></section>'),
+      ];
+      for (const variant of variants) if (await A.sha256Hex(variant) === h1) throw new Error("artifact mutation did not change hash");
+      document.title = "PASS";
+    } catch (e) { document.title = "FAIL: " + (e && e.message || e); }
+  })();
+</script></body></html>

@@ -1,0 +1,324 @@
+<!doctype html>
+<!-- htmlGenius Landing · 方案 C: Nebula Workspace(推荐正式基线)
+     严格复用 extension/sidepanel.css 深色 token(spec §5.2),页面映射按 §5.3。
+     结构与双语脚本与 landing/genius.html 一致,仅替换 <style>、brand-mark(✦ 渐变方块)与 orb 透明度。 -->
+<html lang="en" data-language="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="htmlGenius is an open-source, AI-powered HTML editor extension for Chrome.">
+  <title>htmlGenius — Nebula Landing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg-canvas:#080A12; --bg-surface:#10131F; --bg-surface-raised:#151929;
+      --bg-input:#0D101A; --bg-overlay:#171B2A;
+      --text-primary:#F6F7FB; --text-secondary:#C7CCDC; --text-muted:#8D95AA; --text-faint:#687086;
+      --line-subtle:rgba(255,255,255,.08); --line-default:rgba(255,255,255,.12); --line-focus:rgba(139,153,255,.72);
+      --brand:#7C8CFF; --brand-hover:#91A0FF; --brand-strong:#6879FA; --brand-soft:rgba(124,140,255,.14);
+      --cyan:#79E9F7; --cyan-soft:rgba(121,233,247,.13); --violet:#B09CFF;
+      --success:#83EFD7; --warning:#F5C86B; --danger:#FF8D98;
+      --r-sm:6px; --r-md:9px; --r-lg:12px; --r-xl:16px; --r-pill:999px;
+      --shadow-float:0 14px 34px rgba(0,0,0,.34); --glow-brand:0 8px 24px rgba(104,121,250,.25);
+      --cta-bg:linear-gradient(120deg,#8492FF,#A88BFF); --cta-border:rgba(163,177,255,.35);
+      --hover-bg:rgba(255,255,255,.06);
+      --sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+      --mono:ui-monospace,SFMono-Text,Menlo,Consolas,monospace;
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth;scroll-padding-top:80px}
+    body{margin:0;background:var(--bg-canvas);color:var(--text-primary);font-family:var(--sans);
+      -webkit-font-smoothing:antialiased;overflow-x:hidden;padding-top:64px;position:relative}
+    a{color:inherit;text-decoration:none}
+
+    /* Hero 背景:48px 微网格 + 两处低透明度光晕(顶部中心靛蓝 / 右侧青色,opacity ≤ .20) */
+    .noise{position:fixed;inset:0;z-index:-1;opacity:.5;pointer-events:none;
+      background-image:linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
+      background-size:48px 48px;mask-image:linear-gradient(#000,transparent 82%)}
+    .bg-fx{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:-1}
+    .orb{position:absolute;border-radius:50%;filter:blur(20px);pointer-events:none;z-index:-1}
+    .orb.one{width:560px;height:560px;top:-220px;left:calc(50% - 280px);background:rgba(124,140,255,.20)}
+    .orb.two{width:360px;height:360px;top:360px;right:-160px;background:rgba(121,233,247,.13)}
+
+    .wrap{width:min(1160px,calc(100% - 48px));margin:auto}
+    .nav{height:64px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+    .nav-bar{position:fixed;top:0;left:0;right:0;z-index:50;background:var(--bg-canvas);border-bottom:1px solid var(--line-subtle)}
+    .brand{font-weight:800;letter-spacing:-.05em;font-size:20px;display:flex;align-items:center;gap:10px;color:var(--text-primary)}
+    .brand-mark{width:28px;height:28px;border-radius:var(--r-md);background:var(--cta-bg);display:grid;place-items:center;
+      color:#fff;font-size:15px;line-height:1;box-shadow:var(--glow-brand);flex:none}
+    .nav-links{display:flex;gap:28px;font-size:14px;font-weight:600;color:var(--text-secondary)}
+    .nav-links a{transition:color .16s}
+    .nav-links a:hover{color:var(--text-primary)}
+    .nav-tools{display:flex;align-items:center;gap:10px}
+    .language{position:relative}
+    .language-toggle{height:37px;padding:0 11px;border:1px solid var(--line-default);border-radius:var(--r-md);
+      background:rgba(255,255,255,.025);color:var(--text-secondary);font:500 12px var(--sans);cursor:pointer;
+      display:flex;gap:7px;align-items:center;transition:.16s background,.16s border-color}
+    .language-toggle:hover,.language-toggle[aria-expanded="true"]{background:var(--hover-bg);border-color:var(--line-focus);color:var(--text-primary)}
+    .language-toggle svg{width:13px;transition:transform .16s}
+    .language-toggle[aria-expanded="true"] svg{transform:rotate(180deg)}
+    .language-menu{position:absolute;right:0;top:calc(100% + 8px);z-index:20;width:142px;padding:5px;
+      border:1px solid var(--line-default);border-radius:var(--r-lg);background:var(--bg-overlay);box-shadow:var(--shadow-float);display:none}
+    .language-menu.open{display:block;animation:menu-in .16s cubic-bezier(.2,.8,.2,1)}
+    .language-option{width:100%;height:33px;padding:0 9px;border:0;border-radius:var(--r-sm);background:transparent;
+      color:var(--text-secondary);font:500 12px var(--sans);text-align:left;cursor:pointer;
+      display:flex;align-items:center;justify-content:space-between}
+    .language-option:hover{background:var(--hover-bg);color:var(--text-primary)}
+    .language-option.active{color:var(--brand-hover)}
+    .language-option.active:after{content:"✓";font-size:12px;color:var(--cyan)}
+    @keyframes menu-in{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}
+
+    .nav-cta,.button{border:1px solid var(--cta-border);background:var(--cta-bg);box-shadow:var(--glow-brand);
+      border-radius:var(--r-md);font-weight:700;font-size:13px;padding:11px 16px;color:#fff;
+      transition:transform .2s,box-shadow .2s}
+    .nav-cta:hover,.button:hover{transform:translateY(-2px);box-shadow:0 12px 34px rgba(92,104,255,.4)}
+    .nav-cta{height:37px;display:inline-flex;align-items:center;border-radius:var(--r-md)}
+    .button{display:inline-flex;align-items:center;gap:10px;padding:14px 19px}
+    .button.alt{background:rgba(255,255,255,.03);color:#d8dbeb;border-color:var(--line-default);box-shadow:none}
+    .button.alt:hover{background:var(--hover-bg);box-shadow:none;transform:translateY(-1px)}
+    .button svg{width:17px}
+    a:focus-visible,button:focus-visible{outline:2px solid var(--line-focus);outline-offset:3px}
+
+    .hero{min-height:720px;padding:92px 0 72px;text-align:center;position:relative}
+    .pill{font:12px var(--mono);color:#c9ceff;border:1px solid rgba(151,163,255,.23);
+      background:var(--brand-soft);padding:8px 12px;border-radius:var(--r-pill);display:inline-flex;gap:8px;align-items:center}
+    .dot{width:6px;height:6px;background:var(--success);border-radius:50%;box-shadow:0 0 12px var(--success)}
+    .hero h1{letter-spacing:-.075em;font-size:clamp(52px,7vw,84px);line-height:1.03;max-width:940px;margin:22px auto 20px;color:var(--text-primary)}
+    .gradient{background:linear-gradient(95deg,#fff 18%,#aebaff 56%,#85eff7);background-clip:text;-webkit-background-clip:text;color:transparent}
+    .hero p{font-size:17px;color:var(--text-muted);line-height:1.65;max-width:560px;margin:0 auto}
+    .hero-actions{display:flex;justify-content:center;gap:12px;margin:30px 0 54px}
+    .subnote{font:11px var(--mono);color:var(--text-faint);margin-top:12px}
+
+    /* 产品演示框:外框 line-default,内页保持浅色(强化“正在编辑真实网页”) */
+    .mockup{position:relative;max-width:910px;margin:auto;border:1px solid var(--line-default);padding:8px;
+      border-radius:var(--r-xl);background:linear-gradient(145deg,rgba(128,143,255,.19),rgba(16,19,31,.6) 25%);
+      box-shadow:var(--shadow-float),0 0 70px rgba(102,123,255,.12);text-align:left}
+    .chrome{overflow:hidden;border-radius:var(--r-lg);background:#f6f7fc;min-height:326px;color:#202334}
+    .chrome-bar{height:39px;background:#e9ebf4;display:flex;align-items:center;padding:0 13px;gap:6px;border-bottom:1px solid #d9dce7}
+    .traffic i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;background:#ff786d}
+    .traffic i:nth-child(2){background:#f6c859}
+    .traffic i:nth-child(3){background:#5acb84}
+    .url{height:22px;border-radius:var(--r-sm);background:#fff;color:#8990a4;font:10px var(--mono);display:flex;align-items:center;padding:0 12px;margin:auto;width:52%;justify-content:center}
+    .chrome-body{display:grid;grid-template-columns:1fr 225px;min-height:286px}
+    .page{padding:35px 7.5%}
+    .doc-label{font:10px var(--mono);color:#8e95a7;text-transform:uppercase;letter-spacing:.08em}
+    .page h3{font-size:26px;letter-spacing:-.06em;margin:10px 0 15px}
+    .page p{font-size:12px;line-height:1.8;color:#6d7486;max-width:390px}
+    .selection{background:#d8dcff;color:#454da3;border-radius:3px;padding:1px 3px}
+    .editor{position:absolute;left:30%;top:190px;display:flex;background:#161a2a;border-radius:var(--r-md);padding:4px;box-shadow:var(--shadow-float)}
+    .editor b{font:12px var(--mono);padding:7px 10px;color:#fff;font-weight:500}
+    .editor b:first-child{border-radius:var(--r-sm);background:var(--brand)}
+    .side{background:#f0f2f8;border-left:1px solid #dfe2ea;padding:18px 14px}
+    .side-head{display:flex;justify-content:space-between;font:10px var(--mono);color:#737c93;margin-bottom:14px}
+    .comment{background:#fff;border:1px solid #e0e3eb;border-radius:var(--r-md);padding:11px;margin:8px 0;box-shadow:0 3px 8px rgba(31,36,59,.04)}
+    .comment-top{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:700}
+    .avatar{width:17px;height:17px;border-radius:50%;display:grid;place-items:center;background:var(--violet);color:#fff;font-size:8px}
+    .comment p{font-size:10px;line-height:1.5;color:#697185;margin:7px 0 0}
+    .agent{border:1px solid #bfd3ff;background:#eaf1ff}
+    .agent .avatar{background:var(--brand)}
+
+    .proof{border-top:1px solid var(--line-subtle);border-bottom:1px solid var(--line-subtle);display:grid;grid-template-columns:repeat(3,1fr);margin:66px 0 0}
+    .proof>div{padding:23px 28px;display:flex;align-items:center;justify-content:center;gap:13px;color:var(--text-secondary);font-size:13px}
+    .proof>div+div{border-left:1px solid var(--line-subtle)}
+    .proof svg{color:var(--brand);width:19px;flex:none}
+
+    .feature{display:grid;grid-template-columns:1fr 1.1fr;align-items:center;gap:10%;min-height:680px;position:relative}
+    .feature.reverse{grid-template-columns:1.1fr 1fr}
+    .feature-copy .number{font:16px var(--mono);color:var(--brand);letter-spacing:.12em}
+    .feature h2{letter-spacing:-.064em;font-size:clamp(34px,4.4vw,56px);line-height:1.1;margin:14px 0 18px;color:var(--text-primary)}
+    .feature p{font-size:16px;line-height:1.7;color:var(--text-muted);max-width:420px}
+    .cn{font-size:13px!important;color:var(--text-faint)!important;margin-top:11px}
+    .stage{min-height:360px;background:linear-gradient(145deg,#151929,#0D101A);border:1px solid var(--line-subtle);border-radius:var(--r-xl);position:relative;overflow:hidden;box-shadow:inset 0 1px rgba(255,255,255,.035),0 24px 55px rgba(0,0,0,.16)}
+    .stage:before{content:"";position:absolute;width:220px;height:220px;border:1px solid rgba(118,138,255,.22);border-radius:50%;top:-110px;right:-80px;box-shadow:0 0 0 28px rgba(118,138,255,.04),0 0 0 57px rgba(118,138,255,.025)}
+
+    .local-card{position:absolute;inset:38px}
+    .local-window{border:1px solid var(--line-default);border-radius:var(--r-lg);overflow:hidden;background:#111522}
+    .windowbar{height:29px;border-bottom:1px solid var(--line-subtle);display:flex;align-items:center;padding:0 11px;gap:5px}
+    .windowbar i{height:6px;width:6px;border-radius:50%;background:#5d647a}
+    .code{padding:20px;font:11px/2 var(--mono);color:#a9b1ca}
+    .code em{color:var(--cyan);font-style:normal}
+    .code strong{color:var(--violet);font-weight:400}
+    .save{position:absolute;right:22px;bottom:22px;border-radius:var(--r-sm);background:#1f2840;color:var(--brand-hover);padding:9px 11px;font:10px var(--mono);border:1px solid var(--line-default)}
+
+    .annotation-page{position:absolute;inset:34px 37px;background:#f6f7fb;border-radius:var(--r-lg);padding:31px;color:#222637}
+    .annotation-page small{font:10px var(--mono);color:#80879a}
+    .annotation-page h4{font-size:20px;letter-spacing:-.05em;margin:8px 0 15px}
+    .lines{display:grid;gap:9px}
+    .lines i{height:7px;width:90%;background:#dde0e8;border-radius:2px}
+    .lines i:nth-child(2){width:74%}
+    .lines i:nth-child(3){width:84%;background:#d7d9ff}
+    .lines i:nth-child(4){width:64%}
+    .bubble{position:absolute;right:12px;top:91px;background:#fff;border:1px solid #dde1ee;padding:10px;border-radius:var(--r-md);width:158px;box-shadow:0 10px 24px rgba(23,31,55,.14);font-size:10px;color:#5c6479;line-height:1.5}
+    .bubble:before{content:"AI instruction";display:block;font:9px var(--mono);color:var(--brand);margin-bottom:3px}
+    html[data-language="zh"] .bubble:before{content:"AI 指令"}
+    .cursor{position:absolute;left:41%;top:135px;width:10px;height:15px;background:var(--brand);clip-path:polygon(0 0,0 100%,30% 72%,52% 100%,68% 91%,46% 63%,100% 63%)}
+
+    .team-grid{position:absolute;inset:38px;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:center}
+    .team-card{border-radius:var(--r-lg);padding:16px;background:rgba(255,255,255,.04);border:1px solid var(--line-default)}
+    .team-card:first-child{transform:translateY(-18px)}
+    .team-card:last-child{transform:translateY(18px)}
+    .team-card small{font:10px var(--mono);color:var(--text-muted)}
+    .members{display:flex;margin:14px 0}
+    .members i{width:25px;height:25px;border-radius:50%;background:var(--brand);border:2px solid var(--bg-surface-raised);margin-left:-6px}
+    .members i:first-child{margin:0;background:var(--danger)}
+    .members i:nth-child(2){background:var(--success)}
+    .team-card p{font-size:11px!important;color:var(--text-secondary)!important;line-height:1.45!important;margin:0}
+    .lock{position:absolute;right:22px;bottom:22px;display:flex;align-items:center;gap:7px;font:10px var(--mono);color:var(--success)}
+    .lock b{display:grid;place-items:center;width:21px;height:21px;border-radius:var(--r-sm);background:var(--cyan-soft);font-size:12px}
+
+    .final{border:1px solid var(--line-subtle);border-radius:var(--r-xl);background:radial-gradient(circle at 50% 0,rgba(124,140,255,.20),transparent 48%),#10131E;padding:88px 28px;text-align:center;margin:68px auto 35px}
+    .final h2{font-size:clamp(38px,5vw,64px);line-height:1.08;letter-spacing:-.07em;max-width:750px;margin:0 auto 18px;color:var(--text-primary)}
+    .final p{font-size:15px;line-height:1.65;color:var(--text-muted);max-width:540px;margin:auto}
+    .checks{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin:30px 0 23px}
+    .checks span{font:11px var(--mono);padding:8px 11px;border-radius:var(--r-pill);border:1px solid var(--line-default);color:var(--text-secondary)}
+    .checks span:before{content:"✓";color:var(--success);margin-right:7px}
+    footer{padding:20px 0 38px;color:var(--text-faint);font:11px var(--mono);display:flex;justify-content:space-between;gap:20px}
+    .footer-links{display:flex;gap:16px}
+    .footer-links a:hover{color:var(--text-secondary)}
+
+    @media (prefers-reduced-motion: reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+    @media(max-width:720px){
+      body{padding-top:60px}
+      .nav{height:60px;gap:9px}
+      .nav-links{display:none}
+      .nav-tools{gap:7px}
+      .language-toggle{height:34px;padding:0 8px}
+      .nav-cta{padding:9px 10px;font-size:11px}
+      .wrap{width:min(100% - 32px,1160px)}
+      .hero{min-height:650px;padding:64px 0 52px}
+      .hero h1{font-size:46px}
+      .hero-actions{flex-direction:column;align-items:center}
+      .hero-actions .button{max-width:320px;width:100%;justify-content:center}
+      .chrome-body{grid-template-columns:1fr}
+      .side{display:none}
+      .mockup{margin-inline:-8px}
+      .page{padding:28px}
+      .editor{left:25%;top:176px}
+      .proof{grid-template-columns:1fr}
+      .proof>div+div{border-left:0;border-top:1px solid var(--line-subtle)}
+      .feature,.feature.reverse{grid-template-columns:1fr;gap:35px;min-height:auto;padding:80px 0}
+      .feature.reverse .feature-copy{order:0}
+      .feature.reverse .stage{order:1}
+      .stage{min-height:330px}
+      .final{margin-top:30px;padding:64px 18px}
+      footer{flex-direction:column}
+      .annotation-page{inset:28px 20px}
+      .bubble{right:0}
+      .team-grid{inset:35px 18px}
+      .orb.one{width:380px;height:380px;left:calc(50% - 190px)}
+    }
+  </style>
+</head>
+<body>
+  <div class="noise"></div><div class="bg-fx"><div class="orb one"></div><div class="orb two"></div></div>
+  <header class="nav-bar"><div class="wrap nav"><a href="#top" class="brand"><span class="brand-mark" aria-hidden="true">✦</span>htmlGenius</a><nav class="nav-links"><a href="#edit">Features</a><a href="#agent">How it works</a><a href="#team">Teams</a><a href="https://github.com/chenerzhong123-cloud/htmlGenius" target="_blank" rel="noreferrer">GitHub ↗</a></nav><div class="nav-tools"><div class="language"><button class="language-toggle" id="language-toggle" aria-haspopup="menu" aria-expanded="false"><span id="language-current">English</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m4 6 4 4 4-4"/></svg></button><div class="language-menu" id="language-menu" role="menu"><button class="language-option" data-language="zh" role="menuitem">中文</button><button class="language-option" data-language="en" role="menuitem">English</button></div></div><a class="nav-cta" href="https://chromewebstore.google.com/" target="_blank" rel="noreferrer">Add to Chrome ↗</a></div></div></header>
+  <main id="top">
+    <section class="hero wrap">
+      <span class="pill"><span class="dot"></span> OPEN SOURCE · FREE FOREVER</span>
+      <h1>Edit HTML<br>As natural as <span class="gradient">writing a doc</span></h1>
+      <p>htmlGenius is an open-source, AI-powered HTML editor extension for Chrome. Make changes directly on any page—locally, securely, instantly.</p>
+      <div class="hero-actions"><a class="button" href="https://chromewebstore.google.com/" target="_blank" rel="noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></svg>Add to Chrome</a><a class="button alt" href="#edit">See how it works ↓</a></div>
+      <div class="subnote">NO UPLOADS · NO CONTEXT SWITCHING · JUST EDIT</div>
+      <div class="mockup"><div class="chrome"><div class="chrome-bar"><span class="traffic"><i></i><i></i><i></i></span><div class="url">product.example.com / launch-notes</div></div><div class="chrome-body"><article class="page"><span class="doc-label">Product launch / 2026</span><h3>Make every handoff<br>feel effortless.</h3><p>Our new workflow lets teams move from a thought to a polished result, <span class="selection">without leaving the page.</span> It is fast, clear, and built for focus.</p><p>One source of truth for every meaningful detail.</p></article><aside class="side"><div class="side-head"><span>COMMENTS</span><span>2</span></div><div class="comment"><div class="comment-top"><span class="avatar">M</span>Mei Chen</div><p>Make this line more direct and warm.</p></div><div class="comment agent"><div class="comment-top"><span class="avatar">✦</span>Genius Agent</div><p>Context captured. Ready to apply.</p></div></aside></div></div><div class="editor"><b>✦ Comment</b><b>B</b><b>↗</b></div></div>
+      <div class="proof"><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3 4.5 6.5v5.7c0 4.5 3.2 7.7 7.5 8.8 4.3-1.1 7.5-4.3 7.5-8.8V6.5L12 3Z"/><path d="m9 12 2 2 4-4"/></svg><span>Local by default.<br>Nothing gets uploaded.</span></div><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 4h16v12H7l-3 3V4Z"/><path d="M8 9h8m-8 3h5"/></svg><span>Annotations become<br>precise AI context.</span></div><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="9" cy="8" r="3"/><path d="M3 20c.5-4 2.5-6 6-6s5.5 2 6 6M17 11a3 3 0 1 0-1.1-5.8M18 14c1.7.6 2.7 2.4 3 4.5"/></svg><span>Share only with<br>the people you choose.</span></div></div>
+    </section>
+    <section class="feature wrap" id="edit"><div class="feature-copy"><div class="number">01 / EDIT IN PLACE</div><h2>Right inside Chrome.<br><span class="gradient">Right on the point.</span></h2><p>No exports. No uploads. No wrestling with source code. Change the words and structure you see, right where they live.</p><p class="cn">告别上传,在 Chrome 中直接编辑。本地直接运行,无需上传,安全即时。</p></div><div class="stage"><div class="local-card"><div class="local-window"><div class="windowbar"><i></i><i></i><i></i></div><div class="code">&lt;<em>section</em> class=<strong>"hero"</strong>&gt;<br>&nbsp;&nbsp;&lt;<em>h1</em>&gt;Make it feel human.&lt;/<em>h1</em>&gt;<br>&nbsp;&nbsp;&lt;<em>p</em>&gt;Edit in place, locally.&lt;/<em>p</em>&gt;<br>&lt;/<em>section</em>&gt;</div></div><span class="save">● saved locally</span></div></div></section>
+    <section class="feature reverse wrap" id="agent"><div class="stage"><div class="annotation-page"><small>LANDING PAGE / COPY REVIEW</small><h4>Small details make the work feel considered.</h4><div class="lines"><i></i><i></i><i></i><i></i></div><div class="bubble">Rewrite this headline to feel more confident. Keep it under 7 words.</div><div class="cursor"></div></div></div><div class="feature-copy"><div class="number">02 / ANNOTATE FOR AI</div><h2>Comment your thoughts.<br><span class="gradient">Let the Agent do the rest.</span></h2><p>Say exactly what you mean, in the context where it matters. Inline annotations give your AI the details it needs to complete the task seamlessly.</p><p class="cn">如往常一样批注,剩下的交给 Agent。丰富的上下文指示,让 AI 完美承接后续任务。</p></div></section>
+    <section class="feature wrap" id="team"><div class="feature-copy"><div class="number">03 / TEAM CONTEXT</div><h2>Keep comments<br><span class="gradient">within your team.</span></h2><p>Share feedback with the people who need it—and no one else. Sign in naturally with your Lark or Google account, then keep every decision connected.</p><p class="cn">仅与团队共享批注,安全可控。原生支持飞书与 Google 账号生态。</p></div><div class="stage"><div class="team-grid"><div class="team-card"><small>PRODUCT TEAM</small><div class="members"><i></i><i></i><i></i></div><p>3 teammates are reviewing this page.</p></div><div class="team-card"><small>COMMENT</small><p>Can we tighten the CTA and move it above the fold?</p></div></div><span class="lock"><b>⌑</b> team only</span></div></section>
+    <section class="final wrap"><span class="pill"><span class="dot"></span> BUILT FOR THE NEXT WEB</span><h2>The next-gen workflow is <span class="gradient">one click away.</span></h2><p>Bring the naturalness of a document editor to every HTML page you work with.</p><div class="checks"><span>Open Source</span><span>Free</span><span>Chrome Extension</span></div><a class="button" href="https://chromewebstore.google.com/" target="_blank" rel="noreferrer">Add htmlGenius to Chrome ↗</a></section>
+  </main>
+  <footer class="wrap"><span>© 2026 htmlGenius</span><span class="footer-links"><a href="https://github.com/chenerzhong123-cloud/htmlGenius" target="_blank" rel="noreferrer">GitHub ↗</a><a href="#">Privacy</a><a href="#top">Back to top ↑</a></span></footer>
+  <script>
+    (() => {
+      const storeKey = 'htmlgenius-language';
+      const qs = (selector) => document.querySelector(selector);
+      const set = (selector, value, html = false) => {
+        const el = qs(selector);
+        if (el) html ? el.innerHTML = value : el.textContent = value;
+      };
+      const setMany = (selector, values, html = false) => document.querySelectorAll(selector).forEach((el, i) => {
+        if (values[i] !== undefined) html ? el.innerHTML = values[i] : el.textContent = values[i];
+      });
+      const copy = {
+        en: {
+          title: 'htmlGenius — Edit the web, naturally.',
+          nav: ['Features', 'How it works', 'Teams'], navCta: 'Add to Chrome ↗',
+          badge: 'OPEN SOURCE · FREE FOREVER',
+          hero: 'Edit HTML<br>As natural as <span class="gradient">writing a doc</span>',
+          heroText: 'htmlGenius is an open-source, AI-powered HTML editor extension for Chrome. Make changes directly on any page—locally, securely, instantly.',
+          heroAlt: 'See how it works ↓', note: 'NO UPLOADS · NO CONTEXT SWITCHING · JUST EDIT',
+          docLabel: 'PRODUCT LAUNCH / 2026', docTitle: 'Make every handoff<br>feel effortless.',
+          docText: ['Our new workflow lets teams move from a thought to a polished result, <span class="selection">without leaving the page.</span> It is fast, clear, and built for focus.', 'One source of truth for every meaningful detail.'],
+          comments: ['COMMENTS', 'Make this line more direct and warm.', 'Context captured. Ready to apply.'], inline: '✦ Comment',
+          proof: ['Local by default.<br>Nothing gets uploaded.', 'Annotations become<br>precise AI context.', 'Share only with<br>the people you choose.'],
+          feature: [
+            ['01 / EDIT IN PLACE', 'Right inside Chrome.<br><span class="gradient">Right on the point.</span>', 'No exports. No uploads. No wrestling with source code. Change the words and structure you see, right where they live.'],
+            ['02 / ANNOTATE FOR AI', 'Comment your thoughts.<br><span class="gradient">Let the Agent do the rest.</span>', 'Say exactly what you mean, in the context where it matters. Inline annotations give your AI the details it needs to complete the task seamlessly.'],
+            ['03 / TEAM CONTEXT', 'Keep comments<br><span class="gradient">within your team.</span>', 'Share feedback with the people who need it—and no one else. Sign in naturally with your Lark or Google account, then keep every decision connected.']
+          ],
+          featureCn: ['告别上传,在 Chrome 中直接编辑。本地直接运行,无需上传,安全即时。', '如往常一样批注,剩下的交给 Agent。丰富的上下文指示,让 AI 完美承接后续任务。', '仅与团队共享批注,安全可控。原生支持飞书与 Google 账号生态。'],
+          code: '&lt;<em>section</em> class=<strong>"hero"</strong>&gt;<br>&nbsp;&nbsp;&lt;<em>h1</em>&gt;Make it feel human.&lt;/<em>h1</em>&gt;<br>&nbsp;&nbsp;&lt;<em>p</em>&gt;Edit in place, locally.&lt;/<em>p</em>&gt;<br>&lt;/<em>section</em>&gt;', saved: '● saved locally', annotation: ['LANDING PAGE / COPY REVIEW', 'Small details make the work feel considered.', 'Rewrite this headline to feel more confident. Keep it under 7 words.'],
+          team: ['PRODUCT TEAM', '3 teammates are reviewing this page.', 'COMMENT', 'Can we tighten the CTA and move it above the fold?', 'team only'],
+          final: ['BUILT FOR THE NEXT WEB', 'The next-gen workflow is <span class="gradient">one click away.</span>', 'Bring the naturalness of a document editor to every HTML page you work with.', 'Open Source', 'Free', 'Chrome Extension', 'Add htmlGenius to Chrome ↗'],
+          footer: ['GitHub ↗', 'Privacy', 'Back to top ↑']
+        },
+        zh: {
+          title: 'htmlGenius — 修改 HTML 如编辑文档般自然',
+          nav: ['功能', '如何工作', '团队协作'], navCta: '添加至 Chrome ↗',
+          badge: '开源免费 · 持续可用',
+          hero: '修改 HTML<br>如<span class="gradient">编辑文档般自然</span>',
+          heroText: 'htmlGenius 是一款开源、AI 驱动的 Chrome HTML 编辑器插件。直接在任意页面上修改内容,本地运行,安全即时。',
+          heroAlt: '查看如何工作 ↓', note: '无需上传 · 无需切换 · 直接编辑',
+          docLabel: '产品发布 / 2026', docTitle: '让每一次交接<br>都自然流畅。',
+          docText: ['全新的工作流,让团队无需离开当前页面,就能将想法转化为成熟成果。<span class="selection">更快、更清晰,也更专注。</span>', '每一个重要细节,都有唯一可信的来源。'],
+          comments: ['批注', '这句话可以更直接一些,也更有温度。', '上下文已捕捉,可以开始执行。'], inline: '✦ 批注',
+          proof: ['默认本地运行。<br>内容无需上传。', '批注自动成为<br>精准的 AI 上下文。', '只与你选择的成员<br>共享内容。'],
+          feature: [
+            ['01 / 就地编辑', '就在 Chrome 中<br><span class="gradient">就在你想修改的地方</span>', '无需导出,无需上传,也无需在源码中反复摸索。你看到什么,就直接在原处修改什么。'],
+            ['02 / 为 AI 批注', '如往常一样批注<br><span class="gradient">剩下的交给 Agent</span>', '在最需要的上下文中,准确说出你的想法。行内批注为 AI 提供足够细节,让它无缝完成后续工作。'],
+            ['03 / 团队上下文', '让批注只停留在<br><span class="gradient">你的团队之内</span>', '只与真正需要的人共享反馈,不让信息外泄。通过飞书或 Google 账号自然登录,让每个决策保持连续。']
+          ],
+          featureCn: ['', '', ''],
+          code: '&lt;<em>section</em> class=<strong>"首屏"</strong>&gt;<br>&nbsp;&nbsp;&lt;<em>h1</em>&gt;让内容更贴近人。&lt;/<em>h1</em>&gt;<br>&nbsp;&nbsp;&lt;<em>p</em>&gt;在原处,本地编辑。&lt;/<em>p</em>&gt;<br>&lt;/<em>section</em>&gt;', saved: '● 已本地保存', annotation: ['官网页面 / 文案审阅', '细微之处,让成果更显用心。', '将这个标题改得更有自信,控制在 7 个英文单词以内。'],
+          team: ['产品团队', '3 位团队成员正在审阅此页面。', '批注', 'CTA 能否更精炼一些,并移至首屏?', '仅团队可见'],
+          final: ['为下一代 Web 而生', '新世代工作方式<br><span class="gradient">一键开启</span>', '将文档编辑般的自然体验,带到你处理的每一个 HTML 页面中。', '开源', '免费', 'Chrome 插件', '将 htmlGenius 添加至 Chrome ↗'],
+          footer: ['GitHub ↗', '隐私政策', '返回顶部 ↑']
+        }
+      };
+      function applyLanguage(language, persist = true) {
+        const t = copy[language];
+        document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'en';
+        document.documentElement.dataset.language = language;
+        document.title = t.title;
+        setMany('.nav-links a', t.nav);
+        set('.nav-cta', t.navCta); set('.hero .pill', '<span class="dot"></span> ' + t.badge, true);
+        set('.hero h1', t.hero, true); set('.hero > p', t.heroText); set('.hero-actions .button.alt', t.heroAlt); set('.subnote', t.note);
+        const heroButton = qs('.hero-actions .button'); if (heroButton) heroButton.lastChild.textContent = language === 'zh' ? '添加至 Chrome' : 'Add to Chrome';
+        set('.doc-label', t.docLabel); set('.page h3', t.docTitle, true); setMany('.page p', t.docText, true);
+        set('.side-head span', t.comments[0]); setMany('.comment p', [t.comments[1], t.comments[2]]); set('.editor b', t.inline);
+        setMany('.proof span', t.proof, true);
+        document.querySelectorAll('.feature').forEach((feature, index) => { const content = feature.querySelector('.feature-copy'); if (!content) return; set('.feature:nth-of-type(' + (index + 2) + ') .number', t.feature[index][0]); set('.feature:nth-of-type(' + (index + 2) + ') h2', t.feature[index][1], true); set('.feature:nth-of-type(' + (index + 2) + ') .feature-copy > p:not(.cn)', t.feature[index][2]); set('.feature:nth-of-type(' + (index + 2) + ') .cn', t.featureCn[index]); });
+        document.querySelectorAll('.cn').forEach((element) => { element.hidden = true; });
+        set('.code', t.code, true); set('.save', t.saved); set('.annotation-page small', t.annotation[0]); set('.annotation-page h4', t.annotation[1]); set('.bubble', t.annotation[2]);
+        setMany('.team-card small', [t.team[0], t.team[2]]); setMany('.team-card p', [t.team[1], t.team[3]]); set('.lock', '<b>⌑</b> ' + t.team[4], true);
+        set('.final .pill', '<span class="dot"></span> ' + t.final[0], true); set('.final h2', t.final[1], true); set('.final p', t.final[2]); setMany('.checks span', t.final.slice(3, 6)); set('.final .button', t.final[6]); setMany('.footer-links a', t.footer);
+        set('#language-current', language === 'zh' ? '中文' : 'English');
+        document.querySelectorAll('.language-option').forEach((option) => option.classList.toggle('active', option.dataset.language === language));
+        if (persist) localStorage.setItem(storeKey, language);
+      }
+      const requested = new URLSearchParams(location.search).get('lang');
+      const saved = localStorage.getItem(storeKey);
+      const browserLanguage = (navigator.languages || [navigator.language || 'en']).find((language) => language.toLowerCase().startsWith('zh')) ? 'zh' : 'en';
+      const initial = ['zh', 'en'].includes(requested) ? requested : (['zh', 'en'].includes(saved) ? saved : browserLanguage);
+      const menu = qs('#language-menu'); const toggle = qs('#language-toggle');
+      applyLanguage(initial, true);
+      toggle.addEventListener('click', () => { const open = menu.classList.toggle('open'); toggle.setAttribute('aria-expanded', open); });
+      document.querySelectorAll('.language-option').forEach((option) => option.addEventListener('click', () => { applyLanguage(option.dataset.language); menu.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); }));
+      document.addEventListener('click', (event) => { if (!event.target.closest('.language')) { menu.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); } });
+      document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { menu.classList.remove('open'); toggle.setAttribute('aria-expanded', 'false'); toggle.focus(); } });
+    })();
+  </script>
+</body>
+</html>

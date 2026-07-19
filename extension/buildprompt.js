@@ -70,7 +70,7 @@
       if (!top || typeof top !== "object") return;
       n += 1;
       if (top.id != null) visited.add(top.id);
-      out.push("==批注" + n + "==");
+      out.push("==评论" + n + "==");
       out.push(fmtBlock(top, 0));
       dfs(top, byParent, 1, out, visited);
     });
@@ -78,7 +78,7 @@
     const header =
       "你是一名 HTML 编辑执行器。下面给出文档的全部 " +
       n +
-      " 条顶层批注(含多级回复),请逐条执行修改,并输出完整的新版 HTML:\n\n";
+      " 条顶层评论(含多级回复),请逐条执行修改,并输出完整的新版 HTML:\n\n";
     return header + out.join("\n");
   }
 

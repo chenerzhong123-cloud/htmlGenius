@@ -1,0 +1,9 @@
+{
+  "name": "com.htmlgenius.local_bridge",
+  "description": "HTML Genius Local Bridge (Claude Code handoff)",
+  "path": "/ABSOLUTE/PATH/TO/com.htmlgenius.local_bridge.launcher.sh",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://REPLACE_WITH_EXTENSION_ID/"
+  ]
+}

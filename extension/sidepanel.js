@@ -10,6 +10,18 @@
   let _toastTimer = 0;
   let _lastItems = []; // 上次渲染的批注(供切换语言时重绘)
   let _sessionUser = null; // 已登录用户(供切换语言时重绘登录态文案)
+  let _artifactState = null;
+  let _pendingArtifactReload = false;
+  // v0.6.1 修改契约 Composer 临时状态(不持久化)
+  let _contractItems = [];        // 打开 Composer 时的批注快照(供校验/渲染,不随列表变化)
+  let _contractSourceRootIds = [];
+  let _contractArtifact = null;
+  let _contractOpen = false;
+  let _contractTriggerEl = null;  // 关闭 Composer 后恢复焦点
+  // v0.7 Codex Local Bridge 状态
+  let _contractMeta = null;              // {isLocal, logicalDocumentId, loadedArtifactHash}
+  let _contractSessionContinueAvail = false;
+  let _contractRunning = false;
 
   async function getActiveTab() {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -26,15 +38,19 @@
 
   // 激活当前页:content-script 收到后才显示高亮/工具栏/编辑(关闭侧边栏时普通浏览零打扰)
   // showDialog=true 仅在打开侧边栏时用(弹编辑确认窗);切标签/刷新用 false(静默)
-  let _panelPort = null; // #5: 与活动标签的长连接;侧边栏关闭→port 断开→content-script 立即失活
+  let _panelPort = null; // #5: 与活动标签的长连接;侧边栏关闭→port 断开→content-script 失活
   async function activateActiveTab(showDialog) {
     const tab = await getActiveTab();
     if (!tab || !tab.id) return;
-    if (_panelPort) { try { _panelPort.disconnect(); } catch (e) {} _panelPort = null; } // 切标签:旧标签失活
+    // v0.8.1 顺序修复:先 activate → 连新 port → 最后断旧 port。
+    // 旧顺序(先断旧 port)会让 content-script 的 onDisconnect→失活 异步晚到,误杀刚激活的状态
+    // (激活确认窗被移除且不恢复 → 「点刷新按钮没反应」)。配合 content-script 的延迟失活双保险。
+    const oldPort = _panelPort;
     try { await chrome.tabs.sendMessage(tab.id, { type: "activate", showDialog: showDialog !== false }); }
     catch (e) { /* content-script 未就绪,等 onUpdated(complete) 再试 */ }
-    // #5: 建立长连接 —— 侧边栏关闭(页面销毁)→ Chrome 自动断开 port → content-script onDisconnect 立即失活
+    // #5: 建立长连接 —— 侧边栏关闭(页面销毁)→ Chrome 自动断开 port → content-script onDisconnect 失活
     try { _panelPort = chrome.tabs.connect(tab.id, { name: "hg-panel" }); } catch (e) {}
+    if (oldPort && oldPort !== _panelPort) { try { oldPort.disconnect(); } catch (e) {} } // 切标签:最后再断旧 port
   }
   // #1: 心跳 —— 侧边栏在线时持续 ping 活动标签,content-script 超时未收到则自动失活(兜底)
   async function pingActiveTab() {
@@ -62,8 +78,10 @@
         if (resp && resp.type === "annotations-list") {
           isLocal = resp.isLocal;
           _editing = !!resp.editing; // 以页面实际编辑态为准(刷新后复位为查看)
+          _artifactState = resp.artifact_state || _artifactState;
           renderMode();
           renderCards(resp.items);
+          maybeShowReloadResult(resp.items);
         }
       });
     } else if (msg.type === "presence") {
@@ -76,8 +94,16 @@
       _editing = !!msg.editing;
       if (msg.isLocal !== undefined) isLocal = msg.isLocal;
       renderMode();
+    } else if (msg.type === "artifact-reload-requested") {
+      // 仅 content-script 的已验证 completion 会发此事件；这里不包含任何 Bridge/NM 调用。
+      const tabId = sender && sender.tab && sender.tab.id;
+      if (tabId) { _pendingArtifactReload = true; chrome.tabs.reload(tabId, { bypassCache: true }); }
+    } else if (msg.type === "element-mode-changed") {
+      _elementMode = !!msg.on; updateAdvModeBtn(); renderMode(); // v0.6 #11: 模式翻转 → 刷新 edit-tools/元素面板/编辑态显隐(退出高级模式后仍在编辑态)
+    } else if (msg.type === "element-selected") {
+      renderElementPanel(msg.info); // v0.6 M2: 渲染选中元素信息
     } else if (msg.type === "annotation-clicked") {
-      // #4: 页面点高亮 → 切到批注 tab + 滚到卡片 + 聚焦回复输入
+      // #4: 页面点高亮 → 切到评论 tab + 滚到卡片 + 聚焦回复输入
       switchTab("comment");
       const card = document.querySelector('.card[data-id="' + msg.id + '"]');
       const ann = (_lastItems || []).find((a) => a.id === msg.id);
@@ -86,10 +112,21 @@
         card.classList.add("flash"); setTimeout(() => card.classList.remove("flash"), 1400);
         doReply(ann, card);
       }
+    } else if (msg.type === "format-state") {
+      // v0.8 #5: 页面选区的 B/I/U/S 格式状态同步 —— 两个入口点亮态一致
+      const st = msg.states || {};
+      ["bold", "italic", "underline", "strike"].forEach((k) => {
+        const b = document.getElementById("act-" + k);
+        if (b) b.classList.toggle("active", !!st[k]);
+      });
+    } else if (msg.type === "toast") {
+      // v0.8: content-script 侧的提示(如「请先在页面选中文字」)统一走 toast
+      if (msg.text) showToast(msg.text);
     }
   });
 
   let _editing = false;
+  let _elementMode = false; // v0.6: 高级(元素)模式
 
   // 标准 alert 图标(success=对勾圆 / warning=三角感叹号),用经典控件不手画
   const ICON_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>';
@@ -106,7 +143,93 @@
     el.innerHTML = (isLocal ? ICON_OK : ICON_WARN) + "<span>" + esc(text) + "</span>";
     btn.textContent = _editing ? t("edit.exit") : t("edit.start");
     const tools = document.getElementById("edit-tools");
-    if (tools) tools.hidden = !_editing; // #3a: 会话动作仅编辑态显示
+    if (tools) tools.hidden = !_editing || _elementMode; // 元素模式时让位给元素面板
+    const epanel = document.getElementById("element-panel");
+    if (epanel) epanel.hidden = !_elementMode; // v0.6: 元素面板(M3 填内容)
+    const adv = document.getElementById("adv-mode-btn");
+    if (adv) adv.hidden = !_editing; // v0.6: 仅编辑态显示「切换高级模式」
+    renderArtifactControls();
+  }
+  function renderArtifactControls() {
+    const reload = document.getElementById("artifact-reload-btn");
+    const status = document.getElementById("artifact-status");
+    if (reload) reload.hidden = !isLocal;
+    if (!status) return;
+    if (!isLocal || !_artifactState) { status.hidden = true; return; }
+    const hash = _artifactState.loaded_artifact_hash;
+    const logical = _artifactState.logical_document_id;
+    if (!hash && !logical) { status.hidden = true; return; }
+    status.textContent = t("artifact.status").replace("{id}", logical || "—").replace("{hash}", hash ? hash.slice(0, 19) + "…" : t("artifact.hashPending"));
+    status.hidden = false;
+  }
+  function maybeShowReloadResult(items) {
+    if (!_pendingArtifactReload) return;
+    _pendingArtifactReload = false;
+    const result = document.getElementById("artifact-reload-result");
+    if (!result) return;
+    const open = (items || []).filter((a) => a._status !== "stale").length;
+    const stale = (items || []).filter((a) => a._status === "stale").length;
+    result.textContent = t("artifact.reloaded").replace("{open}", open).replace("{stale}", stale);
+    result.hidden = false;
+  }
+  // v0.6: 高级模式按钮文案/高亮 + 互斥显隐
+  function updateAdvModeBtn() {
+    const b = document.getElementById("adv-mode-btn");
+    if (!b) return;
+    b.textContent = t(_elementMode ? "adv.exit" : "adv.enter");
+    b.classList.toggle("active", _elementMode);
+    renderMode();
+  }
+  // v0.6 M6: 元素样式预设(fontFamily/letterSpacing/lineHeight/padding)
+  const FONT_OPTS = [["sans-serif", "无衬线"], ["serif", "衬线"], ["monospace", "等宽"], ['"PingFang SC",sans-serif', "苹方"], ['"Microsoft YaHei",sans-serif', "微软雅黑"], ["Arial,sans-serif", "Arial"], ["Georgia,serif", "Georgia"]];
+  const LS_OPTS = [["-0.02em", "紧凑"], ["0.05em", "略松"], ["0.1em", "宽松"], ["0.15em", "很宽"]];
+  const LH_OPTS = [["1", "1.0"], ["1.3", "1.3"], ["1.5", "1.5"], ["1.7", "1.7"], ["2", "2.0"]];
+  const PAD_OPTS = [["0", "0"], ["6px", "6"], ["12px", "12"], ["18px", "18"], ["24px", "24"]];
+  // 规范化比较(浏览器会把 font-family 回读成 "PingFang SC", sans-serif 带空格,与 option 字符串不等 → 误显首项)
+  function normStyle(v) { return String(v || "").split(",").map((s) => s.trim()).join(",").toLowerCase(); }
+  function styleSelect(prop, label, opts, cur) {
+    const c = normStyle(cur);
+    const inPreset = opts.some((o) => normStyle(o[0]) === c);
+    let oh = "";
+    if (cur && !inPreset) oh += '<option value="' + esc(cur) + '" selected>' + esc(cur) + '</option>'; // 真实当前值(规范化后不在预设里)
+    oh += opts.map((o) => '<option value="' + esc(o[0]) + '"' + (inPreset && normStyle(o[0]) === c ? " selected" : "") + ">" + esc(o[1]) + "</option>").join("");
+    return '<label class="ep-style"><span>' + esc(label) + '</span><select data-style="' + prop + '">' + oh + "</select></label>";
+  }
+  // v0.6 M7: Emoji 库
+  const EMOJIS = ["😀","😄","😁","🙂","😊","😍","🤩","😘","😎","🤔","😐","😴","😭","😡","👍","👎","👌","✌️","🤝","👏","🙌","💪","🙏","💯","✅","❌","⭐","🔥","💡","❤️","🎉","🎊","🚀","✨","📌","📎","📷","📊","📈","🔑","⏰","📅","🌍","🎯","🏆","💰","📝","✏️","🔍","⚙️","🎨","🎵","📱","💻","🌐","🔗","💬","💭","⚠️","❓","❗","➕","➖","✖️","✔️"];
+  function buildEmojiPanel() {
+    const p = document.getElementById("emoji-panel");
+    if (!p || p.dataset.built) return;
+    p.dataset.built = "1";
+    p.innerHTML = EMOJIS.map((e) => '<button class="emoji-i" type="button" data-e="' + e + '">' + e + "</button>").join("");
+  }
+  // v0.6 M2: 渲染选中元素信息到元素面板(M3 加操作按钮)
+  function renderElementPanel(info) {
+    const el = document.getElementById("element-panel");
+    if (!el) return;
+    if (!info) {
+      el.innerHTML = '<div class="ep-hint">' + esc(t("adv.enter")) + '</div><div class="ep-sub">' + esc(t("ep.noSel")) + '</div>';
+      return;
+    }
+    const cls = (info.classes || "").trim().split(/\s+/).filter(Boolean)
+      .map((c) => '<code class="ep-c">.' + esc(c) + '</code>').join(" ");
+    el.innerHTML =
+      '<div class="ep-head"><code class="ep-tag">' + esc(info.tag) + (info.id ? '#' + esc(info.id) : '') + '</code>' +
+      '<span class="ep-size">' + info.w + '×' + info.h + '</span>' +
+      '<span class="ep-sib">' + (info.siblingIndex + 1) + '/' + info.siblingCount + '</span></div>' +
+      (cls ? '<div class="ep-cls">' + cls + '</div>' : '') +
+      (info.textPreview ? '<div class="ep-text">' + esc(info.textPreview) + '</div>' : '') +
+      '<div class="ep-styles">' +
+      styleSelect("fontFamily", t("style.font"), FONT_OPTS, (info.styles || {}).fontFamily) +
+      styleSelect("letterSpacing", t("style.letter"), LS_OPTS, (info.styles || {}).letterSpacing) +
+      styleSelect("lineHeight", t("style.line"), LH_OPTS, (info.styles || {}).lineHeight) +
+      styleSelect("padding", t("style.padding"), PAD_OPTS, (info.styles || {}).padding) +
+      '</div>' +
+      '<div class="ep-acts"><button id="el-parent" class="ep-btn ep-ghost">↑ ' + esc(t("ep.parent")) + '</button>' +
+      '<button id="el-textedit" class="ep-btn ep-ghost">' + esc(t("ep.editText")) + '</button>' +
+      '<button id="el-dup" class="ep-btn">' + esc(t("ep.duplicate")) + '</button>' +
+      '<button id="el-del" class="ep-btn ep-danger">' + esc(t("ep.delete")) + '</button></div>' +
+      '<div class="ep-draghint">' + esc(t("ep.dragHint")) + '</div>';
   }
 
   function renderCards(items) {
@@ -139,6 +262,20 @@
         reply.textContent = t("card.reply"); reply.title = t("card.reply");
         reply.addEventListener("click", (e) => { e.stopPropagation(); doReply(ann, card); });
         acts.appendChild(reply);
+        if (!depth) {
+          // v0.6.1:仅顶层非 stale 卡片可「生成任务」(回复卡片不出现,避免失去上下文)
+          const gen = document.createElement("button");
+          gen.textContent = t("card.genTask"); gen.title = t("card.genTask");
+          gen.addEventListener("click", (e) => {
+            e.stopPropagation();
+            _contractTriggerEl = gen;
+            sendToContent({ type: "get-export" }).then((resp) => {
+              if (!resp || resp.type !== "export-data") { showToast(t("contract.copyFail")); return; }
+              openContract([ann.id], resp.items || [], resp.artifact, bridgeMeta(resp));
+            });
+          });
+          acts.appendChild(gen);
+        }
       }
       chrome.storage.sync.get(["user", "mode"], (cfg) => {
         const me = cfg.user && cfg.user.id;
@@ -179,6 +316,9 @@
       c.appendChild(sec);
     }
     updateCommentCount((byParent[null] || []).length);
+    // v0.6.1:无未失效顶层批注时,底部「生成修改任务」disabled 且不打开空 Composer
+    const _exportBtn = document.getElementById("export-btn");
+    if (_exportBtn) _exportBtn.disabled = !((byParent[null] || []).length > 0);
   }
 
   // #2: 一键删除所有失效评论(原文已不在当前页面)
@@ -325,18 +465,237 @@
     return safe.replace(/https?:\/\/[^\s<]+/g, (u) => '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>');
   }
 
+  // === v0.6.1 修改契约 Composer(批注 → 带允许范围/保护规则/验收条件的任务)===
+  const contractSheet = document.getElementById("contract-sheet");
+  const contractCloseBtn = document.getElementById("contract-close");
+  const contractSummary = document.getElementById("contract-source-summary");
+  const contractSourceList = document.getElementById("contract-source-list");
+  const contractBrief = document.getElementById("contract-brief");
+  const contractBriefError = document.getElementById("contract-brief-error");
+  const contractBriefReq = document.getElementById("contract-brief-req");
+  const contractPreserve = document.getElementById("contract-preserve");
+  const contractPlanHint = document.getElementById("contract-plan-hint");
+  const contractCopyPrompt = document.getElementById("contract-copy-prompt");
+  const contractCopyJson = document.getElementById("contract-copy-json");
+  const contractFallback = document.getElementById("contract-output-fallback");
+  const contractFallbackText = document.getElementById("contract-fallback-text");
+  const contractBridgeWrap = document.getElementById("contract-bridge-wrap");
+  const contractBridge = document.getElementById("contract-bridge");
+  const contractBridgeStatus = document.getElementById("contract-bridge-status");
+
+  function countReplies(rootId, allItems) {
+    const kids = {};
+    (allItems || []).forEach((a) => { const p = a.parent_id || null; (kids[p] = kids[p] || []).push(a.id); });
+    let n = 0; const stack = (kids[rootId] || []).slice();
+    while (stack.length) { const id = stack.pop(); n += 1; (kids[id] || []).forEach((c) => stack.push(c)); }
+    return n;
+  }
+  function getContractMode() {
+    const checked = document.querySelector('input[name="contract-mode"]:checked');
+    return checked ? checked.value : "precise_patch";
+  }
+  function getContractDraft() {
+    return {
+      mode: getContractMode(),
+      rootIds: _contractSourceRootIds.slice(),
+      brief: contractBrief.value,
+      preserveText: contractPreserve.value,
+      artifact: _contractArtifact || { title: "", url: "", isLocal: false }
+    };
+  }
+  function renderContractSource() {
+    const items = _contractItems;
+    const roots = items.filter((a) => _contractSourceRootIds.indexOf(a.id) !== -1 && a.parent_id == null && a._status !== "stale");
+    contractSummary.textContent = t("contract.source").replace("{n}", String(roots.length));
+    if (!roots.length) {
+      contractSourceList.innerHTML = '<div class="src-item" style="color:var(--text-faint)">' + esc(t("contract.empty")) + "</div>";
+      return;
+    }
+    contractSourceList.innerHTML = roots.map((a) => {
+      const q = (a.quote || "").slice(0, 48);
+      const reps = countReplies(a.id, items);
+      return '<div class="src-item"><span class="src-quote">' + esc(q) + '</span><span class="src-meta">' + reps + " " + esc(t("contract.replies")) + "</span></div>";
+    }).join("");
+  }
+  function refreshContractUI() {
+    if (!_contractOpen) return;
+    const draft = getContractDraft();
+    const meta = (window.ChangeContract.MODES || []).find((m) => m.id === draft.mode);
+    const req = !!(meta && meta.briefRequired);
+    if (contractBriefReq) contractBriefReq.hidden = !req;
+    if (contractPlanHint) contractPlanHint.hidden = draft.mode !== "restructure";
+    if (contractCopyPrompt) contractCopyPrompt.textContent = (draft.mode === "restructure") ? t("contract.copyPlan") : t("contract.copyPrompt");
+    if (contractCloseBtn) contractCloseBtn.setAttribute("aria-label", t("contract.close")); // i18n aria-label(禁硬编码)
+    // 选中态:给当前选中模式卡加 .selected(:has 的 JS 兜底,旧 Chromium 也能正确高亮)
+    document.querySelectorAll(".mode-card").forEach((c) => {
+      const inp = c.querySelector("input"); c.classList.toggle("selected", !!(inp && inp.checked));
+    });
+    const v = window.ChangeContract.validateDraft(draft, _contractItems);
+    if (v.errors.brief) { contractBriefError.textContent = t("contract.briefRequired"); contractBriefError.hidden = false; }
+    else { contractBriefError.hidden = true; }
+    const disable = !v.ok;
+    const lock = _contractRunning;
+    // v0.7.1 bridge:仅本地 managed artifact + 非 restructure 显示
+    const bridgeEligible = !!(_contractMeta && _contractMeta.isLocal && _contractMeta.logicalDocumentId
+      && _contractMeta.loadedArtifactHash && draft.mode !== "restructure");
+    if (contractBridgeWrap) contractBridgeWrap.hidden = !bridgeEligible;
+    if (bridgeEligible && contractBridge) {
+      contractBridge.textContent = t("bridge.run"); // 三种可发送模式统一「发送给 Claude Code」(spec §8)
+    }
+    const continueWrap = document.getElementById("contract-session-continue-wrap");
+    if (continueWrap) continueWrap.hidden = !_contractSessionContinueAvail;
+    contractCopyPrompt.disabled = disable || lock;
+    contractCopyJson.disabled = disable || lock;
+    if (contractBridge) contractBridge.disabled = disable || lock || !bridgeEligible;
+  }
+  function openContract(rootIds, items, artifact, meta) {
+    _contractItems = items || [];
+    _contractSourceRootIds = (rootIds || []).slice();
+    _contractArtifact = artifact || { title: "", url: "", isLocal: false };
+    _contractMeta = meta || { isLocal: !!(artifact && artifact.isLocal), logicalDocumentId: null, loadedArtifactHash: null };
+    _contractRunning = false;
+    _contractSessionContinueAvail = false;
+    _contractOpen = true;
+    const precise = document.querySelector('input[name="contract-mode"][value="precise_patch"]');
+    if (precise) precise.checked = true;
+    const sessNew = document.querySelector('input[name="contract-session"][value="new"]');
+    if (sessNew) sessNew.checked = true;
+    contractBrief.value = "";
+    contractPreserve.value = "";
+    document.querySelectorAll('input[name="contract-mode"], input[name="contract-session"]').forEach((el) => { el.disabled = false; });
+    contractBrief.disabled = false;
+    contractPreserve.disabled = false;
+    contractBriefError.hidden = true;
+    contractFallback.hidden = true;
+    contractFallbackText.value = "";
+    if (contractBridgeStatus) { contractBridgeStatus.hidden = true; contractBridgeStatus.className = "contract-bridge-status"; }
+    accountSheet.classList.remove("show");
+    avatarBtn.classList.remove("active");
+    closeLangSheet();
+    renderContractSource();
+    refreshContractUI();
+    contractSheet.hidden = false;
+    contractSheet.classList.add("show");
+    queryBridgeSession();
+    setTimeout(() => { try { contractBrief.focus(); } catch (e) {} }, 0);
+  }
+  function closeContract() {
+    _contractOpen = false;
+    contractSheet.classList.remove("show");
+    contractSheet.hidden = true;
+    const el = _contractTriggerEl;
+    _contractTriggerEl = null;
+    if (el && el.focus) { try { el.focus(); } catch (e) {} }
+  }
+  function showContractFallback(out) {
+    contractFallback.hidden = false;
+    contractFallbackText.value = out;
+    try { contractFallbackText.focus(); contractFallbackText.select(); } catch (e) {}
+    showToast(t("contract.copyFail"));
+  }
+  function copyContract(kind) {
+    const draft = getContractDraft();
+    let task;
+    try { task = window.ChangeContract.buildTask(draft, _contractItems); }
+    catch (e) { showToast(t("contract.copyFail")); return; }
+    const out = (kind === "json") ? window.ChangeContract.serialize(task) : window.ChangeContract.renderPrompt(task);
+    const btn = (kind === "json") ? contractCopyJson : contractCopyPrompt;
+    const orig = btn.textContent;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(out).then(() => {
+        btn.textContent = t("contract.copied");
+        showToast(t("contract.copied"));
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      }).catch(() => showContractFallback(out));
+    } else {
+      showContractFallback(out);
+    }
+  }
+
+  // === v0.7 Codex Local Bridge 辅助 ===
+  function bridgeMeta(resp) {
+    return {
+      isLocal: !!(resp && resp.artifact && resp.artifact.isLocal),
+      logicalDocumentId: (resp && resp.logicalDocumentId) || (resp && resp.artifact_state && resp.artifact_state.logical_document_id) || null,
+      loadedArtifactHash: (resp && resp.loadedArtifactHash) || (resp && resp.artifact_state && resp.artifact_state.loaded_artifact_hash) || null
+    };
+  }
+  function queryBridgeSession() {
+    getActiveTab().then((tab) => {
+      if (!tab || !tab.id) return;
+      chrome.runtime.sendMessage({ type: "bridge-query-session", tab_id: tab.id }).then((r) => {
+        _contractSessionContinueAvail = !!(r && r.continuable);
+        if (!_contractOpen) return;
+        const cw = document.getElementById("contract-session-continue-wrap");
+        if (cw) cw.hidden = !_contractSessionContinueAvail;
+        if (!_contractSessionContinueAvail) { const n = document.querySelector('input[name="contract-session"][value="new"]'); if (n) n.checked = true; }
+      }).catch(() => {});
+    });
+  }
+  function setBridgeStatus(text, cls) {
+    if (!contractBridgeStatus) return;
+    contractBridgeStatus.hidden = !text;
+    contractBridgeStatus.textContent = text || "";
+    contractBridgeStatus.className = "contract-bridge-status" + (cls ? " " + cls : "");
+  }
+  function bridgeFailClass(code) {
+    if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF"
+      || code === "BRIDGE_NOT_INSTALLED" || code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED"
+      || code === "CLAUDE_SESSION_UNAVAILABLE" || code === "NO_CONTINUABLE_SESSION") return "warn";
+    return "err";
+  }
+  function tBridgeFailed(code, host) {
+    if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF") return t("bridge.sourceChanged");
+    if (code === "BRIDGE_NOT_INSTALLED") return t("bridge.notInstalled");
+    if (code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED") return t("bridge.notLoggedIn");
+    if (code === "CLAUDE_SESSION_UNAVAILABLE" || code === "NO_CONTINUABLE_SESSION") return t("bridge.sessionUnavailable");
+    return t("bridge.failed").replace("{msg}", (host && host.message) ? host.message : (code || ""));
+  }
+  function setContractRunning(running) {
+    _contractRunning = !!running;
+    contractSheet.querySelectorAll('input[name="contract-mode"], input[name="contract-session"], textarea').forEach((el) => { el.disabled = running; });
+    refreshContractUI();
+  }
+  function startBridgeRun() {
+    if (_contractRunning) return;
+    const draft = getContractDraft();
+    let task;
+    try { task = window.ChangeContract.buildTask(draft, _contractItems); }
+    catch (e) { setBridgeStatus(t("bridge.invalid"), "err"); return; }
+    const sessEl = document.querySelector('input[name="contract-session"]:checked');
+    const session_mode = (sessEl && sessEl.value === "continue") ? "continue" : "new";
+    getActiveTab().then((tab) => {
+      if (!tab || !tab.id) { setBridgeStatus(t("bridge.failed").replace("{msg}", "no active tab"), "err"); return; }
+      // v0.7.1: provider 固定 claude_code_cli;host 名 provider-neutral,后续 adapter 复用
+      chrome.runtime.sendMessage({ type: "bridge-start", provider: "claude_code_cli", tab_id: tab.id, session_mode, change_contract: task }).then((resp) => {
+        if (resp && resp.ok) { setContractRunning(true); setBridgeStatus(t("bridge.running"), "running"); }
+        else {
+          const code = resp && resp.code;
+          if (code === "BRIDGE_NOT_INSTALLED") setBridgeStatus(t("bridge.notInstalled"), "warn");
+          else if (code === "NOT_LOCAL" || code === "NO_ARTIFACT_VERSION" || code === "NO_CONTINUABLE_SESSION") setBridgeStatus(t("bridge.hint"), "warn");
+          else setBridgeStatus(tBridgeFailed(code, resp), bridgeFailClass(code));
+        }
+      }).catch(() => setBridgeStatus(t("bridge.notInstalled"), "warn"));
+    });
+  }
+
+  if (contractCloseBtn) contractCloseBtn.addEventListener("click", closeContract);
+  document.querySelectorAll('input[name="contract-mode"]').forEach((r) => r.addEventListener("change", refreshContractUI));
+  if (contractBrief) contractBrief.addEventListener("input", refreshContractUI);
+  if (contractCopyPrompt) contractCopyPrompt.addEventListener("click", () => copyContract("prompt"));
+  if (contractCopyJson) contractCopyJson.addEventListener("click", () => copyContract("json"));
+  if (contractBridge) contractBridge.addEventListener("click", startBridgeRun);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && _contractOpen) { e.preventDefault(); closeContract(); } });
+
+  // 底部「生成修改任务」:取全部未失效顶层批注 → 打开 Composer(无顶层批注时按钮已 disabled)
   document.getElementById("export-btn").addEventListener("click", () => {
     sendToContent({ type: "get-export" }).then((resp) => {
-      if (resp && resp.type === "export-data") {
-        const items = resp.items || [];
-        if (!items.length) { showToast(t("export.empty")); return; }
-        const prompt = (window.BuildPrompt ? BuildPrompt.fromAnnotations(items) : "");
-        navigator.clipboard.writeText(prompt).then(() => {
-          const btn = document.getElementById("export-btn");
-          btn.textContent = t("export.copied");
-          setTimeout(() => (btn.textContent = t("export.btn")), 1500);
-        });
-      }
+      if (!resp || resp.type !== "export-data") return;
+      const items = resp.items || [];
+      const roots = window.ChangeContract.getRoots(items);
+      if (!roots.length) { showToast(t("contract.empty")); return; }
+      _contractTriggerEl = document.getElementById("export-btn");
+      openContract(roots.map((r) => r.id), items, resp.artifact, bridgeMeta(resp));
     });
   });
 
@@ -346,15 +705,145 @@
     _editing = !_editing;
     renderMode();
   });
+  const artifactReloadBtn = document.getElementById("artifact-reload-btn");
+  const artifactReloadConfirm = document.getElementById("artifact-reload-confirm");
+  function performArtifactReload() {
+    if (artifactReloadConfirm) artifactReloadConfirm.hidden = true;
+    _pendingArtifactReload = true;
+    getActiveTab().then((tab) => { if (tab && tab.id) chrome.tabs.reload(tab.id, { bypassCache: true }); });
+  }
+  if (artifactReloadBtn) artifactReloadBtn.addEventListener("click", async () => {
+    const response = await sendToContent({ type: "prepare-artifact-reload" });
+    if (!response || !response.ok) return;
+    if (response.status === "needs_confirmation") { if (artifactReloadConfirm) artifactReloadConfirm.hidden = false; }
+    else performArtifactReload();
+  });
+  const artifactReloadCancel = document.getElementById("artifact-reload-cancel");
+  const artifactReloadConfirmBtn = document.getElementById("artifact-reload-confirm-btn");
+  if (artifactReloadCancel) artifactReloadCancel.addEventListener("click", () => { if (artifactReloadConfirm) artifactReloadConfirm.hidden = true; });
+  if (artifactReloadConfirmBtn) artifactReloadConfirmBtn.addEventListener("click", performArtifactReload);
 
+  // v0.6: 切换高级(元素)模式
+  document.getElementById("adv-mode-btn").addEventListener("click", () => sendToContent({ type: "toggle-element-mode" }));
+  // v0.6 M3: 元素面板操作(事件委托;面板 innerHTML 会随选中重建)
+  document.getElementById("element-panel").addEventListener("click", (e) => {
+    if (e.target.id === "el-del") sendToContent({ type: "element-delete" });
+    else if (e.target.id === "el-dup") sendToContent({ type: "element-duplicate" });
+    else if (e.target.id === "el-parent") sendToContent({ type: "element-select-parent" });
+    else if (e.target.id === "el-textedit") {
+      sendToContent({ type: "element-edit-text" });
+      // #8: 释放侧边栏焦点 → 焦点回到页面,控件里的闪烁光标立即可见(content-script 一侧同时 window.focus() 配合)
+      try { window.blur(); } catch (er) {}
+    }
+  });
+  // v0.6 M6: 元素样式 select 改动 → element-style
+  document.getElementById("element-panel").addEventListener("change", (e) => {
+    const s = e.target.closest("select[data-style]");
+    if (s) sendToContent({ type: "element-style", prop: s.dataset.style, value: s.value });
+  });
+  // v0.6 M7: Emoji 库 — 按钮开关面板 + 点 emoji 插入
+  document.getElementById("act-emoji").addEventListener("click", () => {
+    const p = document.getElementById("emoji-panel");
+    buildEmojiPanel();
+    p.hidden = !p.hidden;
+  });
+  document.getElementById("emoji-panel").addEventListener("click", (e) => {
+    const b = e.target.closest(".emoji-i");
+    if (b) sendToContent({ type: "insert-text", text: b.dataset.e });
+  });
   // #3a/#3b: 侧边栏会话动作 + 取色 → 发消息给 content-script(content-script 在页面施效)
   document.getElementById("act-undo").addEventListener("click", () => sendToContent({ type: "undo" }));
   document.getElementById("act-redo").addEventListener("click", () => sendToContent({ type: "redo" }));
   document.getElementById("act-reset").addEventListener("click", () => sendToContent({ type: "reset-edit" }));
-  document.getElementById("act-save").addEventListener("click", () => sendToContent({ type: "save-html" }));
-  // change(而非 input):取色确认后一次性施效,避免连续触发时选区 range 失效
-  document.getElementById("color-text").addEventListener("change", (e) => sendToContent({ type: "apply-color", kind: "text", color: e.target.value }));
-  document.getElementById("color-hl").addEventListener("change", (e) => sendToContent({ type: "apply-color", kind: "highlight", color: e.target.value }));
+  document.getElementById("act-save").addEventListener("click", async () => {
+    // #2: 下载在 side panel 触发(content-script 只回传 HTML,避免异步消息丢用户手势被拦)
+    const r = await sendToContent({ type: "save-html" });
+    if (r && r.html) {
+      const blob = new Blob([r.html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = r.name || "page.html";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      sendToContent({ type: "mark-artifact-snapshot-exported" });
+    }
+  });
+  // v0.8 #4/#1: 面板内 swatch 浮层(替代原生 color input,杜绝系统选色器右溢出;浮层挂整个
+  //   .edit-colors 行,8 列 × 2 行 = 16 色整齐无空位)。调色板与 content-script 工具栏【同一份取值】,
+  //   两边视觉效果一致;高亮色不含纯白(纯白高亮会让浅色文字「隐形」,像被盖住)。
+  const SP_TEXT_COLORS = ["#0a0a0a", "#374151", "#6b7280", "#9ca3af", "#ffffff", "#ef4444", "#f97316", "#f59e0b", "#10b981", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#ec4899", "#7c8cff", "#e11d48"];
+  const SP_HL_COLORS = ["#fff59d", "#ffe14d", "#ffd54f", "#ffcdd2", "#f8bbd0", "#e1bee7", "#c5cae9", "#bbdefb", "#b2dfdb", "#c8e6c9", "#dcedc8", "#ffccbc", "#ffe0b2", "#d7ccc8", "#e5e7eb", "transparent"];
+  function buildSpSwatches() {
+    const map = [["sp-color-text-pop", SP_TEXT_COLORS], ["sp-color-hl-pop", SP_HL_COLORS]];
+    for (const [id, arr] of map) {
+      const p = document.getElementById(id);
+      if (!p || p.dataset.built) continue;
+      p.dataset.built = "1";
+      // transparent 不写 inline background,让 CSS 的红斜杠「清除高亮」样式生效
+      p.innerHTML = arr.map((c) => '<button class="sw" type="button" data-c="' + c + '"' + (c === "transparent" ? ' title="' + esc(t("tool.clear")) + '"' : ' style="background:' + c + '"') + "></button>").join("");
+    }
+  }
+  // v0.8 #5: 字号 / 标题 / 对齐 列表浮层(条目文案用与工具栏相同的 i18n key)
+  const SP_SIZES = [["size.sm", "0.85em"], ["size.std", "1em"], ["size.lg", "1.3em"], ["size.xl", "1.7em"]];
+  function buildSpListPops() {
+    const sizePop = document.getElementById("sp-size-pop");
+    if (sizePop && !sizePop.dataset.built) {
+      sizePop.dataset.built = "1";
+      sizePop.innerHTML = SP_SIZES.map((s) => '<button class="li" type="button" data-kind="style" data-prop="fontSize" data-val="' + s[1] + '" style="font-size:' + s[1] + '">' + esc(t(s[0])) + "</button>").join("");
+    }
+    const headPop = document.getElementById("sp-heading-pop");
+    if (headPop && !headPop.dataset.built) {
+      headPop.dataset.built = "1";
+      headPop.innerHTML = [["P", "heading.normal", ""], ["H1", "heading.h1", "lg-h1"], ["H2", "heading.h2", "lg-h2"], ["H3", "heading.h3", "lg-h3"]]
+        .map((h) => '<button class="li ' + h[2] + '" type="button" data-kind="block" data-fmt="heading" data-val="' + h[0] + '">' + esc(t(h[1])) + "</button>").join("");
+    }
+    const alignPop = document.getElementById("sp-align-pop");
+    if (alignPop && !alignPop.dataset.built) {
+      alignPop.dataset.built = "1";
+      alignPop.innerHTML = [["left", "align.left"], ["center", "align.center"], ["right", "align.right"], ["justify", "align.justify"]]
+        .map((a) => '<button class="li" type="button" data-kind="block" data-fmt="align" data-val="' + a[0] + '">' + esc(t(a[1])) + "</button>").join("");
+    }
+  }
+  function closeAllSpPops() {
+    document.querySelectorAll(".sp-color-pop, .sp-list-pop").forEach((x) => { x.hidden = true; });
+    document.querySelectorAll(".sp-color-btn, .sp-block-btn").forEach((b) => b.setAttribute("aria-expanded", "false"));
+  }
+  function toggleSpPop(id) {
+    const p = document.getElementById(id);
+    if (!p) return;
+    const open = p.hidden;
+    closeAllSpPops();
+    if (open) { p.hidden = false; const btn = p.parentElement.querySelector(".sp-color-btn, .sp-block-btn"); if (btn) btn.setAttribute("aria-expanded", "true"); }
+  }
+  document.getElementById("sp-color-text").addEventListener("click", () => { buildSpSwatches(); toggleSpPop("sp-color-text-pop"); });
+  document.getElementById("sp-color-hl").addEventListener("click", () => { buildSpSwatches(); toggleSpPop("sp-color-hl-pop"); });
+  document.getElementById("sp-size").addEventListener("click", () => { buildSpListPops(); toggleSpPop("sp-size-pop"); });
+  document.getElementById("sp-heading").addEventListener("click", () => { buildSpListPops(); toggleSpPop("sp-heading-pop"); });
+  document.getElementById("sp-align").addEventListener("click", () => { buildSpListPops(); toggleSpPop("sp-align-pop"); });
+  document.querySelector(".edit-colors").addEventListener("click", (e) => {
+    const sw = e.target.closest(".sw");
+    if (!sw) return;
+    const pop = sw.closest(".sp-color-pop");
+    const kind = pop && pop.id === "sp-color-text-pop" ? "text" : "highlight";
+    sendToContent({ type: "apply-color", kind, color: sw.dataset.c });
+    closeAllSpPops();
+  });
+  // v0.8 #5: 字号/标题/对齐条目 —— 交互是侧边栏自己的弹层,修改内容与工具栏走【同一个 execEdit】
+  document.querySelector(".edit-blocks").addEventListener("click", (e) => {
+    const li = e.target.closest(".li");
+    if (!li) return;
+    if (li.dataset.kind === "style") sendToContent({ type: "edit-style", prop: li.dataset.prop, value: li.dataset.val });
+    else sendToContent({ type: "edit-block", fmt: li.dataset.fmt, value: li.dataset.val });
+    closeAllSpPops();
+  });
+  document.addEventListener("click", (e) => { if (!e.target.closest(".sp-color-wrap, .sp-pop-wrap")) closeAllSpPops(); });
+
+  // v0.8 #5: 评论 + B/I/U/S + 清除格式 —— 与页面浮动工具栏同一批工具、同一修改入口(execEdit)
+  document.getElementById("act-comment").addEventListener("click", () => sendToContent({ type: "create-comment" }));
+  ["bold", "italic", "underline", "strike"].forEach((cmd) => {
+    document.getElementById("act-" + cmd).addEventListener("click", () => sendToContent({ type: "edit-toggle", cmd: cmd }));
+  });
+  document.getElementById("act-clear").addEventListener("click", () => sendToContent({ type: "edit-clear" }));
 
   // #1: 在线人数从评论区移到「身份入口」(账号浮层)显示,只显示人数、不显示姓名(评论卡片已有姓名)
   function renderPresence(users) {
@@ -478,6 +967,12 @@
       if (teamSetup) teamSetup.hidden = false;
       loginState.textContent = t("team.invitePrefill");
     }
+    // v0.7 bridge:background 推送的 run 进度/完成/失败(仅当前 tab 且 Composer 打开时处理)
+    if (_contractOpen && msg && msg.tab_id === currentTabId) {
+      if (msg.type === "bridge-progress" && _contractRunning) setBridgeStatus(t("bridge.running"), "running");
+      else if (msg.type === "bridge-completed") { setContractRunning(false); setBridgeStatus(t("bridge.completed"), "ok"); }
+      else if (msg.type === "bridge-failed") { setContractRunning(false); setBridgeStatus(tBridgeFailed(msg.code, msg), bridgeFailClass(msg.code)); }
+    }
   });
 
   // 静默重登:侧栏打开 → getAuthToken(非交互)→ 有团队直接 session;否则查已有 session
@@ -576,7 +1071,11 @@
     refreshLangUI();
     renderMode();
     renderCards(_lastItems);
+    if (_contractOpen) { renderContractSource(); refreshContractUI(); } // Composer 打开时跟随语言刷新
     refreshLoginState();
+    // v0.8: 弹层条目(字号/标题/对齐/色板 title)跟随新语言 —— 清 built 缓存,下次打开时重建
+    document.querySelectorAll(".sp-list-pop, .sp-color-pop").forEach((p) => { delete p.dataset.built; p.innerHTML = ""; });
+    closeAllSpPops();
     closeLangSheet();
   }
 
@@ -625,6 +1124,7 @@
     if (resp && resp.type === "annotations-list") {
       isLocal = resp.isLocal;
       _editing = !!resp.editing;
+      _artifactState = resp.artifact_state || _artifactState;
       renderMode();
       renderCards(resp.items);
     }
