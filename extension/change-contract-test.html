@@ -69,8 +69,8 @@
     var task = CC.buildTask({ mode: "local_optimize", rootIds: ["a1"], brief: "", preserveText: "", artifact: artifact }, anns);
     eq(task.contract.write_scope, "annotated_local_areas", "T2 write_scope=annotated_local_areas");
     var p = CC.renderPrompt(task);
-    ok(p.indexOf("每条批注所在的局部内容") !== -1, "T2 prompt 允许范围=局部");
-    ok(p.indexOf("只能在每条批注定位到的局部内容中修改") !== -1, "T2 prompt 含局部强制语句");
+    ok(p.indexOf("每条评论所在的局部内容") !== -1, "T2 prompt 允许范围=局部");
+    ok(p.indexOf("只能在每条评论定位到的局部内容中修改") !== -1, "T2 prompt 含局部强制语句");
   })();
 
   // T3 restructure / regenerate:brief<10 验证失败;≥10 成功

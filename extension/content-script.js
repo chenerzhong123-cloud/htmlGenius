@@ -140,6 +140,7 @@
     .hg-inspect,.hg-select{ position:fixed; pointer-events:none; z-index:2147483645; border-radius:3px; }
     .hg-inspect{ background:rgba(124,140,255,.14); border:1px solid rgba(124,140,255,.7); }
     .hg-select{ background:rgba(121,233,247,.12); border:2px solid var(--hg-brand); }
+    .hg-select.flash{ box-shadow:0 0 0 3px var(--hg-brand); } /* #8: 进入文字编辑时闪烁一圈,提示启动成功 */
     .hg-tip{ position:fixed; pointer-events:none; z-index:2147483647; transform:translateY(-100%); margin-top:-4px;
       background:var(--hg-bg); color:var(--hg-fg); border:1px solid var(--hg-line); border-radius:6px;
       padding:3px 7px; font:11px ui-monospace,SFMono-Regular,Menlo,monospace; box-shadow:var(--hg-shadow); white-space:nowrap; }
@@ -167,6 +168,8 @@
     #hg-toolbar .hg-c{ width:16px; height:16px; border-radius:4px; cursor:pointer; border:1px solid var(--hg-line); }
     #hg-toolbar .hg-item{ background:transparent; color:var(--hg-fg); border:0; text-align:left; padding:5px 8px; border-radius:6px; cursor:pointer; font-size:12px; line-height:1.3; }
     #hg-toolbar .hg-item:hover{ background:var(--hg-hover); }
+    #hg-toolbar .hg-emoji{ font-size:16px; background:transparent; color:var(--hg-fg); border:0; cursor:pointer; padding:4px 5px; border-radius:6px; line-height:1; }
+    #hg-toolbar .hg-emoji:hover{ background:var(--hg-hover); }
     #hg-toolbar .hg-item.hg-h1{ font-weight:700; font-size:14px; }
     #hg-toolbar .hg-item.hg-h2{ font-weight:600; font-size:13px; }
     #hg-toolbar .hg-item.hg-h3{ font-weight:600; font-size:12px; }
@@ -197,8 +200,11 @@
   } catch (e) { /* 非关键 */ }
 
   // === 浮工具栏(本地 + 远程均可编辑;远程为临时修改,刷新丢失)===
-  const TEXT_COLORS = ["#ef4444","#f59e0b","#10b981","#3b82f6","#8b5cf6","#ec4899","#6b7280","#000000"];
-  const HL_COLORS = ["#fff59d","#b3e5fc","#c8e6c9","#ffcdd2","#e1bee7","#ffe0b2","#d7ccc8","#cfd8dc"];
+  // v0.8: 调色板为工具栏与侧边栏的【同一份来源】,两边 UI 各自渲染但取值必须一致。
+  // 16 色 = 侧栏浮层 8 列 × 2 行(整齐无空位);高亮色刻意不含纯白 —— 纯白高亮会让浅色文字
+  // 「隐形」(背景与文字同亮,视觉上像被盖住),transparent 表示「清除高亮」。
+  const TEXT_COLORS = ["#0a0a0a","#374151","#6b7280","#9ca3af","#ffffff","#ef4444","#f97316","#f59e0b","#10b981","#06b6d4","#3b82f6","#6366f1","#8b5cf6","#ec4899","#7c8cff","#e11d48"];
+  const HL_COLORS = ["#fff59d","#ffe14d","#ffd54f","#ffcdd2","#f8bbd0","#e1bee7","#c5cae9","#bbdefb","#b2dfdb","#c8e6c9","#dcedc8","#ffccbc","#ffe0b2","#d7ccc8","#e5e7eb","transparent"];
   // SIZES:[labelKey, em];标签随语言变化(toolbarHTML 内取 t())
   const SIZES = [["size.sm","0.85em"],["size.std","1em"],["size.lg","1.3em"],["size.xl","1.7em"]];
   const t = (k) => (window.HG_I18N ? window.HG_I18N.t(k) : k);
@@ -232,6 +238,8 @@
       + `<button class="hg-item" data-fmt="align" data-val="right">${t("align.right")}</button>`
       + `<button class="hg-item" data-fmt="align" data-val="justify">${t("align.justify")}</button>`
       + `</div>`;
+    h += `<button data-act="pop-emoji" class="hg-haspop hg-edit-tool" title="${t("emoji.title")}">😊</button>`;
+    h += `<div class="hg-popover hg-edit-tool" data-pop="emoji">` + ["😀","😄","😁","😍","😎","🤔","👍","👌","👏","🙏","💯","✅","❌","⭐","🔥","💡","❤️","🎉","🚀","✨","📌","📎","🔍","🎨","💬","⚠️","❓","❗","✏️","📝","🎯","➕"].map((e) => `<button class="hg-emoji hg-edit-tool" data-emoji="${e}">${e}</button>`).join("") + `</div>`;
     h += sep + `<button data-act="clear" class="hg-edit-tool" title="${t("tool.clear")}">✕</button>`;
     return h;
   }
@@ -380,8 +388,15 @@
     if (!_selectedEl || _selectedEl === document.body) return;
     _textEditingEl = _selectedEl;
     _textEditingEl.contentEditable = "true";
-    _textEditingEl.focus();
+    // #8: 从侧边栏点「编辑文字」时,窗口焦点停在侧边栏区域,仅 element.focus() 光标(caret)不显示,
+    // 用户要再点一下控件才出光标。先 window.focus() 把焦点拿回页面、再聚焦控件 + 落光标到文末,
+    // 点按钮后立即出现闪烁光标(侧边栏一侧也会 window.blur() 配合放焦点)。
+    try { window.focus(); } catch (e) {}
+    try { _textEditingEl.focus({ preventScroll: false }); } catch (e) { _textEditingEl.focus(); }
     try { const r = document.createRange(); r.selectNodeContents(_textEditingEl); r.collapse(false); const s = document.getSelection(); s.removeAllRanges(); s.addRange(r); } catch (e) {}
+    if (_elSelectBox && _elSelectBox.style.display !== "none") {
+      _elSelectBox.classList.add("flash"); setTimeout(() => _elSelectBox.classList.remove("flash"), 600); // 视觉反馈:选框闪一圈
+    }
   }
   function exitTextEdit() {
     if (!_textEditingEl) return;
@@ -469,13 +484,25 @@
       '<button class="hg-modal-ok">' + t("refresh.confirm") + '</button>' +
       '</div></div>';
     document.body.appendChild(mask);
-    mask.querySelector(".hg-modal-ok").addEventListener("click", () => {
-      // 用户确认「刷新」→ 真正重载页面;重载后由 init 的 hg_autoedit 标记自动进入编辑(不再弹窗)
+    // v0.8.1: 按钮处理合并为 mask 上的 capture 委托监听 ——
+    // ① capture 阶段先于页面常见的全局 bubble 监听执行,减少被页面点击拦截器挡掉的概率;
+    // ② 若 location.reload() 被页面 beforeunload 拦截(模态已关、页面没刷),800ms 兜底直接进编辑,
+    //    保证「点刷新一定进编辑」(reload 真发生则该页 JS 上下文已销毁,兜底定时器自然失效)。
+    mask.addEventListener("click", (e) => {
+      const isOk = !!e.target.closest(".hg-modal-ok");
+      const isCancel = !!e.target.closest(".hg-modal-cancel");
+      if (!isOk && !isCancel) return;
+      e.stopPropagation();
       mask.remove();
-      try { sessionStorage.setItem("hg_autoedit", "1"); } catch (e) {}
+      if (!isOk) return;
+      console.log("[hg] refresh dialog confirmed → reload");
+      try { sessionStorage.setItem("hg_autoedit", "1"); } catch (er) {}
       location.reload();
-    });
-    mask.querySelector(".hg-modal-cancel").addEventListener("click", () => { mask.remove(); });
+      setTimeout(() => {
+        console.warn("[hg] reload 未发生(被页面 beforeunload 拦截?)→ 兜底直接进入编辑");
+        setEditing(true);
+      }, 800);
+    }, true);
   }
 
   // #1: 失活 —— 侧边栏收起/切走标签:隐藏浮窗+高亮,并退出编辑(contentEditable 关闭,页面恢复正常浏览)
@@ -492,37 +519,44 @@
   }
 
   toolbar.addEventListener("click", (e) => {
+    const em = e.target.closest("[data-emoji]");
+    if (em) { execEdit({ kind: "insert", text: em.dataset.emoji }); closeAllPopovers(); return; }
     const sw = e.target.closest(".hg-c");
-    if (sw) { applyStyle(sw.dataset.fmt, sw.dataset.val); closeAllPopovers(); return; }
+    if (sw) { execEdit({ kind: "style", prop: sw.dataset.fmt === "color" ? "color" : "background", value: sw.dataset.val }); closeAllPopovers(); return; }
     const item = e.target.closest(".hg-item");
     if (item) {
-      // #2: 字号是行内样式,走 applyStyle;其余(标题/对齐)是块级,走 applyFormat
-      if (item.dataset.fmt === "fontSize") applyStyle("fontSize", item.dataset.val);
-      else applyFormat(item.dataset.fmt, item.dataset.val);
+      // #2: 字号是行内样式,走 style;其余(标题/对齐)是块级,走 block
+      if (item.dataset.fmt === "fontSize") execEdit({ kind: "style", prop: "fontSize", value: item.dataset.val });
+      else execEdit({ kind: "block", fmt: item.dataset.fmt, value: item.dataset.val });
       closeAllPopovers(); return;
     }
     const btn = e.target.closest("button[data-act]");
     if (!btn) return;
     const act = btn.dataset.act;
-    if (act === "comment") { toolbar.classList.remove("show"); createAnnotation(); return; }
-    // #1: B/I/U/S 改用 execCommand —— 原生 toggle(再点取消)+ 下划线/删除线天然共存
-    if (act === "bold") { document.execCommand("bold"); syncActiveStates(); closeAllPopovers(); }
-    else if (act === "italic") { document.execCommand("italic"); syncActiveStates(); closeAllPopovers(); }
-    else if (act === "underline") { document.execCommand("underline"); syncActiveStates(); closeAllPopovers(); }
-    else if (act === "strike") { document.execCommand("strikeThrough"); syncActiveStates(); closeAllPopovers(); }
-    else if (act === "clear") { clearFormat(); syncActiveStates(); closeAllPopovers(); }
+    if (act === "comment") { toolbar.classList.remove("show"); execEdit({ kind: "comment" }); return; }
+    // #1: B/I/U/S 走统一入口 —— 原生 toggle(再点取消)+ 每次改动都入撤销历史
+    if (act === "bold" || act === "italic" || act === "underline" || act === "strike") { execEdit({ kind: "toggle", cmd: act }); closeAllPopovers(); }
+    else if (act === "clear") { execEdit({ kind: "clear" }); closeAllPopovers(); }
     else if (act.indexOf("pop-") === 0) togglePopover(act.slice(4));
   });
 
   // #1: 依当前选区格式点亮 B/I/U/S 按钮(queryCommandState);清空时取消高亮
   function syncActiveStates() {
     const map = { bold: "bold", italic: "italic", underline: "underline", strike: "strikeThrough" };
+    const states = {};
     Object.keys(map).forEach((act) => {
       let on = false;
       try { on = document.queryCommandState(map[act]); } catch (e) {}
+      states[act] = !!on;
       const b = toolbar.querySelector('button[data-act="' + act + '"]');
       if (b) b.classList.toggle("active", !!on);
     });
+    // v0.8: 同步 B/I/U/S 点亮态给侧边栏(两个入口同一份选区状态)
+    try { chrome.runtime.sendMessage({ type: "format-state", states: states }).catch(() => {}); } catch (e) {}
+  }
+  // v0.8: 侧边栏入口缺少可用选区时,提示用户先在页面选文字(而不是静默无反应)
+  function notifyNoSelection() {
+    try { chrome.runtime.sendMessage({ type: "toast", text: t("toast.noSelection") }).catch(() => {}); } catch (e) {}
   }
 
   // === ① 通信改 sendMessage 广播(替代 port) ===
@@ -572,18 +606,35 @@
       }
       sendResponse({ ok: true });
     } else if (msg.type === "insert-text") {
-      // v0.6: 在最近光标处插入文本(emoji)。优先 _lastCursor。
-      const r = _lastCursor || _lastRange;
-      if (_editing && r && msg.text) {
-        const sel = document.getSelection();
-        sel.removeAllRanges(); sel.addRange(r);
-        r.deleteContents();
-        r.insertNode(document.createTextNode(msg.text));
-        r.collapse(false);
-        sel.removeAllRanges(); sel.addRange(r);
-        pushUndo();
-      }
-      sendResponse({ ok: true });
+      // v0.6/v0.8: 在最近光标处插入文本(emoji)。走统一入口(撤销登记 + 重锚定与工具栏一致)。
+      const r = execEdit({ kind: "insert", text: msg.text, restore: "cursor" });
+      if (r.code === "NO_SELECTION") notifyNoSelection();
+      sendResponse({ ok: !!r.ok, code: r.code });
+    } else if (msg.type === "edit-toggle") {
+      // v0.8: 侧边栏 B/I/U/S —— 与工具栏同一个 execEdit
+      const r = execEdit({ kind: "toggle", cmd: msg.cmd, restore: "range" });
+      if (r.code === "NO_SELECTION") notifyNoSelection();
+      sendResponse({ ok: !!r.ok, code: r.code });
+    } else if (msg.type === "edit-style") {
+      // v0.8: 侧边栏字号等行内样式
+      const r = execEdit({ kind: "style", prop: msg.prop, value: msg.value, restore: "range" });
+      if (r.code === "NO_SELECTION") notifyNoSelection();
+      sendResponse({ ok: !!r.ok, code: r.code });
+    } else if (msg.type === "edit-block") {
+      // v0.8: 侧边栏标题/对齐(块级)
+      const r = execEdit({ kind: "block", fmt: msg.fmt, value: msg.value, restore: "range" });
+      if (r.code === "NO_SELECTION") notifyNoSelection();
+      sendResponse({ ok: !!r.ok, code: r.code });
+    } else if (msg.type === "edit-clear") {
+      // v0.8: 侧边栏清除格式
+      const r = execEdit({ kind: "clear", restore: "range" });
+      if (r.code === "NO_SELECTION") notifyNoSelection();
+      sendResponse({ ok: !!r.ok, code: r.code });
+    } else if (msg.type === "create-comment") {
+      // v0.8: 侧边栏「评论」按钮 —— 用最近选区建评论(与工具栏评论按钮共用 createAnnotation)
+      const r = execEdit({ kind: "comment", restore: "range" });
+      if (r.code === "NO_SELECTION") notifyNoSelection();
+      sendResponse({ ok: !!r.ok, code: r.code });
     } else if (msg.type === "undo") {
       doUndo(); sendResponse({ ok: true });
     } else if (msg.type === "redo") {
@@ -593,14 +644,10 @@
     } else if (msg.type === "save-html") {
       sendResponse({ ok: true, html: buildExportHtml(), name: (document.title || "htmlgenius-page") + ".html" });
     } else if (msg.type === "apply-color") {
-      // #3b: 侧边栏取色 → 还原最近选区 → 复用浮窗的 applyStyle 施色 → 入历史(否则颜色改动无法撤销/重做)
-      if (_editing && _lastRange) {
-        const sel = document.getSelection();
-        sel.removeAllRanges(); sel.addRange(_lastRange);
-        applyStyle(msg.kind === "highlight" ? "background" : "color", msg.color);
-        pushUndo();
-      }
-      sendResponse({ ok: true });
+      // #3b/v0.8: 侧边栏取色 → 还原最近选区 → 与工具栏同一个 execEdit 施色(逻辑唯一,两边效果一致)
+      const r = execEdit({ kind: "style", prop: msg.kind === "highlight" ? "background" : "color", value: msg.color, restore: "range" });
+      if (r.code === "NO_SELECTION") notifyNoSelection();
+      sendResponse({ ok: !!r.ok, code: r.code });
     } else if (msg.type === "activate") {
       // sidepanel 触发:打开侧边栏(showDialog=true,弹确认窗)/ 切标签或刷新(showDialog=false,静默激活)
       const showDialog = msg.showDialog !== false;
@@ -696,10 +743,17 @@
     chrome.runtime.sendMessage({ type: "annotations-updated" }).catch(() => {});
   }
 
-  // #5: 与侧边栏的长连接 —— 侧边栏关闭(页面销毁)→ port 断开 → 立即失活(比 pagehide+异步 query 可靠)
+  // #5: 与侧边栏的长连接 —— 侧边栏关闭(页面销毁)→ port 断开 → 失活(比 pagehide+异步 query 可靠)
+  // v0.8.1 竞态防护:侧边栏切标签/重激活时「先断旧 port → 再 activate → 再连新 port」,onDisconnect
+  // 回调异步到达可能【晚于】新 activate,直接失活会误杀刚激活的状态 —— 激活确认窗被移除且不会恢复
+  // (_refreshDialogShown 已置位),表现为「点刷新按钮没反应」。改为延迟失活,窗口内新 port 连上即取消。
+  let _deactivateTimer = 0;
   chrome.runtime.onConnect.addListener((port) => {
     if (port.name !== "hg-panel") return;
-    port.onDisconnect.addListener(() => deactivateNow());
+    if (_deactivateTimer) { clearTimeout(_deactivateTimer); _deactivateTimer = 0; } // 新连接到达:取消待执行的失活
+    port.onDisconnect.addListener(() => {
+      _deactivateTimer = setTimeout(() => { _deactivateTimer = 0; deactivateNow(); }, 600);
+    });
   });
 
   // === selectionchange → toolbar 定位(rAF 防抖) ===
@@ -708,7 +762,7 @@
     if (barRAF) return;
     barRAF = requestAnimationFrame(() => {
       barRAF = 0;
-      if (!_activated) { toolbar.classList.remove("show"); return; } // 未激活侧边栏:不弹工具栏(零打扰)
+      if (!_activated && !_editing) { toolbar.classList.remove("show"); return; } // 未激活且未编辑:不弹工具栏(零打扰)。编辑中即使漏 ping 也保留工具栏。
       const sel = document.getSelection();
       if (!sel || sel.isCollapsed || sel.rangeCount === 0) { toolbar.classList.remove("show"); closeAllPopovers(); return; }
       const rect = sel.getRangeAt(0).getBoundingClientRect();
@@ -734,16 +788,83 @@
     sel.removeAllRanges();
   }
 
-  // === inline 样式:span 包裹选区(color / background / fontSize)===
+  // === inline 样式:color / background 走逐段包裹(正确处理跨元素/部分选区);fontSize 等 span 包裹 ===
   // 注:B/I/U/S 走 execCommand(见 click handler),不在此处理。
+  // 返回是否真的改动了文档 —— 选区失效(指向幽灵节点)时返回 false,由 execEdit 报 NO_SELECTION。
   function applyStyle(prop, value) {
     const sel = document.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
+    if (!sel || sel.rangeCount === 0) return false;
+    if (prop === "color") return paintRange("color", value);
+    if (prop === "background") return paintRange("backgroundColor", value);
     const range = sel.getRangeAt(0);
     const span = document.createElement("span");
     span.style[prop] = value;
-    try { range.surroundContents(span); }
-    catch (e) { span.appendChild(range.extractContents()); range.insertNode(span); }
+    try { range.surroundContents(span); return true; }
+    catch (e) {
+      try { span.appendChild(range.extractContents()); range.insertNode(span); return span.isConnected; }
+      catch (e2) { return false; } // stale 选区(节点已脱离文档)→ 明确无效
+    }
+  }
+  // 把选区内每一段文本节点包裹进带样式的 span(修「只改前半/末字变样」「高亮盖字」)。
+  function paintRange(prop, value) {
+    const sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
+    const range = sel.getRangeAt(0);
+    const slices = [];
+    const walker = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.nodeValue || node.nodeValue.length === 0) return NodeFilter.FILTER_REJECT;
+        if (node.parentElement && node.parentElement.closest("#hg-toolbar,.hg-hl,.hg-inspect,.hg-select,.hg-tip,.hg-drop")) return NodeFilter.FILTER_REJECT;
+        return range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    let n;
+    while ((n = walker.nextNode())) {
+      const start = (n === range.startContainer) ? range.startOffset : 0;
+      const end = (n === range.endContainer) ? range.endOffset : n.nodeValue.length;
+      if (end > start) slices.push({ node: n, start, end });
+    }
+    if (!slices.length) {
+      const span = document.createElement("span"); span.style[prop] = value;
+      try { range.surroundContents(span); return true; }
+      catch (e) {
+        try { span.appendChild(range.extractContents()); range.insertNode(span); return span.isConnected; }
+        catch (e2) { return false; }
+      }
+    }
+    let applied = false;
+    for (const s of slices) {
+      const node = s.node;
+      if (!node.nodeValue || node.nodeValue.length === 0) continue;
+      if (!node.isConnected) continue; // stale 防护:脱离文档的幽灵节点不施色(否则会「施了但页面没变化」)
+      const start = Math.min(s.start, node.nodeValue.length);
+      const end = Math.min(s.end, node.nodeValue.length);
+      if (end <= start) continue;
+      const inside = node.splitText(start);            // inside = [start, len)
+      if (end - start < inside.nodeValue.length) inside.splitText(end - start); // 截到 [start,end)
+      const span = document.createElement("span");
+      span.style[prop] = value;
+      inside.parentNode.insertBefore(span, inside);
+      span.appendChild(inside);
+      applied = true;
+    }
+    return applied;
+  }
+  // 重锚定 overlay(编辑/插入后让批注高亮跟随文字新位置)
+  function scheduleReanchor() {
+    if (reanchorTimer) clearTimeout(reanchorTimer);
+    reanchorTimer = setTimeout(() => { loadAnnotations(); }, 300);
+  }
+  // 在当前选区/光标处插入文本(浮动栏 emoji 与侧边栏 emoji 共用;撤销登记由 execEdit 统一负责)
+  function insertTextAtSelection(text) {
+    const sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(document.createTextNode(text));
+    range.collapse(false);
+    sel.removeAllRanges(); sel.addRange(range);
+    return true;
   }
   // === 块级格式:标题 / 对齐(作用于选区所在段落块)===
   function blockOf(node) {
@@ -756,28 +877,33 @@
   }
   function applyFormat(fmt, val) {
     const sel = document.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
+    if (!sel || sel.rangeCount === 0) return false;
     const range = sel.getRangeAt(0);
     if (fmt === "heading") {
       // #3: blockOf 找不到标准块时,回退到选区共同祖先(避免静默无操作)
       let blk = blockOf(range.startContainer);
       if (!blk) { const c = range.commonAncestorContainer; blk = c.nodeType === 1 ? c : c.parentElement; }
-      if (!blk || blk === document.body) return;
+      if (!blk || blk === document.body || !blk.isConnected) return false; // stale 选区 → 无效
       const nw = document.createElement(val);
       while (blk.firstChild) nw.appendChild(blk.firstChild);
       if (blk.style.textAlign) nw.style.textAlign = blk.style.textAlign;
       blk.replaceWith(nw);
+      return true;
     } else if (fmt === "align") {
       let blk = blockOf(range.startContainer);
       if (!blk) { const c = range.commonAncestorContainer; blk = c.nodeType === 1 ? c : c.parentElement; }
-      if (blk && blk !== document.body) blk.style.textAlign = val;
+      if (blk && blk !== document.body && blk.isConnected) { blk.style.textAlign = val; return true; }
+      return false;
     }
+    return false;
   }
-  // === 清除格式:unwrap 选区内带 style 的 span ===
+  // === 清除格式:unwrap 选区内带 style 的 span(选区失效返回 false)===
   function clearFormat() {
     const sel = document.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
+    if (!sel || sel.rangeCount === 0) return false;
     const range = sel.getRangeAt(0);
+    const root = range.commonAncestorContainer;
+    if (!root || !root.isConnected) return false; // stale 防护
     const frag = range.extractContents();
     frag.querySelectorAll("span").forEach((sp) => {
       if (sp.getAttribute("style")) {
@@ -786,6 +912,69 @@
       }
     });
     range.insertNode(frag);
+    return true;
+  }
+
+  // === v0.8: 编辑操作的【唯一修改入口】===
+  // 浮动工具栏与侧边栏的所有编辑操作最终都走这里执行 —— 两个入口可以各自处理交互展示
+  // (如工具栏弹自己的 popover、侧边栏弹自己的色板浮层),但【修改页面内容的逻辑只有这一份】,
+  // 保证两边操作效果完全一致,且每次都统一:入撤销历史 + 批注重锚定 + 刷新 B/I/U/S 点亮态。
+  // op = {kind:"toggle", cmd:"bold"|"italic"|"underline"|"strike"}
+  //    | {kind:"style", prop:"color"|"background"|"fontSize", value}
+  //    | {kind:"block", fmt:"heading"|"align", value}
+  //    | {kind:"insert", text}   | {kind:"clear"}   | {kind:"comment"}
+  // restore:"range"=侧边栏入口先恢复最近非折叠选区;"cursor"=恢复最近光标位(插入用)。
+  //          工具栏入口不传 —— 直接用页面实时选区(mousedown preventDefault 保持住的那个)。
+  function rangeInDocument(r) {
+    // 选区是否仍挂在当前文档上(undo/redo 的 innerHTML 重建会让缓存的 range 指向幽灵节点)
+    const n = r && r.commonAncestorContainer;
+    if (!n) return false;
+    const el = n.nodeType === 3 ? n.parentElement : n;
+    if (!el) return false;
+    // 双重判定:isConnected + getRootNode 必须都回到当前文档(某些引擎/时序下单项不可靠)
+    try { return el.isConnected && n.getRootNode() === document && document.contains(el); }
+    catch (e) { return !!el.isConnected; }
+  }
+  function execEdit(op) {
+    if (!op || !op.kind) return { ok: false, code: "BAD_OP" };
+    if (op.kind !== "comment" && !_editing) return { ok: false, code: "NOT_EDITING" };
+    if (op.restore) {
+      const r = op.restore === "cursor" ? (_lastCursor || _lastRange) : _lastRange;
+      // #1: 侧边栏入口的 stale 防护 —— 缓存选区已失效时施色只会「施到幽灵节点上」
+      // (页面毫无变化,像按钮失灵);此时明确报 NO_SELECTION 让侧边栏提示先选文字。
+      if (!r || !rangeInDocument(r)) return { ok: false, code: "NO_SELECTION" };
+      const sel = document.getSelection();
+      sel.removeAllRanges(); sel.addRange(r);
+    }
+    const TOGGLE = { bold: "bold", italic: "italic", underline: "underline", strike: "strikeThrough" };
+    switch (op.kind) {
+      case "toggle":
+        if (!TOGGLE[op.cmd]) return { ok: false, code: "BAD_OP" };
+        document.execCommand(TOGGLE[op.cmd]); // 原生 toggle(再点取消)
+        break;
+      case "style":
+        if (!applyStyle(op.prop, op.value)) return { ok: false, code: "NO_SELECTION" };
+        break;
+      case "block":
+        if (!applyFormat(op.fmt, op.value)) return { ok: false, code: "NO_SELECTION" };
+        break;
+      case "insert":
+        if (!op.text) return { ok: false, code: "BAD_OP" };
+        if (!insertTextAtSelection(op.text)) return { ok: false, code: "NO_SELECTION" };
+        break;
+      case "clear":
+        if (!clearFormat()) return { ok: false, code: "NO_SELECTION" };
+        break;
+      case "comment":
+        createAnnotation();
+        return { ok: true };
+      default:
+        return { ok: false, code: "BAD_OP" };
+    }
+    pushUndo();          // 关键:每次改动立即入历史(可撤销/重做)。此前工具栏改色/字号走 DOM API
+    scheduleReanchor();  // 不触发 input 事件、也无 push,导致改动「撤不掉、重做不回」—— 统一入口后根治。
+    syncActiveStates();
+    return { ok: true };
   }
 
   // === ② overlay:缓存 range,滚动时只更新 rect(不重 anchor) ===
@@ -859,6 +1048,11 @@
   window.addEventListener("scroll", updatePositions, true);
   window.addEventListener("resize", updatePositions);
 
+  // v0.6 #8: 高级模式 inspect 预览框在滚动时跟随 —— 缓存鼠标坐标,滚动时按该坐标重新拾取元素并重定位。
+  let _lastMX = 0, _lastMY = 0;
+  document.addEventListener("mousemove", (e) => { _lastMX = e.clientX; _lastMY = e.clientY; }, { passive: true });
+  window.addEventListener("scroll", () => { if (_elementMode && !_elDrag) onElInspect({ clientX: _lastMX, clientY: _lastMY }); }, true);
+
   // #4: 点击页面高亮 → 命中检测(高亮 pointer-events:none 不挡文字/编辑,故用坐标命中)→ 通知侧边栏聚焦评论
   document.addEventListener("click", (e) => {
     if (_editing) return;                 // 编辑态放行(让编辑正常)
@@ -891,6 +1085,7 @@
   function buildExportHtml() {
     const clone = document.documentElement.cloneNode(true);
     clone.querySelectorAll("#hg-toolbar, .hg-hl, .hg-inspect, .hg-select, .hg-tip, .hg-drop").forEach((e) => e.remove());
+    clone.querySelectorAll('style[data-hg-injected="ui"]').forEach((e) => e.remove()); // 剥离扩展注入样式(用户行内样式/emoji 文本保留)
     return "<!doctype html>\n" + clone.outerHTML;
   }
   // #3b/v0.6: _lastRange=非折叠选区(取色);_lastCursor=任意位(emoji 插入)。分开存,避免光标覆盖取色选区。
@@ -954,8 +1149,8 @@
   // 放在 isLocal 块之外 —— 远程页若也开了 contentEditable 同样生效。与上面的
   // undo/version input 监听互不冲突(两者都可触发)。
   document.body.addEventListener("input", () => {
-    if (reanchorTimer) clearTimeout(reanchorTimer);
-    reanchorTimer = setTimeout(() => { loadAnnotations(); }, 300);
+    updatePositions();    // 即时重定位未受影响的高亮(跟随 reflow,不重 anchor → 更自然)
+    scheduleReanchor();   // 300ms 后全量重锚定(修正被编辑区域)
   });
 
   // === 本地模式:undo 的 body 快照与 artifact 持久化是两条不同路径 ===

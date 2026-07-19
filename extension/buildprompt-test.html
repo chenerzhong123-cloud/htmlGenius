@@ -33,10 +33,10 @@ buildprompt test
     if (p.indexOf("二级回复") < p.indexOf("顶层")) throw new Error("DFS 顺序 顶层->二级");
     // 顶层两条都在
     if ((p.match(/原文/g) || []).length < 2) throw new Error("顶层条数");
-    // 批注编号 ==批注1 == ==批注2 ==
-    if (!/==批注1==/.test(p) || !/==批注2==/.test(p)) throw new Error("批注编号");
+    // 评论编号 ==评论1 == ==评论2 ==
+    if (!/==评论1==/.test(p) || !/==评论2==/.test(p)) throw new Error("评论编号");
     // 头部声明顶层条数与回复
-    if (!/2 条顶层批注/.test(p) || !/多级回复/.test(p)) throw new Error("头部声明");
+    if (!/2 条顶层评论/.test(p) || !/多级回复/.test(p)) throw new Error("头部声明");
 
     // ---- 用例 2:作者标签 ----
     const withAuthor = [
@@ -66,12 +66,12 @@ buildprompt test
 
     // ---- 用例 5:空列表 ----
     const pe = BuildPrompt.fromAnnotations([]);
-    if (!/0 条顶层批注/.test(pe)) throw new Error("空列表头部");
-    if (pe.indexOf("==批注") !== -1) throw new Error("空列表不应有批注块");
+    if (!/0 条顶层评论/.test(pe)) throw new Error("空列表头部");
+    if (pe.indexOf("==评论") !== -1) throw new Error("空列表不应有评论块");
 
     // ---- 用例 6:null 入参容错 ----
     const pn = BuildPrompt.fromAnnotations(null);
-    if (!/0 条顶层批注/.test(pn)) throw new Error("null 入参容错");
+    if (!/0 条顶层评论/.test(pn)) throw new Error("null 入参容错");
 
     // ---- 用例 7:自环(防御,后端不应产生,但不应死循环) ----
     const cyclic = [

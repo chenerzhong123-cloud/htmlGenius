@@ -1,7 +1,7 @@
 {
-  "name": "htmlgenius-codex-bridge",
-  "version": "0.7.0",
-  "description": "HTML Genius Local Bridge — Chrome Native Messaging host that drives the user's local Codex App Server. Writes candidates only, never overwrites the source file.",
+  "name": "htmlgenius-local-bridge",
+  "version": "0.7.1",
+  "description": "HTML Genius Local Bridge — Chrome Native Messaging host that hands a Change Contract to the user's locally signed-in Claude Code CLI (acknowledgement-only handoff; never writes files). Host name is provider-neutral; the Codex adapter reuses this host later.",
   "type": "module",
   "engines": { "node": ">=20" },
   "private": true,

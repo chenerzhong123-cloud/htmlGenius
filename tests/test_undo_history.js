@@ -76,13 +76,37 @@ function makeHist(max) {
   t.h.redo(); eq(t.get(), "text+color", "T5 redo → 颜色这一步能重做回来 ✓");
 }
 
-// T6 【回归】改了状态但没 push → 不可单独撤销/重做(证明 push 是必需的,即原 bug 根因)
+// T6 【v0.8 修复】改了状态但没 push(防抖窗口内)→ undo 先把它入历史再回退 → redo 能恢复
+//   (旧行为:未提交变更被 undo 直接丢弃,redo 回不来 —— 即用户报告的"撤销后无法重做")
 {
   const t = makeHist(); t.h.init();
   t.set("a"); t.h.push();
-  t.set("a+unpushed");                          // 改了状态但【故意不 push】(模拟 bug)
-  t.h.undo(); eq(t.get(), "a", "T6 未 push 的改动被 undo 直接丢弃");
-  t.h.redo(); eq(t.get(), "a", "T6 未 push 的改动 redo 不回来(印证 push 必需)");
+  t.set("a+unpushed");                          // 改了状态但【故意不 push】(模拟防抖窗口内点撤销)
+  t.h.undo(); eq(t.get(), "a", "T6 undo 仍回到变更前(体验不变)");
+  t.h.redo(); eq(t.get(), "a+unpushed", "T6 redo 能恢复未提交变更(undo 时已入历史)");
+}
+
+// T8 防抖窗口内 undo → redo 恢复 → 再 undo → 新编辑截断 redo 分支
+{
+  const t = makeHist(); t.h.init();             // ""
+  t.set("x");                                    // 未提交
+  t.h.undo(); eq(t.get(), "", "T8 窗口内 undo 回基线");
+  t.h.redo(); eq(t.get(), "x", "T8 redo 恢复 x");
+  t.h.undo(); eq(t.get(), "", "T8 再 undo 回基线");
+  t.set("y"); t.h.push();                        // 新编辑 → ["",y],x 的 redo 分支截断
+  t.h.redo(); eq(t.get(), "y", "T8 截断后 redo 停在 y");
+  eq(t.h._snapshot().len, 2, "T8 历史=[基线,y]");
+}
+
+// T9 未提交变更在栈顶时 undo/redo 对称(含 MAX 封顶路径)
+{
+  const t = makeHist(3); t.h.init();            // [""],max=3
+  t.set("a"); t.h.push();
+  t.set("b"); t.h.push();                       // ["",a,b]
+  t.set("b+typing");                             // 未提交
+  t.h.undo(); eq(t.get(), "b", "T9 undo 回 b(未提交先入历史)");
+  t.h.redo(); eq(t.get(), "b+typing", "T9 redo 恢复未提交步");
+  eq(t.h._snapshot().len <= 3, true, "T9 入历史后不超 MAX");
 }
 
 // T7 reset 回基线并截断

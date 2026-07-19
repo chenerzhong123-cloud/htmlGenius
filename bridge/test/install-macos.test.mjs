@@ -43,13 +43,13 @@ test("buildLauncherSource: 路径含单引号 -> UNSAFE_PATH", () => {
   assert.throws(() => buildLauncherSource({ nodePath: "/usr/local/bin/node", hostPath: "/ab's/host.mjs" }), (e) => e.code === "UNSAFE_PATH");
 });
 
-test("install: 在临时 hosts-dir 写出单 origin manifest + 0700 launcher;codex 用 node 本体作可执行占位", async () => {
+test("install: 在临时 hosts-dir 写出单 origin manifest + 0700 launcher;claude 用 node 本体作可执行占位", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hg-bridge-install-"));
   try {
     const r = await install({
       extensionId: VALID_ID,
       hostsDir: tmp,
-      codexPath: process.execPath, // 任意存在且可执行的文件,满足 codex 就绪校验
+      claudePath: process.execPath, // 任意存在且可执行的文件,满足 claude 就绪校验
       bridgeDir: path.resolve(new URL(".", import.meta.url).pathname, "..") // 真实 bridge 目录(含 host.mjs)
     });
     assert.equal(r.allowed_origins.length, 1);
@@ -75,19 +75,19 @@ test("install: 在临时 hosts-dir 写出单 origin manifest + 0700 launcher;cod
 test("install: 非法 extension id -> 失败且无残留文件", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hg-bridge-bad-"));
   try {
-    await assert.rejects(() => install({ extensionId: "not-valid-id", hostsDir: tmp, codexPath: process.execPath,
+    await assert.rejects(() => install({ extensionId: "not-valid-id", hostsDir: tmp, claudePath: process.execPath,
       bridgeDir: path.resolve(new URL(".", import.meta.url).pathname, "..") }),
       (e) => e.code === "INVALID_EXTENSION_ID");
     assert.deepEqual(fs.readdirSync(tmp), [], "失败后无残留");
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
 });
 
-test("install: codex 不存在 -> CODEX_NOT_IN_PATH 且无残留", async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hg-bridge-nocodex-"));
+test("install: claude 不存在 -> CLAUDE_NOT_IN_PATH 且无残留", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hg-bridge-noclaude-"));
   try {
-    await assert.rejects(() => install({ extensionId: VALID_ID, hostsDir: tmp, codexPath: "/definitely/not/here/codex",
+    await assert.rejects(() => install({ extensionId: VALID_ID, hostsDir: tmp, claudePath: "/definitely/not/here/claude",
       bridgeDir: path.resolve(new URL(".", import.meta.url).pathname, "..") }),
-      (e) => e.code === "CODEX_NOT_IN_PATH");
+      (e) => e.code === "CLAUDE_NOT_IN_PATH");
     assert.deepEqual(fs.readdirSync(tmp), []);
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
 });

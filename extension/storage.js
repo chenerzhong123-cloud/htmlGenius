@@ -1,7 +1,7 @@
 // storage.js — IndexedDB 封装(annotations + legacy versions + artifact versions + bridge sessions/runs)
 // 用 globalThis(而非 window)以兼容 background service worker(无 window);在 content-script/sidepanel globalThis===window,行为不变。
 const DB_NAME = "htmlgenius";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -25,14 +25,24 @@ function openDB() {
         a.createIndex("logical_document_id", "logical_document_id", { unique: false });
         a.createIndex("artifact_hash", "artifact_hash", { unique: false });
       }
-      // v0.7 bridge:每个逻辑文档至多一条 Codex 会话所有权;每次 run 一条记录。保留既有 store 与数据。
+      // v0.7.1 (DB v4): bridge schema 升级为 provider-neutral(spec §5)——
+      // bridge_sessions 主键改为 "<logical_document_id>:<provider>" 复合 key(+logical_document_id/provider 索引);
+      // bridge_runs 增补 status 索引。v3(Codex 时代)的 session/run 记录直接作废:
+      // 删 store 重建(本地、临时、仅传输证据,无用户内容损失)。
+      if (e.oldVersion < 4) {
+        if (db.objectStoreNames.contains("bridge_sessions")) db.deleteObjectStore("bridge_sessions");
+        if (db.objectStoreNames.contains("bridge_runs")) db.deleteObjectStore("bridge_runs");
+      }
       if (!db.objectStoreNames.contains("bridge_sessions")) {
-        db.createObjectStore("bridge_sessions", { keyPath: "logical_document_id" });
+        const bs = db.createObjectStore("bridge_sessions", { keyPath: "key" });
+        bs.createIndex("logical_document_id", "logical_document_id", { unique: false });
+        bs.createIndex("provider", "provider", { unique: false });
       }
       if (!db.objectStoreNames.contains("bridge_runs")) {
         const br = db.createObjectStore("bridge_runs", { keyPath: "run_id" });
         br.createIndex("logical_document_id", "logical_document_id", { unique: false });
         br.createIndex("tab_id", "tab_id", { unique: false });
+        br.createIndex("status", "status", { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -210,12 +220,16 @@ const LocalStore = {
     await dbPut("artifact_versions", latest);
     return latest;
   },
-  // === v0.7 bridge session / run(本地,扩展 IndexedDB;不进 RemoteStore)===
-  // 仅按 logical_document_id 读写会话;不提供按 thread_id 浏览/导入(§5.1)。
-  async getBridgeSession(logicalDocumentId) { return dbGet("bridge_sessions", logicalDocumentId); },
+  // === v0.7.1 bridge session / run(本地,扩展 IndexedDB;不进 RemoteStore)===
+  // 仅按 logical_document_id + provider 读写会话;不提供按 session_id 浏览/导入(§5.1)。
+  bridgeSessionKey(logicalDocumentId, provider) { return logicalDocumentId + ":" + provider; },
+  async getBridgeSession(logicalDocumentId, provider) {
+    return dbGet("bridge_sessions", this.bridgeSessionKey(logicalDocumentId, provider));
+  },
   async saveBridgeSession(record) {
     const now = new Date().toISOString();
     const rec = Object.assign({}, record, { updated_at: record.updated_at || now, created_at: record.created_at || now });
+    if (!rec.key) rec.key = this.bridgeSessionKey(rec.logical_document_id, rec.provider); // 复合主键自动组装
     return dbPut("bridge_sessions", rec);
   },
   async getBridgeRun(runId) { return dbGet("bridge_runs", runId); },

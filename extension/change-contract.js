@@ -27,19 +27,19 @@
       briefRequired: false,
       promptName: "精准修补",
       promptDesc: "只允许修改精确定位的目标",
-      scopeText: "仅被批注精确定位的内容"
+      scopeText: "仅被评论精确定位的内容"
     },
     {
       id: "local_optimize",
       writeScope: "annotated_local_areas",
       locked: true,
       onAmbiguous: "ask_or_stop",
-      verification: "仅改批注所在局部；报告每个局部的变更；不改其他页面区域。",
-      forced: "只能在每条批注定位到的局部内容中修改；不要扩展到页面其他区块。",
+      verification: "仅改评论所在局部；报告每个局部的变更；不改其他页面区域。",
+      forced: "只能在每条评论定位到的局部内容中修改；不要扩展到页面其他区块。",
       briefRequired: false,
       promptName: "局部优化",
-      promptDesc: "只优化批注所在的局部内容",
-      scopeText: "每条批注所在的局部内容"
+      promptDesc: "只优化评论所在的局部内容",
+      scopeText: "每条评论所在的局部内容"
     },
     {
       id: "restructure",
@@ -253,9 +253,9 @@
     lines.push("- 受保护内容:" + protectionText(meta, task.preserve || []));
     lines.push("- 目标不明确时:停止修改并说明需要确认的位置。");
     lines.push("");
-    lines.push("## 批注与讨论");
+    lines.push("## 评论与讨论");
     (task.annotations || []).forEach(function (node, i) {
-      lines.push("### 批注 " + (i + 1));
+      lines.push("### 评论 " + (i + 1));
       lines.push("- 定位:" + locText(node));
       lines.push("- 评论:" + (node.author ? "[" + node.author + "] " : "") + (node.comment || "(无)"));
       var reps = [];

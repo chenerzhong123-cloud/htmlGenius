@@ -19,7 +19,7 @@
     <svg class="hg-tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span class="tab-label" data-i18n="tab.edit">编辑</span>
   </button>
   <button id="tab-comment">
-    <svg class="hg-tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="tab-label" data-i18n="tab.comment">批注</span>
+    <svg class="hg-tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="tab-label" data-i18n="tab.comment">评论</span>
   </button>
 </div>
 
@@ -27,6 +27,8 @@
 <div id="view-edit" class="view show">
   <div id="mode-indicator" data-i18n="mode.connecting">正在连接当前页面…</div>
   <button id="edit-btn" hidden>切换编辑模式</button>
+  <!-- v0.8: 编辑工具区。交互展示(弹层样式等)是侧边栏自己的;但所有改动都发消息给
+       content-script 的 execEdit 唯一入口执行,与页面浮动工具栏的效果完全一致。 -->
   <div id="edit-tools" class="edit-tools" hidden>
     <div class="edit-actions">
       <button id="act-undo" class="act" data-i18n-title="tool.undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg></button>
@@ -34,9 +36,44 @@
       <button id="act-reset" class="act" data-i18n-title="tool.reset"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
       <button id="act-save" class="act" data-i18n-title="tool.saveAs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
     </div>
+    <!-- v0.8: 评论 + 文字格式行(工具栏有的,侧边栏都有) -->
+    <div class="edit-format">
+      <button id="act-comment" type="button" class="fmt fmt-comment" data-i18n-title="tool.comment"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
+      <button id="act-bold" type="button" class="fmt" data-i18n-title="tool.bold"><b>B</b></button>
+      <button id="act-italic" type="button" class="fmt" data-i18n-title="tool.italic"><i>I</i></button>
+      <button id="act-underline" type="button" class="fmt" data-i18n-title="tool.underline"><u>U</u></button>
+      <button id="act-strike" type="button" class="fmt" data-i18n-title="tool.strikethrough"><s>S</s></button>
+      <button id="act-clear" type="button" class="fmt fmt-clear" data-i18n-title="tool.clear">✕</button>
+    </div>
     <div class="edit-colors">
-      <label class="color-pick"><input type="color" id="color-text" value="#7c8cff"><span data-i18n="color.text">文字色</span></label>
-      <label class="color-pick"><input type="color" id="color-hl" value="#ffe14d"><span data-i18n="color.highlight">高亮色</span></label>
+      <!-- v0.8: 图标与页面工具栏完全一致(A 带红色底条 / 荧光笔带黄色笔头),两边一眼同款 -->
+      <div class="sp-color-wrap">
+        <button id="sp-color-text" type="button" class="sp-color-btn" data-i18n-title="color.text" aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M2 20h20v4H2zm3.49-3h2.42l1.27-3.58h5.65L16.09 17h2.42L13.25 3h-2.5zm4.42-5.61l2.03-5.79h.12l2.03 5.79z"/><rect x="2" y="20" width="20" height="4" fill="#ef4444"/></svg><span data-i18n="color.text">文字色</span>
+        </button>
+        <div class="sp-color-pop" id="sp-color-text-pop" hidden></div>
+      </div>
+      <div class="sp-color-wrap">
+        <button id="sp-color-hl" type="button" class="sp-color-btn" data-i18n-title="color.highlight" aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true"><path d="m9 11-6 6v3h9l3-3" fill="#fff59d" stroke="#fff59d" stroke-width="2" stroke-linejoin="round"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="color.highlight">高亮色</span>
+        </button>
+        <div class="sp-color-pop" id="sp-color-hl-pop" hidden></div>
+      </div>
+    </div>
+    <!-- v0.8: 字号 / 标题 / 对齐(点开后是列表弹层;最终都走 content-script 同一个 execEdit) -->
+    <div class="edit-blocks">
+      <div class="sp-pop-wrap">
+        <button id="sp-size" type="button" class="sp-block-btn" data-i18n-title="tool.size" aria-haspopup="true" aria-expanded="false"><span data-i18n="tool.sizeLabel">字号</span></button>
+        <div class="sp-list-pop" id="sp-size-pop" hidden></div>
+      </div>
+      <div class="sp-pop-wrap">
+        <button id="sp-heading" type="button" class="sp-block-btn" data-i18n-title="tool.heading" aria-haspopup="true" aria-expanded="false">H</button>
+        <div class="sp-list-pop" id="sp-heading-pop" hidden></div>
+      </div>
+      <div class="sp-pop-wrap">
+        <button id="sp-align" type="button" class="sp-block-btn" data-i18n-title="tool.align" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="21" y1="6" x2="3" y2="6"/><line x1="15" y1="12" x2="3" y2="12"/><line x1="17" y1="18" x2="3" y2="18"/></svg></button>
+        <div class="sp-list-pop" id="sp-align-pop" hidden></div>
+      </div>
     </div>
     <button id="act-emoji" class="emoji-toggle" type="button"><span>😊</span> <span data-i18n="emoji.title">插入表情</span></button>
     <div id="emoji-panel" class="emoji-panel" hidden></div>
@@ -45,7 +82,7 @@
     <div class="ep-hint">高级模式已开启</div>
     <div class="ep-sub">在页面上悬停看元素框、点选元素(M2);删除 / 复制 / 拖拽重排(M3-M4)</div>
   </div>
-  <div class="edit-tips" data-i18n-html="tips.html">选中文字可<b>加批注</b>;点「<b>开始编辑</b>」后,选中文字可改<b>样式 / 颜色 / 字号 / 对齐</b>(Ctrl+Z 撤销)</div>
+  <div class="edit-tips" data-i18n-html="tips.html">选中文字 → 点选区上方「<b>评论</b>」记录意见;点「<b>开始编辑</b>」后,选中文字可改<b>样式 / 颜色 / 字号 / 对齐</b>(Ctrl+Z 撤销)</div>
   <div id="artifact-status" class="artifact-status" hidden></div>
   <div id="artifact-reload-result" class="artifact-reload-result" hidden></div>
   <button id="artifact-reload-btn" class="artifact-reload-btn" data-i18n="artifact.reload" hidden>重新读取文件</button>
@@ -53,15 +90,19 @@
     <div data-i18n="artifact.reloadWarning">刷新将丢弃仅存在于插件内、尚未导出的编辑快照。</div>
     <div class="artifact-reload-actions"><button id="artifact-reload-cancel" data-i18n="artifact.cancel">取消</button><button id="artifact-reload-confirm-btn" data-i18n="artifact.confirm">继续刷新</button></div>
   </div>
-  <div class="reload-hint" data-i18n="reloadHint">若批注或编辑长时间无响应,刷新当前页面即可恢复</div>
+  <div class="reload-hint" data-i18n="reloadHint">若评论或编辑长时间无响应,刷新当前页面即可恢复</div>
   <button id="adv-mode-btn" class="adv-mode-btn" data-i18n="adv.enter" hidden>切换高级模式</button>
 </div>
 
-<!-- 批注视图(次级) -->
+<!-- 评论视图(次级) -->
 <div id="view-comment" class="view">
   <div id="draft-host"></div>
+  <!-- #7: 评论区独立滚动;底部操作区(.comment-actions)固定在第一屏,不被评论数量挤出,
+       之后可在该容器内继续加按钮。 -->
   <div id="annotations"></div>
-  <button id="export-btn" data-i18n="export.taskBtn">生成修改任务</button>
+  <div class="comment-actions">
+    <button id="export-btn" data-i18n="export.taskBtn">生成修改任务</button>
+  </div>
 </div>
 
 <!-- 语言切换浮层(点 🌐 展开;选项始终以各自母语显示) -->
@@ -74,7 +115,7 @@
 <!-- 账号浮层(点头像展开) -->
 <div id="account-sheet" class="sheet">
   <div class="sheet-title" data-i18n="sheet.title">登录后开启团队协作</div>
-  <div class="sheet-sub" data-i18n="sheet.sub">实时共享批注 · 作者身份绑定账号 · 仅本人可删自己的批注</div>
+  <div class="sheet-sub" data-i18n="sheet.sub">实时共享评论 · 作者身份绑定账号 · 仅本人可删自己的评论</div>
   <div id="login-area" class="collab-row">
     <button id="lark-login-btn" data-i18n="login.lark">飞书登录</button>
     <button id="google-login-btn" data-i18n="login.google">Google 登录</button>
@@ -101,8 +142,8 @@
 
   <div class="contract-section-label" data-i18n="contract.modeTitle">修改模式</div>
   <div class="contract-modes" role="radiogroup" aria-labelledby="contract-title">
-    <label class="mode-card"><input type="radio" name="contract-mode" value="precise_patch" checked><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.precise_patch.name">精准修补</div><div class="mode-desc" data-i18n="contract.mode.precise_patch.desc">只改被批注精确定位到的内容；其他内容完全不动。</div></div></label>
-    <label class="mode-card"><input type="radio" name="contract-mode" value="local_optimize"><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.local_optimize.name">局部优化</div><div class="mode-desc" data-i18n="contract.mode.local_optimize.desc">只优化批注所在的局部内容；页面其他部分不动。</div></div></label>
+    <label class="mode-card"><input type="radio" name="contract-mode" value="precise_patch" checked><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.precise_patch.name">精准修补</div><div class="mode-desc" data-i18n="contract.mode.precise_patch.desc">只改被评论精确定位到的内容；其他内容完全不动。</div></div></label>
+    <label class="mode-card"><input type="radio" name="contract-mode" value="local_optimize"><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.local_optimize.name">局部优化</div><div class="mode-desc" data-i18n="contract.mode.local_optimize.desc">只优化评论所在的局部内容；页面其他部分不动。</div></div></label>
     <label class="mode-card"><input type="radio" name="contract-mode" value="restructure"><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.restructure.name">结构重组</div><div class="mode-desc" data-i18n="contract.mode.restructure.desc">重新规划章节、顺序或局部结构；先产出计划，不直接改文件。</div></div></label>
     <label class="mode-card"><input type="radio" name="contract-mode" value="regenerate"><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.regenerate.name">重新生成</div><div class="mode-desc" data-i18n="contract.mode.regenerate.desc">基于新的完整说明重写整份页面/报告；允许改全文。</div></div></label>
   </div>
@@ -128,13 +169,13 @@
     <button id="contract-copy-json" class="contract-secondary" data-i18n="contract.copyJson">复制 JSON</button>
   </div>
 
-  <!-- v0.7 Codex Local Bridge:仅本地 managed artifact + 非 restructure 时显示 -->
+  <!-- v0.7.1 Claude Code handoff:仅本地 managed artifact + 非 restructure 时显示 -->
   <div id="contract-bridge-wrap" class="contract-bridge-wrap" hidden>
-    <div class="contract-section-label" data-i18n="bridge.sessionTitle">Codex 执行</div>
+    <div class="contract-section-label" data-i18n="bridge.sessionTitle">发送给 Claude Code</div>
     <div class="contract-bridge-hint" data-i18n="bridge.hint"></div>
     <div class="contract-session">
-      <label class="session-opt"><input type="radio" name="contract-session" value="new" checked><span data-i18n="bridge.sessionNew">创建新的 Codex task</span></label>
-      <label class="session-opt" id="contract-session-continue-wrap" hidden><input type="radio" name="contract-session" value="continue"><span data-i18n="bridge.sessionContinue">继续上次创建的 Codex task</span></label>
+      <label class="session-opt"><input type="radio" name="contract-session" value="new" checked><span data-i18n="bridge.sessionNew">创建新的 Claude task</span></label>
+      <label class="session-opt" id="contract-session-continue-wrap" hidden><input type="radio" name="contract-session" value="continue"><span data-i18n="bridge.sessionContinue">继续 HTML Genius 上次创建的 Claude task</span></label>
     </div>
     <button id="contract-bridge" class="contract-bridge" type="button"></button>
   </div>

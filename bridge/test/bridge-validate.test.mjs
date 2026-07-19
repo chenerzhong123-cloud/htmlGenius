@@ -1,70 +1,54 @@
-// bridge/test/bridge-validate.test.mjs — background completion double-check 纯函数测试(§12.6)。
-// 任一字段不匹配 -> COMPLETION_MISMATCH,绝不发 artifact-update-ready / 不导航。
+// bridge/test/bridge-validate.test.mjs — background completion 双重校验纯函数测试(v0.7.1)。
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { createRequire } from "node:module";
+
 const require = createRequire(import.meta.url);
-const { validateCompletion, parentDirOf } = require("../../extension/bridge-validate.js");
+const { computeTaskSha256, validateHandoffCompletion, workspacePathForFileUrl } = require("../../extension/bridge-validate.js");
 
-const BASE = "sha256:" + "0".repeat(64);
-const RESULT = "sha256:" + "1".repeat(64);
-const run = {
-  run_id: "hgr_1", logical_document_id: "hgd_1",
-  source_artifact_uri: "file:///abs/report.html", base_artifact_hash: BASE
-};
-function goodCompletion(overrides = {}) {
-  return Object.assign({
-    run_id: "hgr_1", logical_document_id: "hgd_1", thread_id: "thr_1", turn_id: "turn_1",
-    source: "bridge", result_kind: "new_artifact",
-    base_artifact_hash: BASE, result_artifact_hash: RESULT,
-    result_artifact_uri: "file:///abs/.htmlgenius-candidates/hgr_1/result.html"
-  }, overrides);
-}
+const UUID = "11111111-2222-3333-4444-555555555555";
+function sha(json2) { return "sha256:" + crypto.createHash("sha256").update(Buffer.from(json2, "utf8")).digest("hex"); }
 
-test("parentDirOf: file URL 父目录(file: origin=null 特例)", () => {
-  assert.equal(parentDirOf("file:///abs/report.html"), "file:///abs");
-  assert.equal(parentDirOf("file:///Users/x/sub/r.html"), "file:///Users/x/sub");
+test("computeTaskSha256:与 host 的 canonical 算法一致(sha256 of JSON.stringify(task,null,2))", async () => {
+  const task = { schema_version: 1, kind: "htmlgenius_change_contract", mode: "precise_patch", brief: "x" };
+  const expected = sha(JSON.stringify(task, null, 2));
+  assert.equal(await computeTaskSha256(task), expected);
+  // 中文/emoji 的 UTF-8 字节一致
+  const t2 = { brief: "中文 emoji 🚀" };
+  assert.equal(await computeTaskSha256(t2), sha(JSON.stringify(t2, null, 2)));
 });
 
-test("validateCompletion: 全匹配 -> ok", () => {
-  const r = validateCompletion(run, goodCompletion());
-  assert.equal(r.ok, true);
-  assert.equal(r.result_artifact_uri, "file:///abs/.htmlgenius-candidates/hgr_1/result.html");
+test("validateHandoffCompletion:字段全匹配 → ok", () => {
+  const run = { run_id: "hgr_1", task_sha256: "sha256:" + "a".repeat(64) };
+  const completion = { run_id: "hgr_1", session_id: UUID, task_sha256: run.task_sha256 };
+  const v = validateHandoffCompletion(run, completion, run.task_sha256);
+  assert.deepEqual(v, { ok: true, session_id: UUID, task_sha256: run.task_sha256 });
 });
 
-test("validateCompletion: 伪造 run_id -> COMPLETION_MISMATCH(run_id)", () => {
-  assert.equal(validateCompletion(run, goodCompletion({ run_id: "hgr_evil" })).code, "COMPLETION_MISMATCH");
+test("validateHandoffCompletion:任一字段不匹配即拒(绝不放行)", () => {
+  const taskSha = "sha256:" + "a".repeat(64);
+  const run = { run_id: "hgr_1", task_sha256: taskSha };
+  // run_id 不符
+  assert.equal(validateHandoffCompletion(run, { run_id: "hgr_2", session_id: UUID, task_sha256: taskSha }).code, "COMPLETION_MISMATCH");
+  // task_sha256 与 run 记录不符
+  assert.equal(validateHandoffCompletion(run, { run_id: "hgr_1", session_id: UUID, task_sha256: "sha256:" + "b".repeat(64) }).code, "COMPLETION_MISMATCH");
+  // task_sha256 与 background 自算值不符(即便与 run 记录一致)
+  assert.equal(validateHandoffCompletion(run, { run_id: "hgr_1", session_id: UUID, task_sha256: taskSha }, "sha256:" + "c".repeat(64)).code, "COMPLETION_MISMATCH");
+  // task_sha256 格式非法
+  assert.equal(validateHandoffCompletion(run, { run_id: "hgr_1", session_id: UUID, task_sha256: "md5:x" }).code, "COMPLETION_MISMATCH");
+  // session_id 不是 UUID
+  assert.equal(validateHandoffCompletion(run, { run_id: "hgr_1", session_id: "latest", task_sha256: taskSha }).code, "COMPLETION_MISMATCH");
+  assert.equal(validateHandoffCompletion(run, { run_id: "hgr_1", session_id: "", task_sha256: taskSha }).code, "COMPLETION_MISMATCH");
+  // 缺 run / completion
+  assert.equal(validateHandoffCompletion(null, {}).code, "RUN_NOT_FOUND");
 });
 
-test("validateCompletion: 伪造 base hash -> COMPLETION_MISMATCH", () => {
-  assert.equal(validateCompletion(run, goodCompletion({ base_artifact_hash: "sha256:" + "9".repeat(64) })).code, "COMPLETION_MISMATCH");
-});
-
-test("validateCompletion: 伪造 logical_document_id -> COMPLETION_MISMATCH", () => {
-  assert.equal(validateCompletion(run, goodCompletion({ logical_document_id: "hgd_evil" })).code, "COMPLETION_MISMATCH");
-});
-
-test("validateCompletion: source != bridge -> COMPLETION_MISMATCH", () => {
-  assert.equal(validateCompletion(run, goodCompletion({ source: "agent" })).code, "COMPLETION_MISMATCH");
-});
-
-test("validateCompletion: result_kind != new_artifact -> COMPLETION_MISMATCH", () => {
-  assert.equal(validateCompletion(run, goodCompletion({ result_kind: "overwrite" })).code, "COMPLETION_MISMATCH");
-});
-
-test("validateCompletion: result_artifact_uri 逃逸 candidate 目录 -> COMPLETION_MISMATCH", () => {
-  // 试图指向源文件本身(覆盖原文件)/ 任意路径
-  assert.equal(validateCompletion(run, goodCompletion({ result_artifact_uri: "file:///abs/report.html" })).code, "COMPLETION_MISMATCH");
-  assert.equal(validateCompletion(run, goodCompletion({ result_artifact_uri: "file:///etc/passwd" })).code, "COMPLETION_MISMATCH");
-  assert.equal(validateCompletion(run, goodCompletion({ result_artifact_uri: "https://evil/x.html" })).code, "COMPLETION_MISMATCH");
-});
-
-test("validateCompletion: 非 file: source(run.source_artifact_uri)仍安全(空 parent)", () => {
-  const httpRun = Object.assign({}, run, { source_artifact_uri: "https://site/r.html" });
-  assert.equal(validateCompletion(httpRun, goodCompletion()).code, "COMPLETION_MISMATCH");
-});
-
-test("validateCompletion: 不同 source 父目录的 candidate 也不认(防跨目录)", () => {
-  // candidate 在别的目录树下
-  assert.equal(validateCompletion(run, goodCompletion({ result_artifact_uri: "file:///other/.htmlgenius-candidates/hgr_1/result.html" })).code, "COMPLETION_MISMATCH");
+test("workspacePathForFileUrl:<source-parent>/.htmlgenius-bridge/claude/<id>;非 file: → null", () => {
+  assert.equal(workspacePathForFileUrl("file:///Users/x/docs/report.html", "hgd_1"),
+    "/Users/x/docs/.htmlgenius-bridge/claude/hgd_1");
+  assert.equal(workspacePathForFileUrl("file:///a/spa%20ce/r.html", "hgd_2"),
+    "/a/spa ce/.htmlgenius-bridge/claude/hgd_2"); // %20 解码为空格
+  assert.equal(workspacePathForFileUrl("https://example.com/r.html", "hgd_3"), null);
+  assert.equal(workspacePathForFileUrl("not a url", "hgd_4"), null);
 });

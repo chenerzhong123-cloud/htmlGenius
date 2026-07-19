@@ -35,7 +35,13 @@
       undo() {
         if (idx < 0) return false;
         const cur = getState();
-        if (cur !== history[idx]) { applyState(history[idx]); return true; } // 撤回未提交的变更
+        if (cur !== history[idx]) {
+          // 防抖窗口内未提交的变更:先入历史(否则被丢弃、redo 再也回不来),再照常回退一步。
+          // 体验与旧版一致(第一次 undo 回到变更前的样子),但 redo 能把这步恢复回来。
+          history = history.slice(0, idx + 1);
+          history.push(cur); idx = history.length - 1;
+          if (history.length > max) { history.shift(); idx--; }
+        }
         if (idx > 0) { idx--; applyState(history[idx]); return true; }
         return false;
       },
