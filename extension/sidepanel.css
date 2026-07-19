@@ -505,11 +505,58 @@ button {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 
-/* === v0.6.1 修改契约 Composer(覆盖式 sheet;z-index 高于 account/lang 与 toast) === */
+/* === v0.6.1 修改契约 Composer → v0.7.2 选择流(覆盖式 sheet;data-step=select|compose)=== */
 #contract-sheet {
   top: 0; right: 0; left: 0; bottom: 0; width: auto; max-width: none;
-  border-radius: 0; padding: 14px 14px 18px; z-index: 200; overflow-y: auto;
+  border-radius: 0; padding: 0; z-index: 200;
+  display: none; flex-direction: column; overflow: hidden; /* 滚动交给 .contract-scroll;绝不出现横向滚动 */
 }
+#contract-sheet.show { display: flex; }
+.contract-step { display: none; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+#contract-sheet[data-step="select"] #contract-step-select { display: flex; }
+#contract-sheet[data-step="compose"] #contract-step-compose { display: flex; }
+.contract-scroll { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 14px 10px; }
+/* 固定底栏(还原 mockup:窄面板不被挤出,仅列表纵向滚动) */
+.contract-bottom { flex: none; min-width: 0; padding: 12px 14px; border-top: 1px solid var(--line-subtle); background: var(--bg-canvas); display: flex; flex-direction: column; gap: 8px; }
+/* 返回链接(mockup .back) */
+.contract-back { border: 0; padding: 0; margin-bottom: 12px; cursor: pointer; color: var(--brand-hover); background: transparent; font: 600 12px/1.4 var(--font-sans); text-align: left; height: auto; }
+.contract-back:hover { text-decoration: underline; }
+.contract-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-width: 0; margin-bottom: 12px; }
+.contract-title-text { min-width: 0; }
+.contract-sub { margin: 5px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+/* 计数 chip(mockup .count) */
+.contract-count { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; margin: 0 0 12px; padding: 7px 9px; border: 1px solid var(--line-default); border-radius: var(--r-md); color: var(--text-secondary); background: var(--bg-surface); font-size: 12px; }
+.contract-count strong { color: var(--text-primary); }
+/* >20 条 warning banner(mockup .notice,项目 warning token) */
+.contract-notice { display: flex; gap: 8px; margin-bottom: 12px; padding: 9px 10px; border: 1px solid rgba(245,200,107,.3); border-radius: var(--r-md); color: var(--warning); background: var(--warning-soft); font-size: 11px; line-height: 1.5; }
+.contract-notice[hidden] { display: none; }
+/* B 状态 checkbox 卡片(mockup .comment:18px checkbox 列 + 内容列;整卡可点 = label 原生行为) */
+.contract-select-list { display: grid; gap: 8px; min-width: 0; }
+.select-card { display: grid; grid-template-columns: 18px minmax(0,1fr); gap: 10px; min-width: 0; padding: 11px; cursor: pointer; border: 1px solid var(--line-default); border-radius: var(--r-lg); background: var(--bg-surface); transition: border-color .14s, background .14s; }
+.select-card:hover { border-color: var(--line-default); background: var(--bg-surface-raised); }
+/* 选中态:边框 + 背景 + checkbox 勾选(不只靠颜色) */
+.select-card.selected { border-color: var(--brand); background: var(--brand-soft); }
+.select-card input[type="checkbox"] { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--brand); cursor: pointer; }
+.select-card .select-body { min-width: 0; }
+.select-card .quote { color: var(--text-muted); font-size: 12px; background: var(--brand-soft); border-left: 2px solid var(--brand); border-radius: 0 var(--r-sm) var(--r-sm) 0; padding: 5px 9px; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.select-card .select-text { color: var(--text-secondary); font-size: 13px; line-height: 1.5; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.select-card .select-foot { margin-top: 6px; color: var(--text-faint); font-size: 11px; }
+/* ? tooltip(mockup .tip/.bubble:hover/focus/click 均可展开;right:0 向面板内侧展开,不产生横向滚动) */
+.tip { position: relative; display: inline-grid; place-items: center; width: 16px; height: 16px; flex: 0 0 auto; cursor: help; border: 1px solid var(--line-default); border-radius: 50%; color: var(--text-muted); background: transparent; font-size: 10px; font-weight: 800; line-height: 1; padding: 0; }
+.tip:hover, .tip:focus { color: var(--text-primary); border-color: var(--brand); }
+.tip .bubble { visibility: hidden; position: absolute; z-index: 60; right: 0; top: 21px; width: min(218px, calc(100vw - 52px)); padding: 9px; border: 1px solid var(--line-default); border-radius: var(--r-md); color: var(--text-secondary); background: var(--bg-overlay); font-size: 11px; font-weight: 400; line-height: 1.45; box-shadow: var(--shadow-float); text-align: left; white-space: normal; }
+.tip:hover .bubble, .tip:focus .bubble, .tip.open .bubble { visibility: visible; }
+/* C 状态:来源摘要行(mockup .task-summary)+ 更改链接 */
+.task-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; padding: 9px 10px; border: 1px solid var(--line-default); border-radius: var(--r-md); color: var(--text-muted); background: var(--bg-surface); font-size: 11.5px; min-width: 0; }
+.task-summary b, .task-summary strong { color: var(--text-primary); }
+.contract-link { border: 0; padding: 0; height: auto; cursor: pointer; color: var(--brand-hover); background: transparent; font: 600 11.5px var(--font-sans); flex: 0 0 auto; }
+.contract-link:hover { text-decoration: underline; }
+/* C 状态字段 hint 与 bridge 隐私补充 */
+.field-hint { margin: 3px 0 6px; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+.contract-privacy-note { margin: 8px 2px 0; padding-top: 8px; border-top: 1px solid var(--line-subtle); color: var(--text-muted); font-size: 10.5px; line-height: 1.5; }
+/* A 状态 CTA 行(outline 次级按钮 + ? 说明) */
+.comment-actions .cta-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.comment-actions .cta-row #export-btn { flex: 1; min-width: 0; }
 .contract-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .contract-head .sheet-title { margin: 0; }
 .contract-close { background: transparent; border: 0; color: var(--text-muted); font-size: 16px; width: 28px; height: 28px; padding: 0; border-radius: var(--r-sm); cursor: pointer; line-height: 1; }
@@ -545,7 +592,7 @@ button {
 .contract-fallback { margin-top: 10px; }
 .contract-fallback-label { font-size: 11px; color: var(--text-muted); margin-bottom: 5px; }
 .contract-fallback textarea { width: 100%; font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace); font-size: 10.5px; background: var(--bg-input); border: 1px solid var(--line-subtle); border-radius: var(--r-md); padding: 8px 9px; color: var(--text-secondary); box-sizing: border-box; white-space: pre; overflow: auto; }
-.contract-actions { display: flex; gap: 8px; margin-top: 14px; }
+.contract-actions { display: flex; gap: 8px; margin-top: 0; }
 .contract-primary { flex: 1; background: var(--cta-bg); color: #fff; border: 0; font-weight: 600; height: 38px; border-radius: var(--r-md); cursor: pointer; font-family: var(--font-sans); font-size: 13px; transition: filter .14s; }
 .contract-primary:hover { filter: brightness(1.06); }
 .contract-primary:disabled { opacity: .5; cursor: not-allowed; }

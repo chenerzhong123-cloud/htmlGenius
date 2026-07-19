@@ -1,6 +1,12 @@
-<!DOCTYPE html><html lang="zh-CN"><head>
-<meta charset="UTF-8"><link rel="stylesheet" href="sidepanel.css">
-</head><body>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>comment-task-selection-test</title>
+<link rel="stylesheet" href="sidepanel.css">
+<style> html, body { height: auto; overflow: visible; } body { width: 390px; } #log { font: 11px/1.5 ui-monospace,monospace; white-space: pre-wrap; border-top: 1px solid #ccc; margin-top: 10px; } </style>
+</head>
+<body>
 <div id="header">
   <span class="brand">htmlGenius</span>
   <div class="header-right">
@@ -231,10 +237,174 @@
   </div>
 </div>
 
-<script src="config.js"></script>
-<script src="buildprompt.js"></script>
+<pre id="log"></pre>
+<script>
+// ===== mock chrome API(必须在 sidepanel.js 之前)=====
+window.__captured = { runtime: [], clipboard: [] };
+window.__fixture = [
+  { id: "r1", parent_id: null, _status: "open", quote: "QuoteA", selector: { type: "TextQuoteSelector", exact: "QuoteA", prefix: "", suffix: "" }, body: { comment: "Comment one: tighten the title" }, author: { id: "u1", name: "Deuce" } },
+  { id: "r2", parent_id: "r1", _status: "open", quote: "", selector: {}, body: { comment: "ReplyAgreed" }, author: { id: "u1", name: "Deuce" } },
+  { id: "r3", parent_id: null, _status: "open", quote: "QuoteB", selector: { type: "TextQuoteSelector", exact: "QuoteB" }, body: { comment: "Comment two: compress this paragraph" }, author: { id: "u1", name: "Deuce" } },
+  { id: "r4", parent_id: null, _status: "open", quote: "QuoteC", selector: { type: "TextQuoteSelector", exact: "QuoteC" }, body: { comment: "Comment three" }, author: { id: "u1", name: "Deuce" } },
+  { id: "r5", parent_id: null, _status: "stale", quote: "QuoteD", selector: { type: "TextQuoteSelector", exact: "QuoteD" }, body: { comment: "Expired comment" }, author: { id: "u1", name: "Deuce" } }
+];
+function __mockContentResponse(m) {
+  if (m && m.type === "get-annotations") return { type: "annotations-list", items: window.__fixture, isLocal: true, editing: false, artifact_state: null };
+  if (m && m.type === "get-export") return { type: "export-data", items: window.__fixture, artifact: { title: "T", url: "file:///t/report.html", isLocal: true }, logicalDocumentId: null, loadedArtifactHash: null };
+  return { ok: true };
+}
+window.chrome = {
+  storage: {
+    sync: { get: (k, cb) => { if (cb) cb({}); return Promise.resolve({}); }, set: (o, cb) => { if (cb) cb(); return Promise.resolve(); }, remove: (k, cb) => { if (cb) cb(); return Promise.resolve(); } },
+    local: { get: (k, cb) => { const r = { hg_lang: "zh" }; if (cb) cb(r); return Promise.resolve(r); }, set: (o, cb) => { if (cb) cb(); return Promise.resolve(); } },
+    onChanged: { addListener: () => {} }
+  },
+  runtime: {
+    id: "testextensionidtestextensionid",
+    sendMessage: (m) => { window.__captured.runtime.push(m); return Promise.resolve({ ok: true }); },
+    onMessage: { addListener: () => {} }
+  },
+  tabs: {
+    query: (o, cb) => { const tabs = [{ id: 1, url: "file:///t/report.html" }]; if (cb) cb(tabs); return Promise.resolve(tabs); },
+    sendMessage: (id, m) => Promise.resolve(__mockContentResponse(m)),
+    connect: () => ({ disconnect: () => {}, onDisconnect: { addListener: () => {} } }),
+    onActivated: { addListener: () => {} },
+    onUpdated: { addListener: () => {} },
+    reload: () => {}
+  },
+  identity: { getRedirectURL: () => "https://test.chromiumapp.org/", launchWebAuthFlow: () => Promise.reject(new Error("mock-no-auth")) }
+};
+Object.defineProperty(navigator, "clipboard", { value: { writeText: (t) => { window.__captured.clipboard.push(t); return Promise.resolve(); } }, configurable: true });
+</script>
 <script src="change-contract.js"></script>
 <script src="login.js"></script>
 <script src="i18n.js"></script>
 <script src="sidepanel.js"></script>
+
+<script>
+// ===== spec §6 自动化断言 =====
+(async () => {
+  if (new URLSearchParams(location.search).get("shot")) { document.title = "READY"; return; }
+  const log = (s) => { document.getElementById("log").textContent += s + "\n"; };
+  let failed = 0;
+  const ok = (cond, msg) => { if (cond) log("  ok " + msg); else { failed++; log("  FAIL " + msg); } };
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => Array.from(document.querySelectorAll(s));
+  const click = (el) => el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  await sleep(350); // 等 init(get-annotations → renderCards)
+
+  log("T1 状态 A:评论收件箱为默认落点,无 checkbox/Composer");
+  ok($$("#annotations .card").length >= 4, "评论卡片已渲染(" + $$("#annotations .card").length + " 张)");
+  ok($("#contract-sheet").hidden, "contract sheet 关闭");
+  ok(!$("#export-btn").disabled, "CTA 可用");
+
+  log("T2 进入 B:默认全选 non-stale 顶层;stale/回复不占 checkbox");
+  click($("#export-btn"));
+  await sleep(200);
+  ok(!$("#contract-sheet").hidden && $("#contract-sheet").dataset.step === "select", "sheet 打开且 data-step=select");
+  let cards = $$("#contract-select-list .select-card");
+  ok(cards.length === 3, "3 张 checkbox 卡片(r1/r3/r4;got " + cards.length + ")");
+  ok(cards.every(c => c.querySelector("input").checked), "默认全选");
+  ok(!cards.some(c => c.dataset.id === "r2"), "回复 r2 不占 checkbox");
+  ok(!cards.some(c => c.dataset.id === "r5"), "stale r5 被过滤");
+  ok($("#contract-select-summary").textContent.includes("3"), "计数行含 3");
+  ok($("#contract-many-warning").hidden, "3 ≤ 20 无 warning");
+  ok($("#contract-select-continue").textContent.includes("3"), "继续按钮含 3 条");
+
+  log("T3 取消勾选 r3/r4:计数/按钮/卡片同步");
+  click(cards[1].querySelector("input"));
+  click(cards[2].querySelector("input"));
+  await sleep(50);
+  ok(!cards[1].classList.contains("selected") && !cards[2].classList.contains("selected"), "卡片 selected 移除");
+  ok($("#contract-select-summary").textContent.includes("1"), "已选降为 1");
+  ok($("#contract-select-continue").textContent.includes("1"), "按钮文案含 1 条");
+
+  log("T4 M=0 不能继续");
+  click(cards[0].querySelector("input"));
+  await sleep(50);
+  ok($("#contract-select-continue").disabled, "0 条时 disabled");
+  ok($("#contract-select-continue").textContent.includes("至少选择一条"), "文案:请至少选择一条评论");
+  click($("#contract-select-continue"));
+  await sleep(50);
+  ok($("#contract-sheet").dataset.step === "select", "0 条点继续仍停留 B");
+
+  log("T5 重选 r1 → 继续进入 C");
+  click(cards[0].querySelector("input"));
+  await sleep(50);
+  ok(!$("#contract-select-continue").disabled, "重选后启用");
+  click($("#contract-select-continue"));
+  await sleep(120);
+  ok($("#contract-sheet").dataset.step === "compose", "data-step=compose");
+  ok($("#contract-compose-summary-text").textContent.includes("1"), "C 来源摘要含发送 1 条");
+  ok($$("#contract-source-list .src-item").length === 1, "详情列表仅 1 个 root");
+
+  log("T6 C→B 保持选择与表单");
+  $("#contract-brief").value = "测试目标";
+  $("#contract-brief").dispatchEvent(new Event("input", { bubbles: true }));
+  click($("#contract-compose-back"));
+  await sleep(60);
+  ok($("#contract-sheet").dataset.step === "select", "回到 B");
+  const cards2 = $$("#contract-select-list .select-card");
+  ok(cards2[0].querySelector("input").checked && !cards2[1].querySelector("input").checked && !cards2[2].querySelector("input").checked, "仅 r1 仍选中");
+  click($("#contract-select-continue"));
+  await sleep(60);
+  ok($("#contract-brief").value === "测试目标", "brief 保留");
+
+  log("T7 复制 Prompt:只含已选,未选/stale 不出现;回复随 root");
+  click($("#contract-copy-prompt"));
+  await sleep(120);
+  const prompt = window.__captured.clipboard[window.__captured.clipboard.length - 1] || "";
+  ok(prompt.includes("QuoteA") && prompt.includes("Comment one: tighten the title"), "含已选 r1 的 quote+正文");
+  ok(!prompt.includes("QuoteB") && !prompt.includes("压缩成两句话"), "不含未选 r3");
+  ok(!prompt.includes("QuoteD") && !prompt.includes("Expired comment"), "不含 stale r5");
+  ok(prompt.includes("ReplyAgreed"), "回复 r2 随 r1 一并进入任务");
+
+  log("T8 复制 JSON:root_annotation_ids 精确相等");
+  click($("#contract-copy-json"));
+  await sleep(120);
+  const json = JSON.parse(window.__captured.clipboard[window.__captured.clipboard.length - 1]);
+  ok(JSON.stringify(json.source.root_annotation_ids) === JSON.stringify(["r1"]), "root_annotation_ids=[r1]");
+  ok(json.annotations.length === 1 && json.annotations[0].replies.length === 1, "task 含完整 reply tree");
+
+  log("T9 关闭再进入:恢复默认全选 + 表单清空");
+  click($("#contract-close"));
+  await sleep(60);
+  ok($("#contract-sheet").hidden, "sheet 关闭");
+  click($("#export-btn"));
+  await sleep(200);
+  const cards3 = $$("#contract-select-list .select-card");
+  ok(cards3.length === 3 && cards3.every(c => c.querySelector("input").checked), "再次默认全选");
+  click($("#contract-select-continue"));
+  await sleep(60);
+  ok($("#contract-brief").value === "", "brief 已清空");
+  click($("#contract-close"));
+  await sleep(60);
+
+  log("T10 超过 20 条显示 warning;等于 20 不显示");
+  window.__fixture = [];
+  for (let i = 0; i < 21; i++) window.__fixture.push({ id: "m" + i, parent_id: null, _status: "open", quote: "Q" + i, selector: { exact: "Q" + i }, body: { comment: "C" + i } });
+  click($("#export-btn"));
+  await sleep(200);
+  ok(!$("#contract-many-warning").hidden, "21 条显示 warning");
+  ok($$("#contract-select-list .select-card").length === 21, "21 张卡片");
+  click($("#contract-select-back"));
+  await sleep(60);
+  window.__fixture.pop(); // 20 条
+  click($("#export-btn"));
+  await sleep(200);
+  ok($("#contract-many-warning").hidden, "等于 20 条不显示 warning");
+  click($("#contract-select-back"));
+  await sleep(60);
+
+  log("T11 buildTask 与 v0.6.1 语义一致(既有 schema 不破坏)");
+  const task = window.ChangeContract.buildTask({ mode: "precise_patch", rootIds: ["r1"], brief: "", preserveText: "", artifact: { title: "T", url: "u", isLocal: true } }, [
+    window.__fixture.length ? { id: "r1", parent_id: null, _status: "open", quote: "Q", selector: { exact: "Q" }, body: { comment: "C" } } : null
+  ].filter(Boolean));
+  ok(task.schema_version === 1 && task.kind === "htmlgenius_change_contract", "schema 未变");
+
+  log(failed ? "\nFAIL(" + failed + ")" : "\nPASS — all cases ok");
+  document.title = failed ? "FAIL: " + failed + " cases" : "PASS";
+})();
+</script>
 </body></html>

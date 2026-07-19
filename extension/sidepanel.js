@@ -13,8 +13,7 @@
   let _artifactState = null;
   let _pendingArtifactReload = false;
   // v0.6.1 修改契约 Composer 临时状态(不持久化)
-  let _contractItems = [];        // 打开 Composer 时的批注快照(供校验/渲染,不随列表变化)
-  let _contractSourceRootIds = [];
+  let _contractItems = [];        // 本轮评论快照(供校验/渲染;评论更新时重取)
   let _contractArtifact = null;
   let _contractOpen = false;
   let _contractTriggerEl = null;  // 关闭 Composer 后恢复焦点
@@ -82,6 +81,17 @@
           renderMode();
           renderCards(resp.items);
           maybeShowReloadResult(resp.items);
+          // v0.7.2 spec §4.1:任务 sheet 打开时页面评论实时更新 → 按最新 export 重算本轮快照与当前步骤
+          if (_contractOpen) {
+            sendToContent({ type: "get-export" }).then((ex) => {
+              if (!ex || ex.type !== "export-data" || !_contractOpen) return;
+              _contractItems = ex.items || [];
+              _contractArtifact = ex.artifact || _contractArtifact;
+              _contractMeta = bridgeMeta(ex);
+              if (_contractStep === "select") renderSelectStep();
+              else renderContractSource();
+            });
+          }
         }
       });
     } else if (msg.type === "presence") {
@@ -262,20 +272,8 @@
         reply.textContent = t("card.reply"); reply.title = t("card.reply");
         reply.addEventListener("click", (e) => { e.stopPropagation(); doReply(ann, card); });
         acts.appendChild(reply);
-        if (!depth) {
-          // v0.6.1:仅顶层非 stale 卡片可「生成任务」(回复卡片不出现,避免失去上下文)
-          const gen = document.createElement("button");
-          gen.textContent = t("card.genTask"); gen.title = t("card.genTask");
-          gen.addEventListener("click", (e) => {
-            e.stopPropagation();
-            _contractTriggerEl = gen;
-            sendToContent({ type: "get-export" }).then((resp) => {
-              if (!resp || resp.type !== "export-data") { showToast(t("contract.copyFail")); return; }
-              openContract([ann.id], resp.items || [], resp.artifact, bridgeMeta(resp));
-            });
-          });
-          acts.appendChild(gen);
-        }
+        // v0.7.2:删除单卡片「生成任务」快捷入口(spec §4.2:避免两个心智模型);
+        // 任务入口统一为评论列表底部「整理评论,创建编辑任务」。保留回复/编辑/删除/定位。
       }
       chrome.storage.sync.get(["user", "mode"], (cfg) => {
         const me = cfg.user && cfg.user.id;
@@ -465,10 +463,12 @@
     return safe.replace(/https?:\/\/[^\s<]+/g, (u) => '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>');
   }
 
-  // === v0.6.1 修改契约 Composer(批注 → 带允许范围/保护规则/验收条件的任务)===
+  // === v0.6.1 修改契约 Composer → v0.7.2 评论选择流(状态机 spec §2)===
+  // 三个状态:A 评论收件箱(默认,sheet 关闭)/ B 挑选评论(data-step=select)/ C 契约表单(data-step=compose)。
+  // 临时选择只存内存(spec §4.1):关闭/Esc 清空;不写 annotation、chrome.storage 或 IndexedDB。
   const contractSheet = document.getElementById("contract-sheet");
   const contractCloseBtn = document.getElementById("contract-close");
-  const contractSummary = document.getElementById("contract-source-summary");
+  const contractSummaryText = document.getElementById("contract-compose-summary-text");
   const contractSourceList = document.getElementById("contract-source-list");
   const contractBrief = document.getElementById("contract-brief");
   const contractBriefError = document.getElementById("contract-brief-error");
@@ -482,6 +482,14 @@
   const contractBridgeWrap = document.getElementById("contract-bridge-wrap");
   const contractBridge = document.getElementById("contract-bridge");
   const contractBridgeStatus = document.getElementById("contract-bridge-status");
+  // B 状态(挑选评论)元素
+  const selectSummary = document.getElementById("contract-select-summary");
+  const selectManyWarning = document.getElementById("contract-many-warning");
+  const selectList = document.getElementById("contract-select-list");
+  const selectContinue = document.getElementById("contract-select-continue");
+
+  let _contractStep = "closed"; // closed | select | compose
+  let _selectedContractRootIds = new Set(); // 本轮勾选的 root id(真相源;draft 从这里读)
 
   function countReplies(rootId, allItems) {
     const kids = {};
@@ -490,6 +498,12 @@
     while (stack.length) { const id = stack.pop(); n += 1; (kids[id] || []).forEach((c) => stack.push(c)); }
     return n;
   }
+  // 已选 root,按 getRoots(items) 原始顺序(spec §4.4:保证 Prompt/JSON 稳定,不按勾选时间排序)
+  function orderedSelectedRootIds() {
+    return window.ChangeContract.getRoots(_contractItems)
+      .filter((a) => _selectedContractRootIds.has(String(a.id)))
+      .map((a) => a.id);
+  }
   function getContractMode() {
     const checked = document.querySelector('input[name="contract-mode"]:checked');
     return checked ? checked.value : "precise_patch";
@@ -497,7 +511,7 @@
   function getContractDraft() {
     return {
       mode: getContractMode(),
-      rootIds: _contractSourceRootIds.slice(),
+      rootIds: orderedSelectedRootIds(), // spec §4.3:从 _selectedContractRootIds 读,不再依赖固定快照
       brief: contractBrief.value,
       preserveText: contractPreserve.value,
       artifact: _contractArtifact || { title: "", url: "", isLocal: false }
@@ -505,8 +519,14 @@
   }
   function renderContractSource() {
     const items = _contractItems;
-    const roots = items.filter((a) => _contractSourceRootIds.indexOf(a.id) !== -1 && a.parent_id == null && a._status !== "stale");
-    contractSummary.textContent = t("contract.source").replace("{n}", String(roots.length));
+    const selectedIds = orderedSelectedRootIds();
+    const total = window.ChangeContract.getRoots(items).length;
+    // C 来源摘要(spec §3.C.2):本次将发送 M 条评论(可处理共 N 条)+ 更改链接
+    if (contractSummaryText) {
+      contractSummaryText.textContent = t("taskSelect.composeSummary")
+        .replace("{selected}", String(selectedIds.length)).replace("{total}", String(total));
+    }
+    const roots = items.filter((a) => selectedIds.indexOf(a.id) !== -1 && a.parent_id == null && a._status !== "stale");
     if (!roots.length) {
       contractSourceList.innerHTML = '<div class="src-item" style="color:var(--text-faint)">' + esc(t("contract.empty")) + "</div>";
       return;
@@ -539,8 +559,9 @@
     const bridgeEligible = !!(_contractMeta && _contractMeta.isLocal && _contractMeta.logicalDocumentId
       && _contractMeta.loadedArtifactHash && draft.mode !== "restructure");
     if (contractBridgeWrap) contractBridgeWrap.hidden = !bridgeEligible;
-    if (bridgeEligible && contractBridge) {
-      contractBridge.textContent = t("bridge.run"); // 三种可发送模式统一「发送给 Claude Code」(spec §8)
+    if (contractBridge) {
+      contractBridge.hidden = !bridgeEligible; // v0.7.2:发送按钮移入固定底栏,hidden 独立控制
+      if (bridgeEligible) contractBridge.textContent = t("bridge.run"); // 三种可发送模式统一「发送给 Claude Code」
     }
     const continueWrap = document.getElementById("contract-session-continue-wrap");
     if (continueWrap) continueWrap.hidden = !_contractSessionContinueAvail;
@@ -548,14 +569,8 @@
     contractCopyJson.disabled = disable || lock;
     if (contractBridge) contractBridge.disabled = disable || lock || !bridgeEligible;
   }
-  function openContract(rootIds, items, artifact, meta) {
-    _contractItems = items || [];
-    _contractSourceRootIds = (rootIds || []).slice();
-    _contractArtifact = artifact || { title: "", url: "", isLocal: false };
-    _contractMeta = meta || { isLocal: !!(artifact && artifact.isLocal), logicalDocumentId: null, loadedArtifactHash: null };
-    _contractRunning = false;
-    _contractSessionContinueAvail = false;
-    _contractOpen = true;
+  // 重置契约表单(新一轮开始 / 关闭清空时)
+  function resetContractForm() {
     const precise = document.querySelector('input[name="contract-mode"][value="precise_patch"]');
     if (precise) precise.checked = true;
     const sessNew = document.querySelector('input[name="contract-session"][value="new"]');
@@ -569,18 +584,92 @@
     contractFallback.hidden = true;
     contractFallbackText.value = "";
     if (contractBridgeStatus) { contractBridgeStatus.hidden = true; contractBridgeStatus.className = "contract-bridge-status"; }
+  }
+  function showContractSheet() {
     accountSheet.classList.remove("show");
     avatarBtn.classList.remove("active");
     closeLangSheet();
-    renderContractSource();
-    refreshContractUI();
     contractSheet.hidden = false;
     contractSheet.classList.add("show");
+  }
+  // A → B 入口(spec §4.2):默认全选可处理 roots + 清空表单(新一轮)
+  function openContractSelector(roots, items, artifact, meta) {
+    _contractItems = items || [];
+    _contractArtifact = artifact || { title: "", url: "", isLocal: false };
+    _contractMeta = meta || { isLocal: !!(artifact && artifact.isLocal), logicalDocumentId: null, loadedArtifactHash: null };
+    _selectedContractRootIds = new Set((roots || []).map((r) => String(r.id))); // 默认全选(spec §3.B.5)
+    _contractRunning = false;
+    _contractSessionContinueAvail = false;
+    _contractOpen = true;
+    resetContractForm();
+    _contractStep = "select";
+    contractSheet.dataset.step = "select";
+    renderSelectStep();
+    showContractSheet();
+  }
+  // B 步骤渲染:checkbox 卡片(顶层 non-stale,getRoots 原序)+ 计数 + >20 warning + 继续按钮
+  function renderSelectStep() {
+    const roots = window.ChangeContract.getRoots(_contractItems); // 顶层且 non-stale(spec §3.B.2)
+    const total = roots.length;
+    const selectedCount = orderedSelectedRootIds().length;
+    if (selectSummary) {
+      selectSummary.innerHTML = t("taskSelect.summary")
+        .replace("{total}", "<strong>" + total + "</strong>")
+        .replace("{selected}", "<strong>" + selectedCount + "</strong>");
+    }
+    if (selectManyWarning) selectManyWarning.hidden = !(total > 20); // 等于 20 不显示(spec §3.B.3)
+    if (selectList) {
+      selectList.innerHTML = roots.map((a) => {
+        const checked = _selectedContractRootIds.has(String(a.id));
+        const reps = countReplies(a.id, _contractItems);
+        // label 整卡可点(原生行为);quote/正文经 esc/linkify(spec §4.4)
+        return '<label class="select-card' + (checked ? " selected" : "") + '" data-id="' + esc(String(a.id)) + '">'
+          + '<input type="checkbox"' + (checked ? " checked" : "") + '>'
+          + '<span class="select-body">'
+          + '<div class="quote">' + esc((a.quote || "").slice(0, 60)) + "</div>"
+          + '<div class="select-text">' + linkify((a.body && a.body.comment) || "") + "</div>"
+          + '<div class="select-foot">' + reps + " " + esc(t("contract.replies")) + "</div>"
+          + "</span></label>";
+      }).join("");
+    }
+    refreshSelectCounts();
+  }
+  // 计数行与继续按钮(M=0 禁用 + 动态文案,spec §3.B.7)
+  function refreshSelectCounts() {
+    const m = orderedSelectedRootIds().length;
+    if (selectSummary) {
+      const total = window.ChangeContract.getRoots(_contractItems).length;
+      selectSummary.innerHTML = t("taskSelect.summary")
+        .replace("{total}", "<strong>" + total + "</strong>")
+        .replace("{selected}", "<strong>" + m + "</strong>");
+    }
+    if (selectContinue) {
+      selectContinue.disabled = m === 0;
+      selectContinue.textContent = (m === 0) ? t("taskSelect.emptySelection") : t("taskSelect.continue").replace("{count}", String(m));
+    }
+  }
+  // B → C(spec §4.3):复用现有表单初始化,但不重置已填内容(C→B→C 保持 brief/preserve/mode)
+  function gotoComposeStep() {
+    _contractStep = "compose";
+    contractSheet.dataset.step = "compose";
+    _contractRunning = false;
+    renderContractSource();
+    refreshContractUI();
     queryBridgeSession();
     setTimeout(() => { try { contractBrief.focus(); } catch (e) {} }, 0);
   }
+  // C → B:保留本轮选择与已填表单(spec §2/§6.8)
+  function gotoSelectStep() {
+    _contractStep = "select";
+    contractSheet.dataset.step = "select";
+    renderSelectStep();
+  }
+  // close / Esc → A:丢弃本轮 selectedRootIds 与 form draft(spec §2/§4.1)
   function closeContract() {
     _contractOpen = false;
+    _contractStep = "closed";
+    _selectedContractRootIds = new Set(); // 清空临时 Set
+    resetContractForm();                  // 清空表单 → 再次进入恢复默认全选 + 空表单(spec §6.8)
     contractSheet.classList.remove("show");
     contractSheet.hidden = true;
     const el = _contractTriggerEl;
@@ -593,7 +682,28 @@
     try { contractFallbackText.focus(); contractFallbackText.select(); } catch (e) {}
     showToast(t("contract.copyFail"));
   }
-  function copyContract(kind) {
+  // spec §4.3 提交前防线:重取最新 export,若已选评论在此期间 stale/删除 → 可理解错误 + 回 B 刷新,
+  // 绝不拿旧快照发送。返回 true=可继续提交;false=已拦截并回到 B。
+  async function refreshSelectionBeforeSubmit() {
+    const resp = await sendToContent({ type: "get-export" });
+    if (!resp || resp.type !== "export-data") return true; // 拿不到最新数据时沿用本轮快照,不阻塞
+    const items = resp.items || [];
+    const validIds = new Set(window.ChangeContract.getRoots(items).map((a) => String(a.id)));
+    const staleSelected = Array.from(_selectedContractRootIds).filter((id) => !validIds.has(id));
+    // 无论是否有 stale,都用最新数据刷新本轮快照(评论内容/回复可能已更新)
+    _contractItems = items;
+    _contractArtifact = resp.artifact || _contractArtifact;
+    _contractMeta = bridgeMeta(resp);
+    if (staleSelected.length) {
+      staleSelected.forEach((id) => _selectedContractRootIds.delete(id));
+      showToast(t("taskSelect.staleChanged"));
+      gotoSelectStep();
+      return false;
+    }
+    return true;
+  }
+  async function copyContract(kind) {
+    if (!(await refreshSelectionBeforeSubmit())) return;
     const draft = getContractDraft();
     let task;
     try { task = window.ChangeContract.buildTask(draft, _contractItems); }
@@ -656,8 +766,9 @@
     contractSheet.querySelectorAll('input[name="contract-mode"], input[name="contract-session"], textarea').forEach((el) => { el.disabled = running; });
     refreshContractUI();
   }
-  function startBridgeRun() {
+  async function startBridgeRun() {
     if (_contractRunning) return;
+    if (!(await refreshSelectionBeforeSubmit())) return; // spec §4.3:发送前同样过 stale 防线
     const draft = getContractDraft();
     let task;
     try { task = window.ChangeContract.buildTask(draft, _contractItems); }
@@ -687,7 +798,33 @@
   if (contractBridge) contractBridge.addEventListener("click", startBridgeRun);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && _contractOpen) { e.preventDefault(); closeContract(); } });
 
-  // 底部「生成修改任务」:取全部未失效顶层批注 → 打开 Composer(无顶层批注时按钮已 disabled)
+  // === v0.7.2 选择流事件(spec §2 状态转换)===
+  // B:返回 / 继续;C:返回挑选 / 更改评论
+  document.getElementById("contract-select-back").addEventListener("click", closeContract);          // B --返回--> A
+  document.getElementById("contract-select-continue").addEventListener("click", () => {              // B --继续--> C(M>0)
+    if (orderedSelectedRootIds().length > 0) gotoComposeStep();
+  });
+  document.getElementById("contract-compose-back").addEventListener("click", gotoSelectStep);        // C --返回--> B(保留)
+  document.getElementById("contract-change-comments").addEventListener("click", gotoSelectStep);     // C --更改--> B(保留)
+  // B 卡片勾选:事件委托(spec §4.4);label 原生整卡可点 + 键盘 focus/Space
+  selectList.addEventListener("change", (e) => {
+    const cb = e.target.closest('input[type="checkbox"]');
+    if (!cb) return;
+    const card = cb.closest(".select-card");
+    if (!card) return;
+    const id = card.dataset.id;
+    if (cb.checked) _selectedContractRootIds.add(id); else _selectedContractRootIds.delete(id);
+    card.classList.toggle("selected", cb.checked);
+    refreshSelectCounts();
+  });
+  // ? tooltip:click toggle(触屏可用),hover/focus 由 CSS 处理;同时关掉其他已开的
+  document.addEventListener("click", (e) => {
+    const tip = e.target.closest(".tip");
+    document.querySelectorAll(".tip.open").forEach((x) => { if (x !== tip) x.classList.remove("open"); });
+    if (tip) { e.preventDefault(); e.stopPropagation(); tip.classList.toggle("open"); }
+  });
+
+  // 底部「整理评论,创建编辑任务」(spec §4.2):get-export → roots → 默认全选 → 进入 B(选择步骤)
   document.getElementById("export-btn").addEventListener("click", () => {
     sendToContent({ type: "get-export" }).then((resp) => {
       if (!resp || resp.type !== "export-data") return;
@@ -695,7 +832,7 @@
       const roots = window.ChangeContract.getRoots(items);
       if (!roots.length) { showToast(t("contract.empty")); return; }
       _contractTriggerEl = document.getElementById("export-btn");
-      openContract(roots.map((r) => r.id), items, resp.artifact, bridgeMeta(resp));
+      openContractSelector(roots, items, resp.artifact, bridgeMeta(resp));
     });
   });
 
@@ -1071,7 +1208,10 @@
     refreshLangUI();
     renderMode();
     renderCards(_lastItems);
-    if (_contractOpen) { renderContractSource(); refreshContractUI(); } // Composer 打开时跟随语言刷新
+    if (_contractOpen) {
+      if (_contractStep === "select") renderSelectStep();          // B 步骤:卡片/计数/警告/按钮跟随语言
+      else { renderContractSource(); refreshContractUI(); }        // C 步骤:摘要/表单/bridge 跟随语言
+    }
     refreshLoginState();
     // v0.8: 弹层条目(字号/标题/对齐/色板 title)跟随新语言 —— 清 built 缓存,下次打开时重建
     document.querySelectorAll(".sp-list-pop, .sp-color-pop").forEach((p) => { delete p.dataset.built; p.innerHTML = ""; });
