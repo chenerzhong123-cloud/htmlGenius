@@ -216,7 +216,7 @@ def auth_google_session(payload: GoogleSessionIn):
 def create_invite(session: Session = Depends(require_session)):
     """当前 session 的 team 生成邀请码(任意成员可生)。"""
     code = teams.create_invite(session.team_id, session.open_id)
-    return {"code": code, "team_id": session.team_id, "join_url": f"/hg/join?code={code}"}
+    return {"code": code, "team_id": session.team_id, "join_url": f"/htmlgenius/join?code={code}"}
 
 
 # === 文档 / 版本 (无鉴权,本地工具) ===

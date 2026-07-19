@@ -43,6 +43,14 @@ test("buildLauncherSource: 路径含单引号 -> UNSAFE_PATH", () => {
   assert.throws(() => buildLauncherSource({ nodePath: "/usr/local/bin/node", hostPath: "/ab's/host.mjs" }), (e) => e.code === "UNSAFE_PATH");
 });
 
+test("buildLauncherSource: 把 node 目录 + claude 目录烘焙进 PATH(GUI Chrome 也能找到 claude)", () => {
+  const src = buildLauncherSource({ nodePath: "/Users/x/.nvm/versions/node/v20.0.0/bin/node", hostPath: "/abs/bridge/host.mjs", claudePath: "/Users/x/.local/bin/claude" });
+  assert.match(src, /export PATH="/, "含 export PATH");
+  assert.ok(src.includes("/Users/x/.nvm/versions/node/v20.0.0/bin"), "PATH 含 node 目录");
+  assert.ok(src.includes("/Users/x/.local/bin"), "PATH 含 claude 目录");
+  assert.match(src, /:\$PATH"/, "PATH 末尾追加原 $PATH");
+});
+
 test("install: 在临时 hosts-dir 写出单 origin manifest + 0700 launcher;claude 用 node 本体作可执行占位", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hg-bridge-install-"));
   try {

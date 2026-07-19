@@ -45,14 +45,24 @@ export function buildManifest({ extensionId, launcherPath }) {
 }
 
 // launcher 源码:exec 绝对 node + 绝对 host.mjs。无 shell 拼接,路径含单引号即拒(防注入)。
-export function buildLauncherSource({ nodePath, hostPath }) {
+// 关键:从 Dock/Spotlight 启动的 Chrome 其 PATH 极简,通常不含 nvm/claude 所在目录,
+// 导致 host 运行期 spawn("claude") 找不到二进制。故在 launcher 里把 node 目录、claude 目录与
+// 常见安装目录 prepend 进 PATH,使 GUI 启动的 Chrome 也能找到 claude(烟测前提)。
+export function buildLauncherSource({ nodePath, hostPath, claudePath }) {
   if (!path.isAbsolute(nodePath) || !path.isAbsolute(hostPath)) {
     const err = new Error("node/host paths must be absolute"); err.code = "PATH_NOT_ABSOLUTE"; throw err;
   }
   if (nodePath.includes("'") || hostPath.includes("'")) {
     const err = new Error("path contains single quote; refusing to write shell launcher"); err.code = "UNSAFE_PATH"; throw err;
   }
-  return "#!/bin/sh\nexec '" + nodePath + "' '" + hostPath + "' \"$@\"\n";
+  const home = process.env.HOME || "";
+  const dirs = [path.dirname(nodePath)];
+  if (claudePath) { const d = path.dirname(claudePath); if (d && !dirs.includes(d)) dirs.push(d); }
+  // 常见 claude/node 安装位置(nvm 已在 dirname(nodePath);官方安装器 ~/.local/bin;brew;npm-global)
+  [home + "/.local/bin", home + "/.npm-global/bin", home + "/.cargo/bin", "/opt/homebrew/bin", "/usr/local/bin"]
+    .forEach((d) => { if (d && d !== "/" && !dirs.includes(d)) dirs.push(d); });
+  const safePath = dirs.filter((d) => !/['"$\n]/.test(d)).join(":");
+  return "#!/bin/sh\nexport PATH=\"" + safePath + ":$PATH\"\nexec '" + nodePath + "' '" + hostPath + "' \"$@\"\n";
 }
 
 function parseArgs(argv) {
@@ -91,7 +101,7 @@ export async function install({ extensionId, hostsDir, claudePath, bridgeDir }) 
   if (!path.isAbsolute(dir)) { const e = new Error("bridge dir must be absolute"); e.code = "PATH_NOT_ABSOLUTE"; throw e; }
   const hostPath = path.join(dir, "host.mjs");
   try { fs.accessSync(hostPath, fs.constants.R_OK); } catch (_) { const e = new Error("host.mjs not found in bridge dir: " + dir); e.code = "HOST_MISSING"; throw e; }
-  resolveClaude(claudePath); // 验证 claude 就绪(不保存其路径;host 运行期按 PATH 解析)
+  const resolvedClaude = resolveClaude(claudePath); // 验证 claude 就绪,并把其目录烘焙进 launcher PATH
 
   const outDir = hostsDir || DEFAULT_HOSTS_DIR;
   fs.mkdirSync(outDir, { recursive: true });
@@ -100,7 +110,7 @@ export async function install({ extensionId, hostsDir, claudePath, bridgeDir }) 
   const written = [];
 
   try {
-    const launcherSrc = buildLauncherSource({ nodePath: process.execPath, hostPath });
+    const launcherSrc = buildLauncherSource({ nodePath: process.execPath, hostPath, claudePath: resolvedClaude });
     fs.writeFileSync(launcherPath, launcherSrc, { mode: 0o700 });
     fs.chmodSync(launcherPath, 0o700);
     written.push(launcherPath);
