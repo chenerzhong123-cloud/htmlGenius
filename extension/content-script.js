@@ -1272,5 +1272,5 @@
     if (!_artifactVerificationError) await loadAnnotations();
     if (autoEdit) setEditing(true); // 直接进入编辑(广播 edit-state → 侧边栏同步「退出编辑」)
   })();
-  console.log("htmlGenius v0.5 ready, mode:", isLocal ? "local" : "remote(editable, temporary)", "starts in view");
+  console.log("htmlGenius v0.7.1 ready, mode:", isLocal ? "local" : "remote(editable, temporary)", "starts in view");
 })();
