@@ -174,3 +174,20 @@ export function rootAnnotationIdsOf(task) {
   const ids = task && task.source && task.source.root_annotation_ids;
   return Array.isArray(ids) ? ids.slice() : [];
 }
+
+// —— candidate 执行前言(Night Pack A spec §4.3):不可省略;prompt 是协作约束,host hash/manifest/artifact 协议才是可信边界。
+// cwd=runs/<runId>,source.html 与 task-<runId>.* 均在当前目录(由 prepareCandidateRun 复制)。
+export function buildCandidatePrompt({ runId, task }) {
+  const prelude = [
+    "You are executing a task inside HTML Genius's controlled candidate workspace.",
+    "",
+    "- Only read source.html and task-" + runId + ".md / task-" + runId + ".json in the current directory.",
+    "- Only write the final, complete, directly-openable HTML to candidate.html in the current directory.",
+    "- Do not modify source.html, the task files, or any other file; do not use shell, network, MCP, or the browser.",
+    "- Do not emit Markdown files, diffs, explanations, or multiple candidate files instead of candidate.html.",
+    "- Strictly follow the Change Contract below; anything it does not permit must stay unchanged.",
+    "- If a target cannot be uniquely located, do not guess; keep the corresponding source content and note it briefly in your final text."
+  ].join("\n");
+  const rendered = ChangeContract.renderPrompt(task);
+  return prelude + "\n\n## Change Contract (execute strictly)\n" + rendered;
+}

@@ -41,19 +41,25 @@ function sanitizedEnv() {
 
 // —— argv 构造(纯函数,可单测断言「固定 argv」)——
 // prompt 永远是 argv 最后一个元素;resumeSessionId 只接受校验过的 UUID。
-export function buildHandoffArgv({ promptText, resumeSessionId }) {
+// runKind: "handoff"(只读回执,v0.7.1) | "candidate"(Night Pack A:放行 Write,仍禁 Bash/Edit/网/MCP)。
+export function buildClaudeArgv({ promptText, resumeSessionId, runKind }) {
   if (typeof promptText !== "string" || !promptText.length) {
     fail("BAD_PROMPT", "promptText is required");
   }
+  const isCandidate = runKind === "candidate";
+  const allowed = isCandidate ? "Read,Glob,Grep,Write" : "Read,Glob,Grep";       // candidate 才放行 Write(只写 candidate.html)
+  const disallowed = isCandidate
+    ? ["Bash", "Edit", "WebFetch", "WebSearch", "mcp__*"]                          // candidate 禁 in-place Edit/网/MCP
+    : ["Bash", "Edit", "Write", "WebFetch", "WebSearch", "mcp__*"];                // handoff 全只读
   const argv = [
     "-p",
     "--output-format", "json",
     "--safe-mode",                    // 禁用户自定义 hooks/plugins/MCP/skills/本地项目定制
     "--disable-slash-commands",       // 禁 skills 与 slash commands
-    "--allowed-tools", "Read,Glob,Grep",                       // 只读工具白名单
-    "--disallowed-tools", "Bash", "Edit", "Write", "WebFetch", "WebSearch", "mcp__*", // 显式禁写/网/MCP
+    "--allowed-tools", allowed,
+    "--disallowed-tools", ...disallowed,
     "--permission-mode", "dontAsk",   // 非交互:不弹权限询问
-    "--max-turns", "4"                // 回执任务无需多轮,限制防御
+    "--max-turns", isCandidate ? "24" : "4"  // candidate 编辑需更多轮;handoff 回执少轮
   ];
   if (resumeSessionId != null) {
     if (!isSessionUuid(resumeSessionId)) fail("CLAUDE_SESSION_UNAVAILABLE", "resume session_id is not a valid UUID");
@@ -61,6 +67,10 @@ export function buildHandoffArgv({ promptText, resumeSessionId }) {
   }
   argv.push(promptText); // 唯一允许携带任务内容的参数位;spawn 直传,不经 shell
   return argv;
+}
+// 向后兼容:v0.7.1 handoff 路径沿用旧名
+export function buildHandoffArgv({ promptText, resumeSessionId }) {
+  return buildClaudeArgv({ promptText, resumeSessionId, runKind: "handoff" });
 }
 
 // —— 底层 spawn:shell:false + 超时 + stderr 截断 + stdout 防御上限 ——
@@ -149,8 +159,8 @@ export function parseHandoffResult(stdout) {
 }
 
 // —— new handoff(spec §7 步骤6)——
-export async function runHandoff({ cwd, promptText, timeoutMs }) {
-  const argv = buildHandoffArgv({ promptText });
+export async function runHandoff({ cwd, promptText, timeoutMs, runKind }) {
+  const argv = buildClaudeArgv({ promptText, runKind });
   const { code, stdout, stderr } = await runClaude(argv, { cwd, timeoutMs });
   if (code !== 0) {
     fail("CLAUDE_RUN_FAILED", "claude exited " + code + ": " + truncate(stderr), { exitCode: code });
@@ -160,8 +170,8 @@ export async function runHandoff({ cwd, promptText, timeoutMs }) {
 
 // —— continue handoff(spec §7 步骤7):只允许 --resume <已保存 UUID>;cwd 必须是该 session 的
 // workspace(调用方保证)。不支持/找不到 session → CLAUDE_SESSION_UNAVAILABLE;绝不回退 -c 或 picker。——
-export async function resumeHandoff({ cwd, promptText, resumeSessionId, timeoutMs }) {
-  const argv = buildHandoffArgv({ promptText, resumeSessionId });
+export async function resumeHandoff({ cwd, promptText, resumeSessionId, timeoutMs, runKind }) {
+  const argv = buildClaudeArgv({ promptText, resumeSessionId, runKind });
   let r;
   try {
     r = await runClaude(argv, { cwd, timeoutMs });

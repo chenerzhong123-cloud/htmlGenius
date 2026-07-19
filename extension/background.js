@@ -38,6 +38,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleQuerySession(msg).then(sendResponse, () => sendResponse({ ok: false, code: "NO_ARTIFACT_STATE" }));
     return true;
   }
+  if (msg.type === "bridge-query-latest-candidate") {
+    // Night Pack A §6:返回最近一次 completed candidate 的 run metadata(只读,无敏感内容)
+    (async () => {
+      const ex = await chrome.tabs.sendMessage(msg.tab_id, { type: "get-export" }).catch(() => null);
+      const logicalId = ex && (ex.logicalDocumentId || (ex.artifact_state && ex.artifact_state.logical_document_id));
+      if (!logicalId) return sendResponse({ ok: true, run: null });
+      const run = await Storage.getLatestCompletedCandidateRun(logicalId);
+      sendResponse({ ok: true, run: run ? {
+        run_id: run.run_id, provider: run.provider, completed_at: run.completed_at,
+        source_uri: run.source_artifact_uri, candidate_uri: run.candidate_uri,
+        candidate_sha256: run.candidate_sha256, base_artifact_hash: run.base_artifact_hash,
+        manifest_path: run.manifest_path
+      } : null });
+    })();
+    return true;
+  }
 });
 
 // sidepanel 探测当前 tab 是否有可「继续」的 bridge-owned Claude session(供会话选择显示)
@@ -52,10 +68,12 @@ async function handleQuerySession({ tab_id }) {
   return { ok: true, has_session: !!sess, continuable, last_status: sess && sess.status };
 }
 
-async function handleBridgeStart({ tab_id, provider, session_mode, change_contract }) {
+async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, change_contract }) {
   if (!tab_id) return { ok: false, code: "NO_TAB" };
   if (provider !== PROVIDER) return { ok: false, code: "UNKNOWN_PROVIDER", message: "v0.7.1 only supports " + PROVIDER };
   if (session_mode !== "new" && session_mode !== "continue") return { ok: false, code: "BAD_SESSION_MODE" };
+  const runKind = run_kind || "handoff"; // Night Pack A: "candidate" 产受控 candidate;缺省 "handoff"(v0.7.1 ack)
+  if (runKind !== "handoff" && runKind !== "candidate") return { ok: false, code: "BAD_RUN_KIND" };
 
   // 1. 自行向 content-script 取可信 artifact state(不信 sidepanel 传的 hash/uri/logicalId)
   const ex = await chrome.tabs.sendMessage(tab_id, { type: "get-export" }).catch(() => null);
@@ -101,7 +119,7 @@ async function handleBridgeStart({ tab_id, provider, session_mode, change_contra
   const runId = newRunId();
   const run = {
     run_id: runId, logical_document_id: logicalId, tab_id,
-    provider: PROVIDER, session_mode,
+    provider: PROVIDER, session_mode, run_kind: runKind,
     session_id: null, task_sha256: taskSha,
     source_artifact_uri: art.url, base_artifact_hash: loadedHash,
     status: "starting",
@@ -130,6 +148,7 @@ async function handleBridgeStart({ tab_id, provider, session_mode, change_contra
   port.postMessage({
     type: "claude_handoff_start",
     run_id: runId,
+    run_kind: runKind,
     source: {
       logical_document_id: logicalId,
       artifact_uri: art.url,
@@ -139,7 +158,7 @@ async function handleBridgeStart({ tab_id, provider, session_mode, change_contra
     task: task
   });
 
-  return { ok: true, run_id: runId, mode: task.mode, session_mode };
+  return { ok: true, run_id: runId, mode: task.mode, session_mode, run_kind: runKind };
 }
 
 function onHostMessage(tab_id, runId, m, taskSha, logicalId, artifactUrl) {
@@ -162,6 +181,10 @@ function onHostMessage(tab_id, runId, m, taskSha, logicalId, artifactUrl) {
   }
   if (m.type === "bridge_completed") {
     completeRun(tab_id, runId, m, taskSha, logicalId, artifactUrl);
+    return;
+  }
+  if (m.type === "candidate-ready") {
+    completeCandidate(tab_id, runId, m, taskSha, logicalId, artifactUrl);
     return;
   }
   if (m.type === "bridge_failed") {
@@ -206,4 +229,68 @@ async function completeRun(tab_id, runId, completion, taskSha, logicalId, artifa
 
   // 3. v0.7.1 到此为止:不写回、不 reload、不重锚定(§1)。仅通知 sidepanel 显示成功。
   broadcast({ type: "bridge-completed", tab_id, run_id: runId, session_id: v.session_id });
+}
+
+// —— Night Pack A spec §5.1:candidate-ready → 逐字段比对 → 受控 new_artifact(复用 v0.6.2 消费者)→ 打开 candidate + 重锚 ——
+async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, artifactUrl) {
+  const entry = _runsByTab.get(tab_id);
+  if (entry) entry.terminal = true;
+
+  const run = await Storage.getBridgeRun(runId).catch(() => null);
+  if (!run) return failRun(tab_id, runId, "RUN_NOT_FOUND", "no run record for candidate-ready");
+  // 逐字段对照(background 自存 run metadata;任一不一致即拒绝,不导航/不链接/不迁移)
+  if (completion.task_sha256 !== run.task_sha256 || completion.task_sha256 !== taskSha) {
+    return failRun(tab_id, runId, "COMPLETION_MISMATCH", "task_sha256 mismatch");
+  }
+  if (completion.source_sha256_before !== run.base_artifact_hash) {
+    return failRun(tab_id, runId, "COMPLETION_MISMATCH", "source_sha256_before mismatch");
+  }
+  if (completion.logical_document_id !== run.logical_document_id || completion.logical_document_id !== logicalId) {
+    return failRun(tab_id, runId, "COMPLETION_MISMATCH", "logical_document_id mismatch");
+  }
+  const canon = (u) => { try { return Storage.canonicalArtifactUri ? Storage.canonicalArtifactUri(u) : u; } catch (e) { return u; } };
+  if (canon(completion.source_uri) !== canon(artifactUrl)) {
+    return failRun(tab_id, runId, "COMPLETION_MISMATCH", "source_uri mismatch");
+  }
+  if (typeof completion.candidate_uri !== "string" || !/^file:/i.test(completion.candidate_uri)) {
+    return failRun(tab_id, runId, "COMPLETION_MISMATCH", "candidate_uri not a file URL");
+  }
+
+  // 受控 new_artifact:content-script 确认 base hash + logical relation + 受控 URI 后才链接
+  const consumerResp = await chrome.tabs.sendMessage(tab_id, {
+    type: "artifact-update-ready",
+    source: "bridge",
+    result_kind: "new_artifact",
+    result_uri: completion.candidate_uri,
+    base_artifact_hash: completion.source_sha256_before,
+    run_id: runId,
+    task_sha256: completion.task_sha256,
+    logical_document_id: completion.logical_document_id
+  }).catch(() => null);
+  if (!consumerResp || !consumerResp.ok) {
+    return failRun(tab_id, runId, "CONSUMER_REJECTED", "artifact-update-ready consumer rejected: " + (consumerResp && consumerResp.code));
+  }
+
+  // 持久化 run(completed)+ session(bridge-owned)
+  const sessionId = (run.session_id) || null;
+  await Storage.updateBridgeRun(runId, { status: "completed", completed_at: nowIso(),
+    candidate_uri: completion.candidate_uri, candidate_sha256: completion.candidate_sha256,
+    manifest_path: completion.manifest_path }).catch(() => {});
+  if (sessionId) {
+    await Storage.saveBridgeSession({
+      logical_document_id: logicalId, provider: PROVIDER, ownership: "htmlgenius",
+      session_id: sessionId, workspace_path: BridgeValidate.workspacePathForFileUrl(artifactUrl, logicalId),
+      status: "completed"
+    }).catch(() => {});
+  }
+
+  // 打开 candidate(消费者返回 navigate_required);新页 content-script 重锚评论
+  if (consumerResp.action === "navigate_required") {
+    chrome.tabs.update(tab_id, { url: completion.candidate_uri }).catch(() => {});
+  }
+  broadcast({
+    type: "bridge-completed", tab_id, run_id: runId, candidate: true,
+    candidate_uri: completion.candidate_uri, source_uri: completion.source_uri,
+    candidate_sha256: completion.candidate_sha256, source_sha256_before: completion.source_sha256_before
+  });
 }

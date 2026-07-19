@@ -248,6 +248,14 @@ const LocalStore = {
     await dbPut("bridge_runs", updated);
     return updated;
   },
+  // Night Pack A §6:最近一次 completed 的 candidate run(只读 run metadata;不含 prompt/comment/candidate HTML)
+  async getLatestCompletedCandidateRun(logicalDocumentId) {
+    const runs = await dbGetAllByIndex("bridge_runs", "logical_document_id", logicalDocumentId);
+    const cands = (runs || []).filter((r) => r.status === "completed" && r.run_kind === "candidate" && r.candidate_uri);
+    if (!cands.length) return null;
+    cands.sort((a, b) => String(b.completed_at || "").localeCompare(String(a.completed_at || "")));
+    return cands[0];
+  },
 };
 
 // === mode 分派器 ===

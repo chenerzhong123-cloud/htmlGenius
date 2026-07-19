@@ -217,6 +217,20 @@
         </div>
         <p class="contract-privacy-note" data-i18n="bridge.privacyNote">不会显示或接管你正在运行的其他 Claude 会话。</p>
       </div>
+
+      <!-- v0.7.2/Night Pack A spec §5.2:最小只读成功态(非「接受修改」) -->
+      <div id="contract-candidate-result" class="candidate-result" hidden>
+        <div class="candidate-result-title" data-i18n="candidate.resultTitle">候选版本已生成</div>
+        <ul class="candidate-result-facts">
+          <li data-i18n="candidate.sourceUntouched">原文件未被修改</li>
+          <li id="candidate-anchor-stats"></li>
+          <li id="candidate-evidence"></li>
+        </ul>
+        <div class="candidate-result-actions">
+          <button id="candidate-open" class="contract-secondary" type="button" data-i18n="candidate.openCandidate">打开候选版本</button>
+          <button id="candidate-back" class="contract-secondary" type="button" data-i18n="candidate.backToSource">返回原文件</button>
+        </div>
+      </div>
     </div>
 
     <!-- 固定底栏:复制输出 + 发送(还原 mockup 层级;窄面板不被挤出) -->

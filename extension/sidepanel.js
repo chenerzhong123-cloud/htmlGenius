@@ -317,6 +317,7 @@
     // v0.6.1:无未失效顶层批注时,底部「生成修改任务」disabled 且不打开空 Composer
     const _exportBtn = document.getElementById("export-btn");
     if (_exportBtn) _exportBtn.disabled = !((byParent[null] || []).length > 0);
+    fillCandidateAnchorStats(); // Night Pack A §5.2:候选打开重锚后,用最新列表填重锚统计
   }
 
   // #2: 一键删除所有失效评论(原文已不在当前页面)
@@ -487,9 +488,16 @@
   const selectManyWarning = document.getElementById("contract-many-warning");
   const selectList = document.getElementById("contract-select-list");
   const selectContinue = document.getElementById("contract-select-continue");
+  // Night Pack A §5.2 只读成功态元素
+  const candidateResult = document.getElementById("contract-candidate-result");
+  const candidateAnchorStats = document.getElementById("candidate-anchor-stats");
+  const candidateOpen = document.getElementById("candidate-open");
+  const candidateBack = document.getElementById("candidate-back");
 
   let _contractStep = "closed"; // closed | select | compose
   let _selectedContractRootIds = new Set(); // 本轮勾选的 root id(真相源;draft 从这里读)
+  let _contractRunKind = "handoff"; // 本轮 bridge run 类型(handoff|candidate);sidepanel 发送 = candidate
+  let _candidateResult = null;      // Night Pack A §5.2:最近一次 candidate-ready 结果(只读成功态)
 
   function countReplies(rootId, allItems) {
     const kids = {};
@@ -656,6 +664,7 @@
     renderContractSource();
     refreshContractUI();
     queryBridgeSession();
+    getActiveTab().then((tab) => { if (tab && tab.id) loadCandidateEvidence(tab.id); }); // §6 持久证据
     setTimeout(() => { try { contractBrief.focus(); } catch (e) {} }, 0);
   }
   // C → B:保留本轮选择与已填表单(spec §2/§6.8)
@@ -675,6 +684,45 @@
     const el = _contractTriggerEl;
     _contractTriggerEl = null;
     if (el && el.focus) { try { el.focus(); } catch (e) {} }
+  }
+  // Night Pack A §5.2:展示最小只读成功态(非「接受修改」);统计在 renderCards 里随最新列表填充
+  function showCandidateResult(msg) {
+    _candidateResult = msg || null;
+    if (candidateResult) candidateResult.hidden = !_candidateResult;
+    fillCandidateEvidence(msg);
+    fillCandidateAnchorStats();
+  }
+  function fillCandidateAnchorStats() {
+    if (!_candidateResult || !candidateAnchorStats) return;
+    const items = _lastItems || [];
+    const stale = items.filter((a) => a._status === "stale").length;
+    const open = items.filter((a) => a._status !== "stale").length;
+    candidateAnchorStats.textContent = t("candidate.anchorStats")
+      .replace("{open}", String(open)).replace("{total}", String(open + stale)).replace("{stale}", String(stale));
+  }
+  // §6 证据行:provider · 时间 · 源→候选文件名 · 源哈希已校验 · 候选 hash 短前缀(只读 run metadata)
+  function filenameOf(uri) { try { return decodeURIComponent(new URL(uri).pathname.split("/").pop()) || uri; } catch (e) { return String(uri || ""); } }
+  function shortHash(h) { const hex = typeof h === "string" ? h.replace(/^sha256:/i, "") : ""; return hex.length > 12 ? hex.slice(0, 12) + "…" : (hex || ""); }
+  function fillCandidateEvidence(run) {
+    const el = document.getElementById("candidate-evidence");
+    if (!el || !run) return;
+    el.textContent = t("candidate.evidence")
+      .replace("{provider}", run.provider || "claude_code_cli")
+      .replace("{time}", String(run.completed_at || new Date().toISOString()).replace("T", " ").slice(0, 16))
+      .replace("{source}", filenameOf(run.source_uri || run.source_artifact_uri))
+      .replace("{candidate}", filenameOf(run.candidate_uri))
+      .replace("{hashPrefix}", shortHash(run.candidate_sha256));
+  }
+  // §6 持久证据:刷新 Side Panel 后,从 storage 读最近一次 completed candidate run 展示(无敏感内容)
+  async function loadCandidateEvidence(tabId) {
+    if (_candidateResult) return; // 本轮 live 结果优先
+    const r = await chrome.runtime.sendMessage({ type: "bridge-query-latest-candidate", tab_id: tabId }).catch(() => null);
+    if (r && r.run) {
+      _candidateResult = r.run;
+      if (candidateResult) candidateResult.hidden = false;
+      fillCandidateEvidence(r.run);
+      fillCandidateAnchorStats();
+    }
   }
   function showContractFallback(out) {
     contractFallback.hidden = false;
@@ -750,12 +798,16 @@
   }
   function bridgeFailClass(code) {
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF"
+      || code === "SOURCE_MUTATED_DURING_CANDIDATE"
       || code === "BRIDGE_NOT_INSTALLED" || code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED"
       || code === "CLAUDE_SESSION_UNAVAILABLE" || code === "NO_CONTINUABLE_SESSION") return "warn";
     return "err";
   }
   function tBridgeFailed(code, host) {
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF") return t("bridge.sourceChanged");
+    if (code === "SOURCE_MUTATED_DURING_CANDIDATE") return t("bridge.sourceMutated");
+    if (code === "CANDIDATE_MISSING" || code === "CANDIDATE_INVALID_HTML" || code === "CANDIDATE_EMPTY"
+      || code === "CANDIDATE_SYMLINK" || code === "CANDIDATE_NOT_FILE" || code === "CANDIDATE_TOO_LARGE" || code === "CANDIDATE_NOT_UTF8") return t("bridge.candidateInvalid");
     if (code === "BRIDGE_NOT_INSTALLED") return t("bridge.notInstalled");
     if (code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED") return t("bridge.notLoggedIn");
     if (code === "CLAUDE_SESSION_UNAVAILABLE" || code === "NO_CONTINUABLE_SESSION") return t("bridge.sessionUnavailable");
@@ -777,9 +829,11 @@
     const session_mode = (sessEl && sessEl.value === "continue") ? "continue" : "new";
     getActiveTab().then((tab) => {
       if (!tab || !tab.id) { setBridgeStatus(t("bridge.failed").replace("{msg}", "no active tab"), "err"); return; }
-      // v0.7.1: provider 固定 claude_code_cli;host 名 provider-neutral,后续 adapter 复用
-      chrome.runtime.sendMessage({ type: "bridge-start", provider: "claude_code_cli", tab_id: tab.id, session_mode, change_contract: task }).then((resp) => {
-        if (resp && resp.ok) { setContractRunning(true); setBridgeStatus(t("bridge.running"), "running"); }
+      // v0.7.1/Night Pack A: provider 固定 claude_code_cli;发送 = run_kind "candidate"(产受控 candidate,非 ack)
+      _contractRunKind = "candidate";
+      if (candidateResult) candidateResult.hidden = true; // 新 run 清掉上一轮只读结果
+      chrome.runtime.sendMessage({ type: "bridge-start", provider: "claude_code_cli", run_kind: "candidate", tab_id: tab.id, session_mode, change_contract: task }).then((resp) => {
+        if (resp && resp.ok) { setContractRunning(true); setBridgeStatus(t("bridge.candidateRunning"), "running"); }
         else {
           const code = resp && resp.code;
           if (code === "BRIDGE_NOT_INSTALLED") setBridgeStatus(t("bridge.notInstalled"), "warn");
@@ -796,6 +850,20 @@
   if (contractCopyPrompt) contractCopyPrompt.addEventListener("click", () => copyContract("prompt"));
   if (contractCopyJson) contractCopyJson.addEventListener("click", () => copyContract("json"));
   if (contractBridge) contractBridge.addEventListener("click", startBridgeRun);
+  // Night Pack A §5.2 只读成功态按钮:打开候选(新标签,便于对照)/ 返回原文件(当前标签导航回 source,清结果态)
+  if (candidateOpen) candidateOpen.addEventListener("click", () => {
+    if (_candidateResult && _candidateResult.candidate_uri) {
+      try { chrome.tabs.create({ url: _candidateResult.candidate_uri }); } catch (e) {}
+    }
+  });
+  if (candidateBack) candidateBack.addEventListener("click", () => {
+    if (_candidateResult && _candidateResult.source_uri) {
+      const src = _candidateResult.source_uri;
+      _candidateResult = null;
+      if (candidateResult) candidateResult.hidden = true;
+      getActiveTab().then((tab) => { if (tab && tab.id) chrome.tabs.update(tab.id, { url: src }); });
+    }
+  });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && _contractOpen) { e.preventDefault(); closeContract(); } });
 
   // === v0.7.2 选择流事件(spec §2 状态转换)===
@@ -1106,9 +1174,13 @@
     }
     // v0.7 bridge:background 推送的 run 进度/完成/失败(仅当前 tab 且 Composer 打开时处理)
     if (_contractOpen && msg && msg.tab_id === currentTabId) {
-      if (msg.type === "bridge-progress" && _contractRunning) setBridgeStatus(t("bridge.running"), "running");
-      else if (msg.type === "bridge-completed") { setContractRunning(false); setBridgeStatus(t("bridge.completed"), "ok"); }
-      else if (msg.type === "bridge-failed") { setContractRunning(false); setBridgeStatus(tBridgeFailed(msg.code, msg), bridgeFailClass(msg.code)); }
+      if (msg.type === "bridge-progress" && _contractRunning) {
+        setBridgeStatus(_contractRunKind === "candidate" ? t("bridge.candidateRunning") : t("bridge.running"), "running");
+      } else if (msg.type === "bridge-completed") {
+        setContractRunning(false);
+        if (msg.candidate) showCandidateResult(msg); // Night Pack A §5.2 最小只读成功态
+        setBridgeStatus(msg.candidate ? t("bridge.candidateCompleted") : t("bridge.completed"), "ok");
+      } else if (msg.type === "bridge-failed") { setContractRunning(false); setBridgeStatus(tBridgeFailed(msg.code, msg), bridgeFailClass(msg.code)); }
     }
   });
 

@@ -554,6 +554,14 @@ button {
 /* C 状态字段 hint 与 bridge 隐私补充 */
 .field-hint { margin: 3px 0 6px; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
 .contract-privacy-note { margin: 8px 2px 0; padding-top: 8px; border-top: 1px solid var(--line-subtle); color: var(--text-muted); font-size: 10.5px; line-height: 1.5; }
+/* Night Pack A §5.2 最小只读成功态 */
+.candidate-result { margin-top: 12px; padding: 11px 12px; border: 1px solid rgba(131,239,215,.35); border-radius: var(--r-md); background: var(--success-soft); }
+.candidate-result-title { font-weight: 700; color: var(--success); font-size: 13px; margin-bottom: 6px; }
+.candidate-result-facts { margin: 0 0 9px; padding-left: 18px; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.candidate-result-facts li { min-width: 0; overflow-wrap: anywhere; }
+.candidate-result-actions { display: flex; gap: 8px; }
+.candidate-result-actions .contract-secondary { flex: 1; height: 34px; }
+[data-theme="light"] .candidate-result { border-color: rgba(31,122,61,.35); }
 /* A 状态 CTA 行(outline 次级按钮 + ? 说明) */
 .comment-actions .cta-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .comment-actions .cta-row #export-btn { flex: 1; min-width: 0; }

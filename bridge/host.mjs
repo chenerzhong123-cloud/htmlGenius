@@ -5,7 +5,7 @@
 // host 名 com.htmlgenius.local_bridge 是 provider-neutral 的:后续 Codex adapter 复用同一 host,不新建。
 import process from "node:process";
 import { NativeFrameDecoder, writeMessage } from "./native-protocol.mjs";
-import { executeHandoff } from "./host-runner.mjs";
+import { executeHandoff, executeCandidateRun } from "./host-runner.mjs";
 
 function log(...args) {
   process.stderr.write("[htmlgenius-bridge] " + args.map(String).join(" ") + "\n");
@@ -20,11 +20,13 @@ function dispatch(msg) {
       try { writeMessage(process.stdout, payload); }
       catch (e) { log("emit failed:", e && e.message); }
     };
+    const isCandidate = msg.run_kind === "candidate";
     (async () => {
       try {
-        await executeHandoff(msg, { emit });
+        if (isCandidate) await executeCandidateRun(msg, { emit });
+        else await executeHandoff(msg, { emit });
       } catch (e) {
-        log("handoff crashed:", (e && e.stack) || e);
+        log((isCandidate ? "candidate" : "handoff") + " crashed:", (e && e.stack) || e);
         emit({ type: "bridge_failed", run_id: msg.run_id, code: "HOST_CRASH", message: (e && e.message) || "host crash" });
       }
     })();
