@@ -541,6 +541,12 @@ button {
 .select-card .quote { color: var(--text-muted); font-size: 12px; background: var(--brand-soft); border-left: 2px solid var(--brand); border-radius: 0 var(--r-sm) var(--r-sm) 0; padding: 5px 9px; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .select-card .select-text { color: var(--text-secondary); font-size: 13px; line-height: 1.5; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .select-card .select-foot { margin-top: 6px; color: var(--text-faint); font-size: 11px; }
+/* 嵌套回复卡:左侧细线表示层级(reply 的缩进由 inline margin-left 控制) */
+.select-card.reply { border-left: 2px solid var(--line-default); }
+.select-card.reply.selected { border-left-color: var(--brand); }
+/* issue 2:跨上下文聚焦受限时,草稿输入框的「准备输入」脉冲提示 */
+@keyframes hg-draft-pulse { 0%, 100% { box-shadow: 0 0 0 0 var(--brand-soft); } 50% { box-shadow: 0 0 0 4px var(--brand-soft); } }
+.draft-input.ready { animation: hg-draft-pulse 1.1s ease-in-out 3; border-color: var(--line-focus); }
 /* ? tooltip(mockup .tip/.bubble:hover/focus/click 均可展开;right:0 向面板内侧展开,不产生横向滚动) */
 .tip { position: relative; display: inline-grid; place-items: center; width: 16px; height: 16px; flex: 0 0 auto; cursor: help; border: 1px solid var(--line-default); border-radius: 50%; color: var(--text-muted); background: transparent; font-size: 10px; font-weight: 800; line-height: 1; padding: 0; }
 .tip:hover, .tip:focus { color: var(--text-primary); border-color: var(--brand); }
@@ -562,6 +568,64 @@ button {
 .candidate-result-actions { display: flex; gap: 8px; }
 .candidate-result-actions .contract-secondary { flex: 1; height: 34px; }
 [data-theme="light"] .candidate-result { border-color: rgba(31,122,61,.35); }
+/* issue 1:? 气泡向上展开(用于贴近面板底部的 CTA) */
+.tip.above .bubble { top: auto; bottom: calc(100% + 6px); }
+/* issue 4:流程中禁止新建评论的醒目提示 */
+.contract-block-notice { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0 12px; padding: 10px 11px; border: 1px solid rgba(255,141,152,.45); border-radius: var(--r-md); background: rgba(255,141,152,.12); color: var(--danger); font-size: 12px; line-height: 1.5; }
+.contract-block-notice[hidden] { display: none; }
+.contract-block-notice .cbn-icon { flex: 0 0 auto; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--danger); color: #1a0408; font-size: 11px; font-weight: 800; }
+.contract-block-notice .cbn-text { min-width: 0; }
+[data-theme="light"] .contract-block-notice { border-color: rgba(178,38,30,.4); background: rgba(178,38,30,.08); }
+/* C 步骤(mockup 还原):编号步骤头 + scope 卡 + 执行 seg + 折叠保留项 */
+.cstep { margin-top: 16px; min-width: 0; }
+.cstep-head { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; min-width: 0; }
+.cstep-num { display: grid; place-items: center; width: 20px; height: 20px; flex: 0 0 auto; border-radius: 50%; color: #151923; background: var(--brand); font-size: 11px; font-weight: 800; }
+.cstep-title { min-width: 0; font-weight: 750; color: var(--text-primary); font-size: 13px; }
+[data-theme="light"] .cstep-num { color: #fff; }
+.scope-cards { display: grid; gap: 7px; min-width: 0; }
+.scope-card { display: flex; gap: 9px; align-items: flex-start; padding: 10px; cursor: pointer; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface); transition: border-color .14s, background .14s; min-width: 0; }
+.scope-card:hover { border-color: var(--line-default); background: var(--bg-surface-raised); }
+.scope-card input { position: absolute; opacity: 0; width: 0; height: 0; }
+.scope-radio { width: 15px; height: 15px; flex: 0 0 auto; margin-top: 2px; border: 1px solid #8390a7; border-radius: 50%; box-sizing: border-box; }
+.scope-card:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+.scope-card:has(input:checked) .scope-radio { border: 5px solid var(--brand); }
+.scope-card.sel-fallback { border-color: var(--brand); background: var(--brand-soft); }
+.scope-card.sel-fallback .scope-radio { border: 5px solid var(--brand); }
+.scope-body { min-width: 0; }
+.scope-body b { display: block; font-size: 12px; color: var(--text-primary); }
+.scope-body small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+.exec-seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-input); }
+.exec-opt { border: 0; border-radius: var(--r-sm); padding: 8px 5px; cursor: pointer; color: var(--text-muted); background: transparent; font: 600 11px/1.3 var(--font-sans); height: auto; }
+.exec-opt.active { color: #111520; background: var(--brand); font-weight: 750; }
+[data-theme="light"] .exec-opt.active { color: #fff; }
+.contract-preserve-details { margin-top: 16px; padding: 10px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface); }
+.contract-preserve-details summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--text-primary); list-style: none; }
+.contract-preserve-details summary::-webkit-details-marker { display: none; }
+.contract-preserve-details summary .opt { color: var(--text-muted); font-weight: 400; }
+.contract-preserve-details .field-hint { margin: 7px 0 6px; }
+.contract-preserve-details textarea { margin-top: 2px; }
+/* 底栏 mockup send-group(发送主按钮 + ⌄ 菜单) */
+.contract-actions { display: flex; min-width: 0; gap: 7px; align-items: stretch; }
+.contract-copy { min-width: 0; flex: 1; padding: 10px 6px; cursor: pointer; border: 1px solid var(--line-default); border-radius: var(--r-md); color: var(--text-primary); background: var(--bg-surface-raised); font: 650 12px/1.2 var(--font-sans); height: auto; }
+.contract-copy:hover { border-color: var(--brand); }
+.contract-copy:disabled { opacity: .5; cursor: not-allowed; }
+.send-group { position: relative; display: flex; min-width: 0; flex: 1.4; }
+.send-main { min-width: 0; flex: 1; padding: 10px 6px; cursor: pointer; border: 0; border-radius: var(--r-md) 0 0 var(--r-md); color: #111520; background: var(--brand); font: 750 12px/1.2 var(--font-sans); height: auto; }
+.send-main:disabled { opacity: .5; cursor: not-allowed; }
+.send-toggle { width: 33px; flex: 0 0 auto; cursor: pointer; border: 0; border-left: 1px solid rgba(0,0,0,.17); border-radius: 0 var(--r-md) var(--r-md) 0; color: #111520; background: var(--brand); font-size: 13px; height: auto; }
+[data-theme="light"] .send-main, [data-theme="light"] .send-toggle { color: #fff; }
+.send-menu { display: none; position: absolute; z-index: 8; right: 0; bottom: calc(100% + 8px); width: min(285px, calc(100vw - 32px)); padding: 7px; border: 1px solid var(--line-default); border-radius: var(--r-lg); background: var(--bg-overlay); box-shadow: var(--shadow-float); }
+.send-menu.show { display: block; }
+.send-menu .menu-head { padding: 7px 8px 5px; color: var(--text-muted); font-size: 10px; }
+.send-menu .menu-item { width: 100%; display: flex; gap: 8px; align-items: flex-start; padding: 9px; cursor: pointer; border: 0; border-radius: var(--r-md); color: var(--text-primary); background: transparent; text-align: left; font: inherit; height: auto; }
+.send-menu .menu-item.static { cursor: default; }
+.send-menu .menu-item:not(.static):hover { background: var(--bg-surface-raised); }
+.send-menu .menu-item b { display: block; font-size: 12px; }
+.send-menu .menu-item small { display: block; margin-top: 1px; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
+.send-menu .dot-i { width: 7px; height: 7px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 3px rgba(131,239,215,.13); }
+.send-menu .radio-i { width: 14px; height: 14px; flex: 0 0 auto; margin-top: 2px; border: 1px solid #8390a7; border-radius: 50%; box-sizing: border-box; }
+.send-menu .radio-i.on { border: 5px solid var(--brand); }
+.send-menu .menu-note { margin: 5px 8px 4px; padding-top: 8px; border-top: 1px solid var(--line-subtle); color: var(--text-muted); font-size: 10px; line-height: 1.45; }
 /* A 状态 CTA 行(outline 次级按钮 + ? 说明) */
 .comment-actions .cta-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .comment-actions .cta-row #export-btn { flex: 1; min-width: 0; }

@@ -97,8 +97,10 @@
     } else if (msg.type === "presence") {
       renderPresence(msg.users);
     } else if (msg.type === "start-comment") {
-      // 页面上点了「批注」→ 在侧边栏开草稿块内联编辑评论
-      showDraft(msg.selector, msg.quote);
+      // issue 4:若正处于「整理评论/创建任务」流程(sheet 打开),草稿会被 sheet 盖住、用户无处输入 →
+      // 不开草稿,改显示醒目提示,引导先返回收件箱。否则正常开草稿。
+      if (_contractOpen) { showBlockNotice(); }
+      else { hideBlockNotice(); showDraft(msg.selector, msg.quote); }
     } else if (msg.type === "edit-state") {
       // content-script 切换编辑态后同步按钮(确认窗「刷新」/ 手动「开始编辑」均经此)
       _editing = !!msg.editing;
@@ -344,8 +346,20 @@
       '<div class="draft-acts"><button class="draft-cancel">' + esc(t("draft.cancel")) + '</button><button class="draft-save">' + esc(t("draft.save")) + '</button></div>';
     host.appendChild(draft);
     const ta = draft.querySelector(".draft-input");
-    window.focus();          // 抢侧边栏窗口焦点(点批注浮窗时焦点在页面)
-    ta.focus();              // 立即聚焦输入框(不用 setTimeout,避免被页面抢回)
+    ta.classList.add("ready"); // 视觉「准备输入」脉冲提示(跨上下文聚焦受限时的可见线索)
+    // 直接聚焦:若侧栏面板恰好处于活动状态,光标立即出现
+    try { window.focus(); } catch (e) {}
+    try { ta.focus(); } catch (e) {}
+    // 跨上下文聚焦限制:页面点击触发的消息无法在侧栏合成「用户手势」,caret 常不亮。
+    // 退而求其次——用户指针/焦点首次到达侧栏时,自动把光标落到草稿输入框(仅一次),交互更顺。
+    const grabFocus = () => {
+      try { if (document.activeElement !== ta) ta.focus(); } catch (e) {}
+      ta.classList.remove("ready");
+      window.removeEventListener("focus", grabFocus);
+      document.removeEventListener("pointerdown", grabFocus, true);
+    };
+    window.addEventListener("focus", grabFocus);
+    document.addEventListener("pointerdown", grabFocus, true);
     draft.querySelector(".draft-save").addEventListener("click", commitDraft);
     draft.querySelector(".draft-cancel").addEventListener("click", cancelDraft);
     ta.addEventListener("keydown", (e) => {
@@ -495,8 +509,8 @@
   const candidateBack = document.getElementById("candidate-back");
 
   let _contractStep = "closed"; // closed | select | compose
-  let _selectedContractRootIds = new Set(); // 本轮勾选的 root id(真相源;draft 从这里读)
-  let _contractRunKind = "handoff"; // 本轮 bridge run 类型(handoff|candidate);sidepanel 发送 = candidate
+  let _selectedNodeIds = new Set(); // 本轮勾选的节点 id(root+reply;真相源)。回复也可选(用户反馈 v0.7.2)
+  let _contractRunKind = "candidate"; // sidepanel 发送 = candidate
   let _candidateResult = null;      // Night Pack A §5.2:最近一次 candidate-ready 结果(只读成功态)
 
   function countReplies(rootId, allItems) {
@@ -506,44 +520,61 @@
     while (stack.length) { const id = stack.pop(); n += 1; (kids[id] || []).forEach((c) => stack.push(c)); }
     return n;
   }
-  // 已选 root,按 getRoots(items) 原始顺序(spec §4.4:保证 Prompt/JSON 稳定,不按勾选时间排序)
+  // parent→children 索引(原始顺序),供嵌套渲染与子树勾选
+  function buildChildrenIndex(items) {
+    const pos = new Map(); (items || []).forEach((a, i) => { if (a && a.id != null) pos.set(a.id, i); });
+    const kids = new Map();
+    (items || []).forEach((a) => { if (!a || a.id == null || !a.parent_id) return; const p = a.parent_id; if (!kids.has(p)) kids.set(p, []); kids.get(p).push(a); });
+    kids.forEach((arr) => arr.sort((x, y) => (pos.get(x.id) | 0) - (pos.get(y.id) | 0)));
+    return kids;
+  }
+  // 所有 non-stale 节点 id(root+reply,原始顺序)
+  function allNonStaleNodeIds(items) {
+    return (items || []).filter((a) => a && a._status !== "stale" && a.id != null).map((a) => String(a.id));
+  }
+  // 节点及其全部后代 id(含自身)
+  function descendantIds(id, kids) {
+    const out = [String(id)]; const stack = (kids.get(id) || []).slice();
+    while (stack.length) { const c = stack.pop(); out.push(String(c.id)); (kids.get(c.id) || []).forEach((x) => stack.push(x)); }
+    return out;
+  }
+  // 已选 root(按 getRoots 原序,供 buildTask rootIds;§4.4 稳定)
   function orderedSelectedRootIds() {
     return window.ChangeContract.getRoots(_contractItems)
-      .filter((a) => _selectedContractRootIds.has(String(a.id)))
-      .map((a) => a.id);
+      .filter((a) => _selectedNodeIds.has(String(a.id))).map((a) => a.id);
   }
+  // 已选且 non-stale 的节点数(用于计数行 M)
+  function selectedNodeCount() {
+    const nonStale = new Set(allNonStaleNodeIds(_contractItems));
+    let n = 0; _selectedNodeIds.forEach((id) => { if (nonStale.has(id)) n++; });
+    return n;
+  }
+  // 内部 mode 由 scope 卡 + 执行 seg 派生(mockup 还原;schema 仍单值):plan→restructure,否则=scope
   function getContractMode() {
-    const checked = document.querySelector('input[name="contract-mode"]:checked');
-    return checked ? checked.value : "precise_patch";
+    const execEl = document.querySelector(".exec-opt.active");
+    const execVal = execEl ? execEl.dataset.exec : "run";
+    if (execVal === "plan") return "restructure";
+    const scope = document.querySelector('input[name="contract-scope"]:checked');
+    return scope ? scope.value : "precise_patch";
   }
   function getContractDraft() {
     return {
       mode: getContractMode(),
-      rootIds: orderedSelectedRootIds(), // spec §4.3:从 _selectedContractRootIds 读,不再依赖固定快照
+      rootIds: orderedSelectedRootIds(),
+      selectedIds: Array.from(_selectedNodeIds), // 节点级选择:buildTask 据此裁剪未选回复
       brief: contractBrief.value,
       preserveText: contractPreserve.value,
       artifact: _contractArtifact || { title: "", url: "", isLocal: false }
     };
   }
+  // C 来源摘要(只读计数;C 不重复逐条列表,与 mockup 一致)
   function renderContractSource() {
-    const items = _contractItems;
-    const selectedIds = orderedSelectedRootIds();
-    const total = window.ChangeContract.getRoots(items).length;
-    // C 来源摘要(spec §3.C.2):本次将发送 M 条评论(可处理共 N 条)+ 更改链接
+    const total = allNonStaleNodeIds(_contractItems).length;
+    const selected = selectedNodeCount();
     if (contractSummaryText) {
       contractSummaryText.textContent = t("taskSelect.composeSummary")
-        .replace("{selected}", String(selectedIds.length)).replace("{total}", String(total));
+        .replace("{selected}", String(selected)).replace("{total}", String(total));
     }
-    const roots = items.filter((a) => selectedIds.indexOf(a.id) !== -1 && a.parent_id == null && a._status !== "stale");
-    if (!roots.length) {
-      contractSourceList.innerHTML = '<div class="src-item" style="color:var(--text-faint)">' + esc(t("contract.empty")) + "</div>";
-      return;
-    }
-    contractSourceList.innerHTML = roots.map((a) => {
-      const q = (a.quote || "").slice(0, 48);
-      const reps = countReplies(a.id, items);
-      return '<div class="src-item"><span class="src-quote">' + esc(q) + '</span><span class="src-meta">' + reps + " " + esc(t("contract.replies")) + "</span></div>";
-    }).join("");
   }
   function refreshContractUI() {
     if (!_contractOpen) return;
@@ -551,41 +582,42 @@
     const meta = (window.ChangeContract.MODES || []).find((m) => m.id === draft.mode);
     const req = !!(meta && meta.briefRequired);
     if (contractBriefReq) contractBriefReq.hidden = !req;
-    if (contractPlanHint) contractPlanHint.hidden = draft.mode !== "restructure";
-    if (contractCopyPrompt) contractCopyPrompt.textContent = (draft.mode === "restructure") ? t("contract.copyPlan") : t("contract.copyPrompt");
-    if (contractCloseBtn) contractCloseBtn.setAttribute("aria-label", t("contract.close")); // i18n aria-label(禁硬编码)
-    // 选中态:给当前选中模式卡加 .selected(:has 的 JS 兜底,旧 Chromium 也能正确高亮)
-    document.querySelectorAll(".mode-card").forEach((c) => {
-      const inp = c.querySelector("input"); c.classList.toggle("selected", !!(inp && inp.checked));
+    const isPlan = draft.mode === "restructure";
+    if (contractPlanHint) contractPlanHint.hidden = !isPlan;
+    if (contractCopyPrompt) contractCopyPrompt.textContent = isPlan ? t("contract.copyPlan") : t("contract.copyPrompt");
+    if (contractCloseBtn) contractCloseBtn.setAttribute("aria-label", t("contract.close"));
+    // scope 卡高亮兜底(:has 不支持的旧内核)
+    document.querySelectorAll(".scope-card").forEach((c) => {
+      const inp = c.querySelector("input"); c.classList.toggle("sel-fallback", !!(inp && inp.checked));
     });
+    // 执行 seg 文案
+    const execHint = document.getElementById("contract-exec-hint");
+    if (execHint) execHint.textContent = isPlan ? t("contract.exec.planHint") : t("contract.exec.runHint");
     const v = window.ChangeContract.validateDraft(draft, _contractItems);
     if (v.errors.brief) { contractBriefError.textContent = t("contract.briefRequired"); contractBriefError.hidden = false; }
     else { contractBriefError.hidden = true; }
     const disable = !v.ok;
     const lock = _contractRunning;
-    // v0.7.1 bridge:仅本地 managed artifact + 非 restructure 显示
+    // 发送组(发送给 Claude Code)仅 run 模式 + 本地 managed artifact 可用;plan 模式隐藏(只能复制规划)
     const bridgeEligible = !!(_contractMeta && _contractMeta.isLocal && _contractMeta.logicalDocumentId
-      && _contractMeta.loadedArtifactHash && draft.mode !== "restructure");
-    if (contractBridgeWrap) contractBridgeWrap.hidden = !bridgeEligible;
-    if (contractBridge) {
-      contractBridge.hidden = !bridgeEligible; // v0.7.2:发送按钮移入固定底栏,hidden 独立控制
-      if (bridgeEligible) contractBridge.textContent = t("bridge.run"); // 三种可发送模式统一「发送给 Claude Code」
-    }
-    const continueWrap = document.getElementById("contract-session-continue-wrap");
-    if (continueWrap) continueWrap.hidden = !_contractSessionContinueAvail;
-    contractCopyPrompt.disabled = disable || lock;
-    contractCopyJson.disabled = disable || lock;
-    if (contractBridge) contractBridge.disabled = disable || lock || !bridgeEligible;
+      && _contractMeta.loadedArtifactHash && !isPlan);
+    const sendGroup = document.getElementById("contract-send-group");
+    if (sendGroup) sendGroup.hidden = !bridgeEligible;
+    if (contractBridge) { contractBridge.textContent = t("bridge.run"); contractBridge.disabled = disable || lock; }
+    const contItem = document.getElementById("contract-session-continue-item");
+    if (contItem) contItem.hidden = !_contractSessionContinueAvail;
+    if (contractCopyPrompt) contractCopyPrompt.disabled = disable || lock;
   }
   // 重置契约表单(新一轮开始 / 关闭清空时)
   function resetContractForm() {
-    const precise = document.querySelector('input[name="contract-mode"][value="precise_patch"]');
+    const precise = document.querySelector('input[name="contract-scope"][value="precise_patch"]');
     if (precise) precise.checked = true;
-    const sessNew = document.querySelector('input[name="contract-session"][value="new"]');
-    if (sessNew) sessNew.checked = true;
+    document.querySelectorAll(".exec-opt").forEach((b) => b.classList.toggle("active", b.dataset.exec === "run"));
+    const sessNew = document.querySelector('.session-item[data-session="new"] .radio-i');
+    document.querySelectorAll(".session-item .radio-i").forEach((r) => r.classList.remove("on"));
+    if (sessNew) sessNew.classList.add("on");
     contractBrief.value = "";
     contractPreserve.value = "";
-    document.querySelectorAll('input[name="contract-mode"], input[name="contract-session"]').forEach((el) => { el.disabled = false; });
     contractBrief.disabled = false;
     contractPreserve.disabled = false;
     contractBriefError.hidden = true;
@@ -600,53 +632,67 @@
     contractSheet.hidden = false;
     contractSheet.classList.add("show");
   }
-  // A → B 入口(spec §4.2):默认全选可处理 roots + 清空表单(新一轮)
+  // 流程中禁止新建评论的醒目提示(issue 4)
+  function showBlockNotice() {
+    const n = document.getElementById("contract-block-notice");
+    if (n) n.hidden = false;
+  }
+  function hideBlockNotice() {
+    const n = document.getElementById("contract-block-notice");
+    if (n) n.hidden = true;
+  }
+  // A → B 入口:默认全选所有 non-stale 节点(root+reply)+ 清空表单(新一轮)
   function openContractSelector(roots, items, artifact, meta) {
     _contractItems = items || [];
     _contractArtifact = artifact || { title: "", url: "", isLocal: false };
     _contractMeta = meta || { isLocal: !!(artifact && artifact.isLocal), logicalDocumentId: null, loadedArtifactHash: null };
-    _selectedContractRootIds = new Set((roots || []).map((r) => String(r.id))); // 默认全选(spec §3.B.5)
+    _selectedNodeIds = new Set(allNonStaleNodeIds(items)); // 默认全选(含回复)
     _contractRunning = false;
     _contractSessionContinueAvail = false;
     _contractOpen = true;
     resetContractForm();
     _contractStep = "select";
     contractSheet.dataset.step = "select";
+    hideBlockNotice();
     renderSelectStep();
     showContractSheet();
   }
-  // B 步骤渲染:checkbox 卡片(顶层 non-stale,getRoots 原序)+ 计数 + >20 warning + 继续按钮
+  // B 步骤渲染:嵌套回复树,每个节点(root+reply)一个 checkbox;整卡可点;子树随父勾选
   function renderSelectStep() {
-    const roots = window.ChangeContract.getRoots(_contractItems); // 顶层且 non-stale(spec §3.B.2)
-    const total = roots.length;
-    const selectedCount = orderedSelectedRootIds().length;
+    const items = _contractItems;
+    const kids = buildChildrenIndex(items);
+    const roots = window.ChangeContract.getRoots(items);
+    const total = allNonStaleNodeIds(items).length;     // N = 所有 non-stale 节点
+    const selectedCount = selectedNodeCount();          // M
     if (selectSummary) {
       selectSummary.innerHTML = t("taskSelect.summary")
         .replace("{total}", "<strong>" + total + "</strong>")
         .replace("{selected}", "<strong>" + selectedCount + "</strong>");
     }
-    if (selectManyWarning) selectManyWarning.hidden = !(total > 20); // 等于 20 不显示(spec §3.B.3)
+    if (selectManyWarning) selectManyWarning.hidden = !(total > 20);
     if (selectList) {
-      selectList.innerHTML = roots.map((a) => {
-        const checked = _selectedContractRootIds.has(String(a.id));
-        const reps = countReplies(a.id, _contractItems);
-        // label 整卡可点(原生行为);quote/正文经 esc/linkify(spec §4.4)
-        return '<label class="select-card' + (checked ? " selected" : "") + '" data-id="' + esc(String(a.id)) + '">'
+      const renderNode = (a, depth) => {
+        const id = String(a.id);
+        const checked = _selectedNodeIds.has(id);
+        const isRoot = !a.parent_id;
+        let h = '<label class="select-card' + (checked ? " selected" : "") + (isRoot ? "" : " reply") + '" data-id="' + esc(id) + '" style="margin-left:' + (depth * 16) + 'px">'
           + '<input type="checkbox"' + (checked ? " checked" : "") + '>'
           + '<span class="select-body">'
           + '<div class="quote">' + esc((a.quote || "").slice(0, 60)) + "</div>"
           + '<div class="select-text">' + linkify((a.body && a.body.comment) || "") + "</div>"
-          + '<div class="select-foot">' + reps + " " + esc(t("contract.replies")) + "</div>"
           + "</span></label>";
-      }).join("");
+        (kids.get(a.id) || []).filter((c) => c._status !== "stale").forEach((c) => { h += renderNode(c, depth + 1); });
+        return h;
+      };
+      selectList.innerHTML = roots.map((r) => renderNode(r, 0)).join("");
     }
     refreshSelectCounts();
   }
-  // 计数行与继续按钮(M=0 禁用 + 动态文案,spec §3.B.7)
+  // 计数行与继续按钮(M=0 禁用 + 动态文案)
   function refreshSelectCounts() {
-    const m = orderedSelectedRootIds().length;
+    const m = selectedNodeCount();
     if (selectSummary) {
-      const total = window.ChangeContract.getRoots(_contractItems).length;
+      const total = allNonStaleNodeIds(_contractItems).length;
       selectSummary.innerHTML = t("taskSelect.summary")
         .replace("{total}", "<strong>" + total + "</strong>")
         .replace("{selected}", "<strong>" + m + "</strong>");
@@ -677,7 +723,7 @@
   function closeContract() {
     _contractOpen = false;
     _contractStep = "closed";
-    _selectedContractRootIds = new Set(); // 清空临时 Set
+    _selectedNodeIds = new Set(); // 清空临时 Set
     resetContractForm();                  // 清空表单 → 再次进入恢复默认全选 + 空表单(spec §6.8)
     contractSheet.classList.remove("show");
     contractSheet.hidden = true;
@@ -736,14 +782,14 @@
     const resp = await sendToContent({ type: "get-export" });
     if (!resp || resp.type !== "export-data") return true; // 拿不到最新数据时沿用本轮快照,不阻塞
     const items = resp.items || [];
-    const validIds = new Set(window.ChangeContract.getRoots(items).map((a) => String(a.id)));
-    const staleSelected = Array.from(_selectedContractRootIds).filter((id) => !validIds.has(id));
+    const validIds = new Set(allNonStaleNodeIds(items)); // root+reply 均参与 stale 判定
+    const staleSelected = Array.from(_selectedNodeIds).filter((id) => !validIds.has(id));
     // 无论是否有 stale,都用最新数据刷新本轮快照(评论内容/回复可能已更新)
     _contractItems = items;
     _contractArtifact = resp.artifact || _contractArtifact;
     _contractMeta = bridgeMeta(resp);
     if (staleSelected.length) {
-      staleSelected.forEach((id) => _selectedContractRootIds.delete(id));
+      staleSelected.forEach((id) => _selectedNodeIds.delete(id));
       showToast(t("taskSelect.staleChanged"));
       gotoSelectStep();
       return false;
@@ -757,13 +803,13 @@
     try { task = window.ChangeContract.buildTask(draft, _contractItems); }
     catch (e) { showToast(t("contract.copyFail")); return; }
     const out = (kind === "json") ? window.ChangeContract.serialize(task) : window.ChangeContract.renderPrompt(task);
-    const btn = (kind === "json") ? contractCopyJson : contractCopyPrompt;
-    const orig = btn.textContent;
+    const btn = (kind === "json") ? (document.getElementById("contract-copy-json-menu") || contractCopyJson) : contractCopyPrompt;
+    const orig = btn ? btn.innerHTML : "";
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(out).then(() => {
-        btn.textContent = t("contract.copied");
+        if (btn) btn.innerHTML = esc(t("contract.copied"));
         showToast(t("contract.copied"));
-        setTimeout(() => { btn.textContent = orig; }, 1500);
+        setTimeout(() => { if (btn) btn.innerHTML = orig; }, 1500);
       }).catch(() => showContractFallback(out));
     } else {
       showContractFallback(out);
@@ -784,9 +830,14 @@
       chrome.runtime.sendMessage({ type: "bridge-query-session", tab_id: tab.id }).then((r) => {
         _contractSessionContinueAvail = !!(r && r.continuable);
         if (!_contractOpen) return;
-        const cw = document.getElementById("contract-session-continue-wrap");
+        const cw = document.getElementById("contract-session-continue-item");
         if (cw) cw.hidden = !_contractSessionContinueAvail;
-        if (!_contractSessionContinueAvail) { const n = document.querySelector('input[name="contract-session"][value="new"]'); if (n) n.checked = true; }
+        if (!_contractSessionContinueAvail) {
+          document.querySelectorAll(".session-item .radio-i").forEach((r) => r.classList.remove("on"));
+          const n = document.querySelector('.session-item[data-session="new"] .radio-i');
+          if (n) n.classList.add("on");
+        }
+        refreshContractUI();
       }).catch(() => {});
     });
   }
@@ -815,7 +866,7 @@
   }
   function setContractRunning(running) {
     _contractRunning = !!running;
-    contractSheet.querySelectorAll('input[name="contract-mode"], input[name="contract-session"], textarea').forEach((el) => { el.disabled = running; });
+    contractSheet.querySelectorAll('input[name="contract-scope"], .exec-opt, textarea').forEach((el) => { el.disabled = running; });
     refreshContractUI();
   }
   async function startBridgeRun() {
@@ -825,8 +876,9 @@
     let task;
     try { task = window.ChangeContract.buildTask(draft, _contractItems); }
     catch (e) { setBridgeStatus(t("bridge.invalid"), "err"); return; }
-    const sessEl = document.querySelector('input[name="contract-session"]:checked');
-    const session_mode = (sessEl && sessEl.value === "continue") ? "continue" : "new";
+    const sessOn = document.querySelector('.session-item .radio-i.on');
+    const sessItem = sessOn ? sessOn.closest(".session-item") : null;
+    const session_mode = (sessItem && sessItem.dataset.session === "continue") ? "continue" : "new";
     getActiveTab().then((tab) => {
       if (!tab || !tab.id) { setBridgeStatus(t("bridge.failed").replace("{msg}", "no active tab"), "err"); return; }
       // v0.7.1/Night Pack A: provider 固定 claude_code_cli;发送 = run_kind "candidate"(产受控 candidate,非 ack)
@@ -845,11 +897,36 @@
   }
 
   if (contractCloseBtn) contractCloseBtn.addEventListener("click", closeContract);
-  document.querySelectorAll('input[name="contract-mode"]').forEach((r) => r.addEventListener("change", refreshContractUI));
+  // scope 卡 / 执行 seg → 派生 mode + 刷新 UI(mockup 还原)
+  document.querySelectorAll('input[name="contract-scope"]').forEach((r) => r.addEventListener("change", refreshContractUI));
+  document.querySelectorAll(".exec-opt").forEach((b) => b.addEventListener("click", () => {
+    if (b.disabled) return;
+    document.querySelectorAll(".exec-opt").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    refreshContractUI();
+  }));
   if (contractBrief) contractBrief.addEventListener("input", refreshContractUI);
   if (contractCopyPrompt) contractCopyPrompt.addEventListener("click", () => copyContract("prompt"));
-  if (contractCopyJson) contractCopyJson.addEventListener("click", () => copyContract("json"));
   if (contractBridge) contractBridge.addEventListener("click", startBridgeRun);
+  // 发送组菜单(mockup):⌄ 切换;session-item 选会话;复制 JSON;外部点击关闭
+  const sendToggle = document.getElementById("contract-send-toggle");
+  const sendMenu = document.getElementById("contract-send-menu");
+  function closeSendMenu() { if (sendMenu) sendMenu.classList.remove("show"); if (sendToggle) sendToggle.setAttribute("aria-expanded", "false"); }
+  if (sendToggle) sendToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = !sendMenu.classList.contains("show");
+    if (open) { sendMenu.classList.add("show"); sendToggle.setAttribute("aria-expanded", "true"); } else closeSendMenu();
+  });
+  if (sendMenu) sendMenu.addEventListener("click", (e) => {
+    const si = e.target.closest(".session-item");
+    if (si && !si.hidden) {
+      document.querySelectorAll(".session-item .radio-i").forEach((r) => r.classList.remove("on"));
+      const ri = si.querySelector(".radio-i"); if (ri) ri.classList.add("on");
+      closeSendMenu(); return;
+    }
+    if (e.target.closest("#contract-copy-json-menu")) { copyContract("json"); closeSendMenu(); }
+  });
+  document.addEventListener("click", (e) => { if (sendMenu && !e.target.closest(".send-group")) closeSendMenu(); });
   // Night Pack A §5.2 只读成功态按钮:打开候选(新标签,便于对照)/ 返回原文件(当前标签导航回 source,清结果态)
   if (candidateOpen) candidateOpen.addEventListener("click", () => {
     if (_candidateResult && _candidateResult.candidate_uri) {
@@ -881,9 +958,10 @@
     const card = cb.closest(".select-card");
     if (!card) return;
     const id = card.dataset.id;
-    if (cb.checked) _selectedContractRootIds.add(id); else _selectedContractRootIds.delete(id);
-    card.classList.toggle("selected", cb.checked);
-    refreshSelectCounts();
+    const kids = buildChildrenIndex(_contractItems);
+    // 勾选/取消一个节点 → 连同其全部后代一起(子树)
+    descendantIds(id, kids).forEach((x) => { if (cb.checked) _selectedNodeIds.add(x); else _selectedNodeIds.delete(x); });
+    renderSelectStep(); // 重渲染同步嵌套勾选态 + 计数
   });
   // ? tooltip:click toggle(触屏可用),hover/focus 由 CSS 处理;同时关掉其他已开的
   document.addEventListener("click", (e) => {

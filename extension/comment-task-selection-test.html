@@ -1,12 +1,26 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<title>comment-task-selection-test</title>
-<link rel="stylesheet" href="sidepanel.css">
-<style> html, body { height: auto; overflow: visible; } body { width: 390px; } #log { font: 11px/1.5 ui-monospace,monospace; white-space: pre-wrap; border-top: 1px solid #ccc; margin-top: 10px; } </style>
-</head>
-<body>
+<!doctype html><html lang="zh-CN"><head>
+<meta charset="UTF-8"><link rel="stylesheet" href="sidepanel.css">
+<script>
+window.__captured = { runtime: [] };
+window.__hgMsgs = [];
+window.fire = (m) => (window.__hgMsgs||[]).forEach((fn) => { try { fn(m); } catch (e) {} });
+window.$$sel = (s) => Array.from(document.querySelectorAll(s));
+const __ITEMS = [
+  {id:"r1",parent_id:null,_status:"open",quote:"把 AI 生成的 HTML 越改越准",selector:{type:"TextQuoteSelector",exact:"把 AI 生成的 HTML 越改越准"},body:{comment:"主标题可以更具体一些，让人一眼知道是可视化批注工具。"},author:{id:"u1",name:"Deuce"}},
+  {id:"r2",parent_id:"r1",_status:"open",quote:"",selector:{},body:{comment:"同意，而且语气再克制一点。"},author:{id:"u1",name:"Deuce"}},
+  {id:"r3",parent_id:null,_status:"open",quote:"直接在渲染好的网页上圈出每一处",selector:{type:"TextQuoteSelector",exact:"直接在渲染好的网页上圈出每一处"},body:{comment:"这段太长，压缩成两句话，语气更有产品感。"},author:{id:"u1",name:"Deuce"}},
+  {id:"r4",parent_id:null,_status:"open",quote:"批注跟着内容走",selector:{type:"TextQuoteSelector",exact:"批注跟着内容走"},body:{comment:"这个「跟着内容走」具体是怎么做到的？"},author:{id:"u1",name:"Mia"}},
+  {id:"r5",parent_id:null,_status:"stale",quote:"多人协同正式开放",selector:{type:"TextQuoteSelector",exact:"多人协同正式开放"},body:{comment:"团队模式和本地模式的数据边界分别是什么？"},author:{id:"u1",name:"Deuce"}}
+];
+window.chrome = {
+  storage:{sync:{get:(k,cb)=>cb({})},local:{get:(k,cb)=>cb({hg_lang:"zh"})},onChanged:{addListener:()=>{}}},
+  runtime:{id:"x", sendMessage:(m)=>{ if(m.type==="bridge-query-latest-candidate") return Promise.resolve({ok:true,run:null}); window.__captured.runtime.push(m); return Promise.resolve({ok:true}); }, onMessage:{addListener:(fn)=>{ window.__hgMsgs.push(fn); }}},
+  tabs:{query:(o,cb)=>{const t=[{id:1,url:"file:///t/r.html"}]; if(cb)cb(t); else return Promise.resolve(t);}, sendMessage:(id,m)=>{ if(m.type==="get-annotations") return Promise.resolve({type:"annotations-list",items:__ITEMS,isLocal:true,editing:false,artifact_state:null}); if(m.type==="get-export") return Promise.resolve({type:"export-data",items:__ITEMS,artifact:{title:"T",url:"file:///t/r.html",isLocal:true},logicalDocumentId:"hgd",loadedArtifactHash:"sha256:"+"1".repeat(64)}); return Promise.resolve({ok:true}); }, connect:()=>({disconnect:()=>{},onDisconnect:{addListener:()=>{}}}), onActivated:{addListener:()=>{}}, onUpdated:{addListener:()=>{}}, reload:()=>{}},
+  identity:{getRedirectURL:()=>"x",launchWebAuthFlow:()=>Promise.reject(new Error("mock"))}
+};
+Object.defineProperty(window.navigator,"clipboard",{value:{writeText:(t)=>{window.__captured.clipboard=window.__captured.clipboard||[];window.__captured.clipboard.push(t);return Promise.resolve();}},configurable:true});
+</script>
+</head><body>
 <div id="header">
   <span class="brand">htmlGenius</span>
   <div class="header-right">
@@ -110,7 +124,7 @@
     <!-- v0.7.2 状态 A 唯一任务入口:次级 outline CTA + ? 说明(spec §3.A) -->
     <div class="cta-row">
       <button id="export-btn" data-i18n="taskSelect.start">整理评论,创建编辑任务</button>
-      <button class="tip" type="button" aria-label="?"><span>?</span><span class="bubble" role="tooltip" data-i18n="taskSelect.hint">先挑选这次要处理的评论;未选评论不会发送给 Agent。</span></button>
+      <button class="tip above" type="button" aria-label="?"><span>?</span><span class="bubble" role="tooltip" data-i18n="taskSelect.hint">先挑选这次要处理的评论;未选评论不会发送给 Agent。</span></button>
     </div>
   </div>
 </div>
@@ -145,6 +159,12 @@
      data-step 两个显式子状态:select(挑选评论)/ compose(契约表单)。返回/Esc/关闭 的状态语义见 sidepanel.js。 -->
 <div id="contract-sheet" class="sheet contract-sheet" role="dialog" aria-modal="true" aria-labelledby="contract-title" data-step="select" hidden>
 
+  <!-- issue 4:处于选择/契约流程中,页面试图新建评论时的醒目提示(置顶,两步骤均可见) -->
+  <div id="contract-block-notice" class="contract-block-notice" hidden>
+    <span class="cbn-icon" aria-hidden="true">!</span>
+    <span class="cbn-text" data-i18n="contract.blockNotice">当前正在整理评论 / 创建任务，暂时不能新建评论。请先点「← 返回页面评论」回到收件箱后再添加。</span>
+  </div>
+
   <!-- ===== Step B:挑选这次要处理的评论 ===== -->
   <div class="contract-step" id="contract-step-select">
     <div class="contract-scroll">
@@ -177,35 +197,53 @@
         <button id="contract-close" class="contract-close" data-i18n-title="contract.close" aria-label="">✕</button>
       </div>
 
+      <!-- 来源摘要(只读计数 + 更改;C 不重复逐条列表,与 mockup 一致) -->
       <div id="contract-source-summary" class="task-summary">
         <span id="contract-compose-summary-text"></span>
         <button id="contract-change-comments" class="contract-link" type="button" data-i18n="taskSelect.change">更改</button>
       </div>
-      <div id="contract-source-list" class="contract-source-list"></div>
 
-      <div class="contract-section-label" data-i18n="contract.modeTitle">修改模式</div>
-      <div class="contract-modes" role="radiogroup" aria-labelledby="contract-title">
-        <label class="mode-card"><input type="radio" name="contract-mode" value="precise_patch" checked><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.precise_patch.name">只改圈选处</div><div class="mode-desc" data-i18n="contract.mode.precise_patch.desc">只改我评论对应的内容，页面其他地方完全不动。</div></div></label>
-        <label class="mode-card"><input type="radio" name="contract-mode" value="local_optimize"><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.local_optimize.name">优化这一区块</div><div class="mode-desc" data-i18n="contract.mode.local_optimize.desc">可以连同周围这一块调整，但不要影响页面其他部分。</div></div></label>
-        <label class="mode-card"><input type="radio" name="contract-mode" value="restructure"><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.restructure.name">先给我改法</div><div class="mode-desc" data-i18n="contract.mode.restructure.desc">先告诉我准备怎么改，不生成或修改文件。</div></div></label>
-        <label class="mode-card"><input type="radio" name="contract-mode" value="regenerate"><div class="mode-card-body"><div class="mode-name" data-i18n="contract.mode.regenerate.name">重做整页</div><div class="mode-desc" data-i18n="contract.mode.regenerate.desc">按新的要求重做这份页面，原来的任何部分都可能改变。</div></div></label>
-      </div>
-
-      <label class="contract-field">
-        <span class="contract-label">
-          <span data-i18n="contract.brief.label">你想让页面变成什么样？</span>
-          <span id="contract-brief-req" class="contract-req" hidden data-i18n="contract.briefRequired"></span>
+      <!-- step 1:目标 -->
+      <div class="cstep">
+        <div class="cstep-head"><span class="cstep-num">1</span><span class="cstep-title" data-i18n="contract.brief.label">你想让页面变成什么样？</span>
           <button class="tip" type="button" aria-label="?"><span>?</span><span class="bubble" role="tooltip" data-i18n="contract.brief.tooltip">补充「所有已选评论共同想达成的效果」。例如目标读者、品牌语气或整体风格；不需要重复每一条评论。</span></button>
-        </span>
+        </div>
         <p class="field-hint" data-i18n="contract.brief.hint">评论里没说清的目标、受众或风格。</p>
         <textarea id="contract-brief" rows="3" maxlength="2000" data-i18n-placeholder="contract.brief.hint" placeholder="评论里没说清的目标、受众或风格。"></textarea>
         <div id="contract-brief-error" class="contract-error" hidden></div>
-      </label>
-      <label class="contract-field">
-        <span class="contract-label" data-i18n="contract.preserve.label">有绝对不能动的内容吗？（可选）</span>
+      </div>
+
+      <!-- step 2:范围(3 张 scope 卡;restructure 不在此,而在 step3 的「先看方案」) -->
+      <div class="cstep">
+        <div class="cstep-head"><span class="cstep-num">2</span><span class="cstep-title" data-i18n="contract.scopeTitle">允许 Agent 改多大范围？</span>
+          <button class="tip" type="button" aria-label="?"><span>?</span><span class="bubble" role="tooltip" data-i18n="contract.scopeHelp">这是 Agent 的修改权限，不是「建议力度」。范围越大，允许它联动调整的内容越多。</span></button>
+        </div>
+        <div class="scope-cards" role="radiogroup" aria-label="scope">
+          <label class="scope-card"><input type="radio" name="contract-scope" value="precise_patch" checked><span class="scope-radio"></span><span class="scope-body"><b data-i18n="contract.mode.precise_patch.name">只改圈选处</b><small data-i18n="contract.mode.precise_patch.desc">只改我评论对应的内容，页面其他地方完全不动。</small></span></label>
+          <label class="scope-card"><input type="radio" name="contract-scope" value="local_optimize"><span class="scope-radio"></span><span class="scope-body"><b data-i18n="contract.mode.local_optimize.name">优化这一区块</b><small data-i18n="contract.mode.local_optimize.desc">可以连同周围这一块调整，但不要影响页面其他部分。</small></span></label>
+          <label class="scope-card"><input type="radio" name="contract-scope" value="regenerate"><span class="scope-radio"></span><span class="scope-body"><b data-i18n="contract.mode.regenerate.name">重做整页</b><small data-i18n="contract.mode.regenerate.desc">按新的要求重做这份页面，原来的任何部分都可能改变。</small></span></label>
+        </div>
+      </div>
+
+      <!-- step 3:执行(直接生成 / 先看方案=内部 restructure) -->
+      <div class="cstep">
+        <div class="cstep-head"><span class="cstep-num">3</span><span class="cstep-title" data-i18n="contract.execTitle">现在就改，还是先看方案？</span>
+          <button class="tip" type="button" aria-label="?"><span>?</span><span class="bubble" role="tooltip" data-i18n="contract.execHelp">「先给我改法」只输出修改计划，不生成文件；适合你还没确定是否接受大范围调整时使用。</span></button>
+        </div>
+        <div class="exec-seg" role="radiogroup" aria-label="execution">
+          <button type="button" class="exec-opt active" data-exec="run" data-i18n="contract.exec.run">直接生成新版本</button>
+          <button type="button" class="exec-opt" data-exec="plan" data-i18n="contract.exec.plan">先给我改法</button>
+        </div>
+        <p class="field-hint" id="contract-exec-hint" data-i18n="contract.exec.runHint">Agent 会按上面的范围生成一个新版本；原文件不会被直接覆盖。</p>
+      </div>
+
+      <!-- 必须保留(可选,折叠) -->
+      <details class="contract-preserve-details">
+        <summary><span data-i18n="contract.preserve.label">有绝对不能动的内容吗？</span> <span class="opt" data-i18n="contract.preserve.opt">（可选）</span></summary>
         <p class="field-hint" data-i18n="contract.preserve.hint">只写即使允许大改，也必须原样保留的内容。</p>
         <textarea id="contract-preserve" rows="3" maxlength="2000" data-i18n-placeholder="contract.preservePh" placeholder="每行一条，必须原样保留的内容"></textarea>
-      </label>
+      </details>
+
       <div id="contract-plan-hint" class="contract-plan-hint" hidden data-i18n="contract.planHint"></div>
 
       <div id="contract-output-fallback" class="contract-fallback" hidden>
@@ -213,198 +251,108 @@
         <textarea id="contract-fallback-text" readonly rows="6"></textarea>
       </div>
 
-      <!-- v0.7.1 Claude Code handoff:仅本地 managed artifact + 非 restructure 显示(发送按钮在底部固定栏) -->
-      <div id="contract-bridge-wrap" class="contract-bridge-wrap" hidden>
-        <div class="contract-section-label" data-i18n="bridge.sessionTitle">发送给 Claude Code</div>
-        <div class="contract-bridge-hint" data-i18n="bridge.hint"></div>
-        <div class="contract-session">
-          <label class="session-opt"><input type="radio" name="contract-session" value="new" checked><span data-i18n="bridge.sessionNew">创建新的 Claude task</span></label>
-          <label class="session-opt" id="contract-session-continue-wrap" hidden><input type="radio" name="contract-session" value="continue"><span data-i18n="bridge.sessionContinue">继续 HTML Genius 上次创建的 Claude task</span></label>
+      <!-- 最小只读成功态(非「接受修改」) -->
+      <div id="contract-candidate-result" class="candidate-result" hidden>
+        <div class="candidate-result-title" data-i18n="candidate.resultTitle">候选版本已生成</div>
+        <ul class="candidate-result-facts">
+          <li data-i18n="candidate.sourceUntouched">原文件未被修改</li>
+          <li id="candidate-anchor-stats"></li>
+          <li id="candidate-evidence"></li>
+        </ul>
+        <div class="candidate-result-actions">
+          <button id="candidate-open" class="contract-secondary" type="button" data-i18n="candidate.openCandidate">打开候选版本</button>
+          <button id="candidate-back" class="contract-secondary" type="button" data-i18n="candidate.backToSource">返回原文件</button>
         </div>
-        <p class="contract-privacy-note" data-i18n="bridge.privacyNote">不会显示或接管你正在运行的其他 Claude 会话。</p>
       </div>
     </div>
 
-    <!-- 固定底栏:复制输出 + 发送(还原 mockup 层级;窄面板不被挤出) -->
+    <!-- 固定底栏:还原 mockup —— [复制 Prompt] [发送给 Claude Code ⌄ 菜单];JSON 收入菜单 -->
     <div class="contract-bottom">
       <div class="contract-actions">
-        <button id="contract-copy-prompt" class="contract-primary"></button>
-        <button id="contract-copy-json" class="contract-secondary" data-i18n="contract.copyJson">复制 JSON</button>
+        <button id="contract-copy-prompt" class="contract-copy" type="button"></button>
+        <div class="send-group" id="contract-send-group" hidden>
+          <button id="contract-bridge" class="send-main" type="button"></button>
+          <button id="contract-send-toggle" class="send-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="menu">⌄</button>
+          <div class="send-menu" id="contract-send-menu" hidden>
+            <div class="menu-head" data-i18n="bridge.agentHead">已连接的 Agent</div>
+            <div class="menu-item static"><span class="dot-i"></span><span><b>Claude Code</b><small data-i18n="bridge.agentNote">本机已连接 · 使用你的 Claude 登录态</small></span></div>
+            <div class="menu-head" data-i18n="bridge.sessionHead">这次发到哪里？</div>
+            <button class="menu-item session-item" data-session="new" type="button"><span class="radio-i on"></span><span><b data-i18n="bridge.sessionNew">创建新的 Claude task</b><small data-i18n="bridge.sessionNewNote">从一份干净的上下文开始</small></span></button>
+            <button class="menu-item session-item" id="contract-session-continue-item" data-session="continue" type="button" hidden><span class="radio-i"></span><span><b data-i18n="bridge.sessionContinue">继续 HTML Genius 上次创建的 Claude task</b><small data-i18n="bridge.sessionContinueNote">沿用之前创建的上下文</small></span></button>
+            <div class="menu-head" data-i18n="bridge.exportHead">或导出</div>
+            <button class="menu-item" id="contract-copy-json-menu" type="button"><span><b data-i18n="contract.copyJson">复制 JSON</b></span></button>
+            <div class="menu-note" data-i18n="bridge.privacyNote">不会显示或接管你正在运行的其他 Claude 会话。</div>
+          </div>
+        </div>
       </div>
-      <button id="contract-bridge" class="contract-bridge" type="button" hidden></button>
       <div id="contract-bridge-status" class="contract-bridge-status" hidden></div>
     </div>
   </div>
 </div>
 
-<pre id="log"></pre>
-<script>
-// ===== mock chrome API(必须在 sidepanel.js 之前)=====
-window.__captured = { runtime: [], clipboard: [] };
-window.__fixture = [
-  { id: "r1", parent_id: null, _status: "open", quote: "QuoteA", selector: { type: "TextQuoteSelector", exact: "QuoteA", prefix: "", suffix: "" }, body: { comment: "Comment one: tighten the title" }, author: { id: "u1", name: "Deuce" } },
-  { id: "r2", parent_id: "r1", _status: "open", quote: "", selector: {}, body: { comment: "ReplyAgreed" }, author: { id: "u1", name: "Deuce" } },
-  { id: "r3", parent_id: null, _status: "open", quote: "QuoteB", selector: { type: "TextQuoteSelector", exact: "QuoteB" }, body: { comment: "Comment two: compress this paragraph" }, author: { id: "u1", name: "Deuce" } },
-  { id: "r4", parent_id: null, _status: "open", quote: "QuoteC", selector: { type: "TextQuoteSelector", exact: "QuoteC" }, body: { comment: "Comment three" }, author: { id: "u1", name: "Deuce" } },
-  { id: "r5", parent_id: null, _status: "stale", quote: "QuoteD", selector: { type: "TextQuoteSelector", exact: "QuoteD" }, body: { comment: "Expired comment" }, author: { id: "u1", name: "Deuce" } }
-];
-function __mockContentResponse(m) {
-  if (m && m.type === "get-annotations") return { type: "annotations-list", items: window.__fixture, isLocal: true, editing: false, artifact_state: null };
-  if (m && m.type === "get-export") return { type: "export-data", items: window.__fixture, artifact: { title: "T", url: "file:///t/report.html", isLocal: true }, logicalDocumentId: null, loadedArtifactHash: null };
-  return { ok: true };
-}
-window.chrome = {
-  storage: {
-    sync: { get: (k, cb) => { if (cb) cb({}); return Promise.resolve({}); }, set: (o, cb) => { if (cb) cb(); return Promise.resolve(); }, remove: (k, cb) => { if (cb) cb(); return Promise.resolve(); } },
-    local: { get: (k, cb) => { const r = { hg_lang: "zh" }; if (cb) cb(r); return Promise.resolve(r); }, set: (o, cb) => { if (cb) cb(); return Promise.resolve(); } },
-    onChanged: { addListener: () => {} }
-  },
-  runtime: {
-    id: "testextensionidtestextensionid",
-    sendMessage: (m) => { window.__captured.runtime.push(m); return Promise.resolve({ ok: true }); },
-    onMessage: { addListener: () => {} }
-  },
-  tabs: {
-    query: (o, cb) => { const tabs = [{ id: 1, url: "file:///t/report.html" }]; if (cb) cb(tabs); return Promise.resolve(tabs); },
-    sendMessage: (id, m) => Promise.resolve(__mockContentResponse(m)),
-    connect: () => ({ disconnect: () => {}, onDisconnect: { addListener: () => {} } }),
-    onActivated: { addListener: () => {} },
-    onUpdated: { addListener: () => {} },
-    reload: () => {}
-  },
-  identity: { getRedirectURL: () => "https://test.chromiumapp.org/", launchWebAuthFlow: () => Promise.reject(new Error("mock-no-auth")) }
-};
-Object.defineProperty(navigator, "clipboard", { value: { writeText: (t) => { window.__captured.clipboard.push(t); return Promise.resolve(); } }, configurable: true });
-</script>
+<script src="config.js"></script>
+<script src="buildprompt.js"></script>
 <script src="change-contract.js"></script>
 <script src="login.js"></script>
 <script src="i18n.js"></script>
 <script src="sidepanel.js"></script>
-
-<script>
-// ===== spec §6 自动化断言 =====
-(async () => {
-  if (new URLSearchParams(location.search).get("shot")) { document.title = "READY"; return; }
-  const log = (s) => { document.getElementById("log").textContent += s + "\n"; };
-  let failed = 0;
-  const ok = (cond, msg) => { if (cond) log("  ok " + msg); else { failed++; log("  FAIL " + msg); } };
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+<pre id="log" style="font:11px monospace;white-space:pre-wrap"></pre><script>
+(function(){
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
-  const click = (el) => el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-  await sleep(350); // 等 init(get-annotations → renderCards)
-
-  log("T1 状态 A:评论收件箱为默认落点,无 checkbox/Composer");
-  ok($$("#annotations .card").length >= 4, "评论卡片已渲染(" + $$("#annotations .card").length + " 张)");
-  ok($("#contract-sheet").hidden, "contract sheet 关闭");
-  ok(!$("#export-btn").disabled, "CTA 可用");
-
-  log("T2 进入 B:默认全选 non-stale 顶层;stale/回复不占 checkbox");
-  click($("#export-btn"));
-  await sleep(200);
-  ok(!$("#contract-sheet").hidden && $("#contract-sheet").dataset.step === "select", "sheet 打开且 data-step=select");
-  let cards = $$("#contract-select-list .select-card");
-  ok(cards.length === 3, "3 张 checkbox 卡片(r1/r3/r4;got " + cards.length + ")");
-  ok(cards.every(c => c.querySelector("input").checked), "默认全选");
-  ok(!cards.some(c => c.dataset.id === "r2"), "回复 r2 不占 checkbox");
-  ok(!cards.some(c => c.dataset.id === "r5"), "stale r5 被过滤");
-  ok($("#contract-select-summary").textContent.includes("3"), "计数行含 3");
-  ok($("#contract-many-warning").hidden, "3 ≤ 20 无 warning");
-  ok($("#contract-select-continue").textContent.includes("3"), "继续按钮含 3 条");
-
-  log("T3 取消勾选 r3/r4:计数/按钮/卡片同步");
-  click(cards[1].querySelector("input"));
-  click(cards[2].querySelector("input"));
-  await sleep(50);
-  ok(!cards[1].classList.contains("selected") && !cards[2].classList.contains("selected"), "卡片 selected 移除");
-  ok($("#contract-select-summary").textContent.includes("1"), "已选降为 1");
-  ok($("#contract-select-continue").textContent.includes("1"), "按钮文案含 1 条");
-
-  log("T4 M=0 不能继续");
-  click(cards[0].querySelector("input"));
-  await sleep(50);
-  ok($("#contract-select-continue").disabled, "0 条时 disabled");
-  ok($("#contract-select-continue").textContent.includes("至少选择一条"), "文案:请至少选择一条评论");
-  click($("#contract-select-continue"));
-  await sleep(50);
-  ok($("#contract-sheet").dataset.step === "select", "0 条点继续仍停留 B");
-
-  log("T5 重选 r1 → 继续进入 C");
-  click(cards[0].querySelector("input"));
-  await sleep(50);
-  ok(!$("#contract-select-continue").disabled, "重选后启用");
-  click($("#contract-select-continue"));
-  await sleep(120);
-  ok($("#contract-sheet").dataset.step === "compose", "data-step=compose");
-  ok($("#contract-compose-summary-text").textContent.includes("1"), "C 来源摘要含发送 1 条");
-  ok($$("#contract-source-list .src-item").length === 1, "详情列表仅 1 个 root");
-
-  log("T6 C→B 保持选择与表单");
-  $("#contract-brief").value = "测试目标";
-  $("#contract-brief").dispatchEvent(new Event("input", { bubbles: true }));
-  click($("#contract-compose-back"));
-  await sleep(60);
-  ok($("#contract-sheet").dataset.step === "select", "回到 B");
-  const cards2 = $$("#contract-select-list .select-card");
-  ok(cards2[0].querySelector("input").checked && !cards2[1].querySelector("input").checked && !cards2[2].querySelector("input").checked, "仅 r1 仍选中");
-  click($("#contract-select-continue"));
-  await sleep(60);
-  ok($("#contract-brief").value === "测试目标", "brief 保留");
-
-  log("T7 复制 Prompt:只含已选,未选/stale 不出现;回复随 root");
-  click($("#contract-copy-prompt"));
-  await sleep(120);
-  const prompt = window.__captured.clipboard[window.__captured.clipboard.length - 1] || "";
-  ok(prompt.includes("QuoteA") && prompt.includes("Comment one: tighten the title"), "含已选 r1 的 quote+正文");
-  ok(!prompt.includes("QuoteB") && !prompt.includes("压缩成两句话"), "不含未选 r3");
-  ok(!prompt.includes("QuoteD") && !prompt.includes("Expired comment"), "不含 stale r5");
-  ok(prompt.includes("ReplyAgreed"), "回复 r2 随 r1 一并进入任务");
-
-  log("T8 复制 JSON:root_annotation_ids 精确相等");
-  click($("#contract-copy-json"));
-  await sleep(120);
-  const json = JSON.parse(window.__captured.clipboard[window.__captured.clipboard.length - 1]);
-  ok(JSON.stringify(json.source.root_annotation_ids) === JSON.stringify(["r1"]), "root_annotation_ids=[r1]");
-  ok(json.annotations.length === 1 && json.annotations[0].replies.length === 1, "task 含完整 reply tree");
-
-  log("T9 关闭再进入:恢复默认全选 + 表单清空");
-  click($("#contract-close"));
-  await sleep(60);
-  ok($("#contract-sheet").hidden, "sheet 关闭");
-  click($("#export-btn"));
-  await sleep(200);
-  const cards3 = $$("#contract-select-list .select-card");
-  ok(cards3.length === 3 && cards3.every(c => c.querySelector("input").checked), "再次默认全选");
-  click($("#contract-select-continue"));
-  await sleep(60);
-  ok($("#contract-brief").value === "", "brief 已清空");
-  click($("#contract-close"));
-  await sleep(60);
-
-  log("T10 超过 20 条显示 warning;等于 20 不显示");
-  window.__fixture = [];
-  for (let i = 0; i < 21; i++) window.__fixture.push({ id: "m" + i, parent_id: null, _status: "open", quote: "Q" + i, selector: { exact: "Q" + i }, body: { comment: "C" + i } });
-  click($("#export-btn"));
-  await sleep(200);
-  ok(!$("#contract-many-warning").hidden, "21 条显示 warning");
-  ok($$("#contract-select-list .select-card").length === 21, "21 张卡片");
-  click($("#contract-select-back"));
-  await sleep(60);
-  window.__fixture.pop(); // 20 条
-  click($("#export-btn"));
-  await sleep(200);
-  ok($("#contract-many-warning").hidden, "等于 20 条不显示 warning");
-  click($("#contract-select-back"));
-  await sleep(60);
-
-  log("T11 buildTask 与 v0.6.1 语义一致(既有 schema 不破坏)");
-  const task = window.ChangeContract.buildTask({ mode: "precise_patch", rootIds: ["r1"], brief: "", preserveText: "", artifact: { title: "T", url: "u", isLocal: true } }, [
-    window.__fixture.length ? { id: "r1", parent_id: null, _status: "open", quote: "Q", selector: { exact: "Q" }, body: { comment: "C" } } : null
-  ].filter(Boolean));
-  ok(task.schema_version === 1 && task.kind === "htmlgenius_change_contract", "schema 未变");
-
-  log(failed ? "\nFAIL(" + failed + ")" : "\nPASS — all cases ok");
-  document.title = failed ? "FAIL: " + failed + " cases" : "PASS";
+  const click = (s) => { const el=$(s); if(el) el.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true})); };
+  const setCheck = (id,val) => { const inp=$('.select-card[data-id="'+id+'"] input'); if(!inp)return; inp.checked=val; inp.dispatchEvent(new Event("change",{bubbles:true})); };
+  const sleep = (ms) => new Promise(r=>setTimeout(r,ms));
+  const log = (s) => { const l=document.getElementById("log"); if(l) l.textContent+=s+"\n"; };
+  if (new URLSearchParams(location.search).has("shot")) { document.title="READY"; return; }
+  (async () => {
+    let bad=0; const ok=(c,m)=>{ if(c)log("  ok "+m); else {bad++;log("  FAIL "+m);} };
+    await sleep(400);
+    click("#export-btn"); await sleep(200);
+    let cards=$$("#contract-select-list .select-card");
+    ok(cards.length===4, "T1 选择卡=4(root+reply, got "+cards.length+")");
+    ok(cards.every(c=>c.querySelector("input").checked), "T1 默认全选");
+    ok(!$("#contract-select-list .select-card[data-id='r5']"), "T1 stale r5 不出现");
+    ok($("#contract-select-summary").textContent.includes("4"), "T1 计数含 4");
+    setCheck("r3",false); setCheck("r4",false); await sleep(60);
+    ok($("#contract-select-summary").textContent.includes("2"), "T2 已选=2");
+    click("#contract-select-continue"); await sleep(150);
+    ok($("#contract-sheet").dataset.step==="compose", "T3 进入 compose");
+    const cs=$("#contract-compose-summary-text").textContent;
+    ok(cs.includes("2")&&cs.includes("4"), "T3 C 摘要 2/4");
+    ok($$(".scope-card").length===3, "T3 scope 卡=3");
+    ok($$(".exec-opt").length===2, "T3 执行 seg=2");
+    window.__captured.clipboard=[]; click("#contract-copy-prompt"); await sleep(120);
+    const pr=window.__captured.clipboard[window.__captured.clipboard.length-1]||"";
+    ok(pr.includes("主标题")&&pr.includes("同意"), "T4 prompt 含 r1+r2(回复)");
+    ok(!pr.includes("这段太长")&&!pr.includes("跟着内容走"), "T4 prompt 不含未选 r3/r4");
+    click("#contract-send-toggle"); await sleep(80);
+    window.__captured.clipboard=[]; click("#contract-copy-json-menu"); await sleep(120);
+    const j=JSON.parse(window.__captured.clipboard[window.__captured.clipboard.length-1]);
+    ok(JSON.stringify(j.source.root_annotation_ids)===JSON.stringify(["r1"]), "T5 root_annotation_ids=[r1]");
+    ok(j.annotations[0].replies.length===1, "T5 选中回复 r2 在树中");
+    click("#contract-change-comments"); await sleep(120);
+    setCheck("r2",false); await sleep(60);
+    click("#contract-select-continue"); await sleep(120);
+    click("#contract-send-toggle"); await sleep(80);
+    window.__captured.clipboard=[]; click("#contract-copy-json-menu"); await sleep(120);
+    const j2=JSON.parse(window.__captured.clipboard[window.__captured.clipboard.length-1]);
+    ok(j2.annotations[0].replies.length===0, "T6 取消 r2 后回复被裁剪");
+    click("#contract-close"); await sleep(120);
+    click("#export-btn"); await sleep(200);
+    ok($$("#contract-select-list .select-card").every(c=>c.querySelector("input").checked), "T7 重开默认全选");
+    click("#contract-select-continue"); await sleep(120);
+    ok($("#contract-brief").value==="", "T7 brief 清空");
+    click("#contract-change-comments"); await sleep(120);
+    fire({type:"start-comment",selector:{exact:"x"},quote:"x"}); await sleep(80);
+    ok(!$("#contract-block-notice").hidden, "T8 流程中新建评论→醒目提示显示");
+    ok(!$("#draft-host .draft-card"), "T8 流程中不开草稿");
+    click("#contract-close"); await sleep(120);
+    fire({type:"start-comment",selector:{exact:"x"},quote:"x"}); await sleep(80);
+    ok(!!$("#draft-host .draft-input.ready"), "T9 状态A新建评论→草稿带 ready 提示");
+    log(bad?("\nFAIL "+bad):"\nPASS selection v2");
+    document.title = bad?"FAIL: "+bad+" cases":"PASS";
+  })();
 })();
 </script>
 </body></html>

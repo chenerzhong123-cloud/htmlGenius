@@ -93,7 +93,7 @@
   // - roots 输出顺序 = 在 allAnnotations 中的原始顺序(§8.1 用例6)
   // - 每条 root 含完整后代,DFS,父在子前,同级按原始顺序
   // - 孤儿 reply(父不在树中)不会被纳入;循环引用/重复 id 跳过,不抛异常
-  function buildReplyTree(allAnnotations, rootIds) {
+  function buildReplyTree(allAnnotations, rootIds, selectedIds) {
     var items = allAnnotations || [];
     var pos = new Map();
     items.forEach(function (a, i) { if (a && a.id != null) pos.set(a.id, i); });
@@ -108,6 +108,9 @@
     childrenOf.forEach(function (arr) {
       arr.sort(function (x, y) { return (pos.get(x.id) | 0) - (pos.get(y.id) | 0); });
     });
+
+    // 节点级选择(v0.7.2 反馈):selectedSet 存在时,未选的回复子树不纳入;未传则含全部后代(向后兼容)
+    var selectedSet = selectedIds ? new Set((selectedIds || []).map(function (x) { return String(x); })) : null;
 
     function toNode(ann, seen) {
       var sel = ann.selector || {};
@@ -127,6 +130,7 @@
       var kids = childrenOf.get(ann.id) || [];
       kids.forEach(function (ch) {
         if (!ch || ch.id == null || seen.has(ch.id)) return; // 防御:循环/重复
+        if (selectedSet && !selectedSet.has(String(ch.id))) return; // 未选的回复不纳入
         seen.add(ch.id);
         node.replies.push(toNode(ch, seen));
       });
@@ -134,7 +138,7 @@
     }
 
     var want = {};
-    (rootIds || []).forEach(function (id) { if (id != null) want[id] = true; });
+    (rootIds || []).forEach(function (id) { if (id != null) want[id] = true; })
     // 仅纳入:被选中 + 顶层 + 非 stale;filter 保持原始顺序
     var roots = items.filter(function (a) {
       return a && !hasParent(a) && a._status !== "stale" && want[a.id] === true;
@@ -180,7 +184,7 @@
     if (!v.ok) throw new Error("Invalid change contract");
 
     var meta = modeById(draft.mode);
-    var tree = buildReplyTree(allAnnotations || [], draft.rootIds);
+    var tree = buildReplyTree(allAnnotations || [], draft.rootIds, draft.selectedIds);
     var art = draft.artifact || {};
     return {
       schema_version: 1,

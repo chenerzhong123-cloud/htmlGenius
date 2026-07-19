@@ -19,7 +19,7 @@
 | v0.6.1 Change Contract | 已存在 | `change-contract.js`（buildTask/getRoots/renderPrompt/serialize）；schema 未改。 |
 | v0.6.2 artifact 协议 | 已存在 | `artifact-version.js`；`content-script.js` `handleArtifactUpdateReady`(overwrite/new_artifact→linkArtifactUri+重锚)。 |
 | v0.7.1 Claude handoff | 已存在 | `bridge/{claude-cli,task-bundle,host,host-runner}.mjs` ack 路径；host 名 `com.htmlgenius.local_bridge`。 |
-| 评论→任务选择 UI | 已存在 | `sidepanel.js` `openContractSelector`/`renderSelectStep`/`_selectedContractRootIds`/`data-step`；测试 `comment-task-selection-test.html`；截图 `docs/screenshots-v0.7.2/`。 |
+| 评论→任务选择 UI | 已存在 | `sidepanel.js` `openContractSelector`/`renderSelectStep`(嵌套回复树,root+reply 均可勾选)/`_selectedNodeIds`/`data-step`；compose 按 mockup 还原=step1 目标+step2 **3 张 scope 卡**+step3 执行 seg(直接生成/先看方案=内部 restructure,mode 由 scope+exec 派生,schema 仍单值)+preserve `<details>`+底栏 mockup send-group 菜单；测试 `comment-task-selection-test.html`(T1–T9)；截图 `docs/screenshots-v0.7.2/`。反馈轮已修：CTA `?` 气泡向上展开、流程中新建评论显示醒目阻断提示、跨上下文草稿聚焦降级(见 §5)。 |
 | candidate 闭环(Night Pack A) | 已存在 | `bridge/candidate-workspace.mjs`(snapshot 0400/manifest 0600/sibling 原子/形态校验/路径安全)；`host-runner.mjs` `executeCandidateRun`；`claude-cli.mjs` `buildClaudeArgv`(candidate 放行 Write)；`background.js` `completeCandidate`(逐字段比对→new_artifact→navigate)；`storage.js` `getLatestCompletedCandidateRun`；`sidepanel.js` 只读成功态+持久证据。 |
 | M5 diff/review/promote | 未实施 | 下一包唯一方向；不在 candidate 稳定前混入。 |
 
@@ -59,6 +59,8 @@ git diff --check                      # clean
 - source 安全边界 = 不向 Claude 暴露 source 路径 + 禁 shell + host 前后 hash + 失败拒绝注册（非「模型绝不可能写 source」虚假承诺）。continue candidate 用新 snapshot，`--resume` 仅延续对话记忆。
 - run record 只存 metadata（candidate_uri/candidate_sha256/manifest_path），无 prompt/comment/candidate HTML/Claude stdout；无 promote/overwrite-source/auto-accept 路径。
 - 无 AI 评论分类、无评论类别持久化；评论卡片交互未改。
+- **跨上下文聚焦限制（Chrome side panel）**：在页面点「评论」触发的草稿，无法用程序在侧栏合成「用户手势」，故 caret 常不立即出现。已降级为：草稿输入框 `.ready` 脉冲视觉提示 + 用户指针/焦点首次到达侧栏时自动聚焦草稿（一次）。零额外点击的自动聚焦在该架构下不可达。
+- **节点级选择**：`buildTask` 接受 `draft.selectedIds` 裁剪未选回复（未传则含全部后代，向后兼容）；`buildReplyTree(allAnnotations, rootIds, selectedIds)`。选择步骤计数 N/M 计 root+reply 全部 non-stale 节点。
 
 ## 6. 下一个获授权施工包
 
