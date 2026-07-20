@@ -11,7 +11,7 @@ import {
   resolveSourceArtifact, verifySourceHash, createWorkspace, writeTaskBundle,
   buildHandoffPrompt, buildCandidatePrompt, rootAnnotationIdsOf, isSha256Tagged, sha256File
 } from "./task-bundle.mjs";
-import { isSessionUuid, checkAuth, runHandoff, resumeHandoff } from "./claude-cli.mjs";
+import { isSessionUuid, checkAuth, runHandoff, resumeHandoff, HANDOFF_TIMEOUT_MS } from "./claude-cli.mjs";
 import {
   resolveSourcePath, prepareCandidateRun, writeManifest, validateCandidate,
   publishSiblingCandidate, quarantineCandidate
@@ -19,6 +19,9 @@ import {
 import { pathToFileURL } from "node:url";
 
 const realClaude = { checkAuth, runHandoff, resumeHandoff };
+
+// candidate run 需要读写完整 HTML 文件,比 ack 回执慢得多;3 分钟太短(真实 Claude 编辑整页常需 3-5 分钟)
+const CANDIDATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 分钟
 
 function truncateMsg(s) {
   const t = String(s || "");
@@ -197,10 +200,10 @@ export async function executeCandidateRun(msg, { emit, claude } = {}) {
   let sessionId;
   try {
     if (session.mode === "continue") {
-      const r = await cli.resumeHandoff({ cwd: prep.runsDir, promptText, resumeSessionId: session.session_id, runKind: "candidate" });
+      const r = await cli.resumeHandoff({ cwd: prep.runsDir, promptText, resumeSessionId: session.session_id, runKind: "candidate", timeoutMs: CANDIDATE_TIMEOUT_MS });
       sessionId = r.sessionId;
     } else {
-      const r = await cli.runHandoff({ cwd: prep.runsDir, promptText, runKind: "candidate" });
+      const r = await cli.runHandoff({ cwd: prep.runsDir, promptText, runKind: "candidate", timeoutMs: CANDIDATE_TIMEOUT_MS });
       sessionId = r.sessionId;
       emit({ type: "bridge_session_created", run_id: runId, session_id: sessionId });
     }

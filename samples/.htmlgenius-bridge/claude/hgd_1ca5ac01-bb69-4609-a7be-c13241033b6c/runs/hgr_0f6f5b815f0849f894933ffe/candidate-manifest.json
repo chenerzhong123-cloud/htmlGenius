@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "kind": "htmlgenius_candidate_manifest",
+  "run_id": "hgr_0f6f5b815f0849f894933ffe",
+  "logical_document_id": "hgd_1ca5ac01-bb69-4609-a7be-c13241033b6c",
+  "provider": "claude_code_cli",
+  "source": {
+    "path": "/Users/deuce/claudeproject/productlearning/htmlGenius/samples/01_token.html",
+    "sha256_before": "sha256:71de12abcdd0f23b25c87c4939db5b57f52d074167ca1b2227e9640a9db8a5c9",
+    "sha256_after": null
+  },
+  "candidate": null,
+  "change_contract_sha256": "sha256:95e930b40cd94d73dd4d012a73c41da78863a538b391788c1bf0d7d989ddd950",
+  "session": null,
+  "created_at": "2026-07-20T15:24:51.594Z",
+  "status": "timed_out"
+}

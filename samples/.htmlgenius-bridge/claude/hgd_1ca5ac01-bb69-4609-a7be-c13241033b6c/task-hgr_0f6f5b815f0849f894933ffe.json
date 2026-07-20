@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "kind": "htmlgenius_change_contract",
+  "mode": "precise_patch",
+  "artifact": {
+    "title": "Token — AI 百科 #01",
+    "url": "file:///Users/deuce/claudeproject/productlearning/htmlGenius/samples/01_token.html",
+    "is_local": true
+  },
+  "source": {
+    "root_annotation_ids": [
+      "ann_1784046246561_619u9b",
+      "ann_1784559112350_rncxn0"
+    ],
+    "root_annotation_count": 2
+  },
+  "annotations": [
+    {
+      "id": "ann_1784046246561_619u9b",
+      "selector": {
+        "type": "TextQuoteSelector",
+        "exact": "婴儿",
+        "prefix": "介于两者之间的“语义碎片”。 把 AI 读文章想象成婴儿看世界：",
+        "suffix": "不会一开始就认识“苹果”这个词，而是先看到红色、圆形、光滑等碎片"
+      },
+      "quote": "婴儿",
+      "comment": "和前面一样也换比喻方式",
+      "author": "作者",
+      "replies": []
+    },
+    {
+      "id": "ann_1784559112350_rncxn0",
+      "selector": {
+        "type": "TextQuoteSelector",
+        "exact": "因为 AI 的计费、速度、记忆容量全都按 token 算。",
+        "prefix": "“碎片”——“苹果”可能被拆成“苹”和“果”两个 token。 ",
+        "suffix": "你给 ChatGPT 发消息，每 1000 个 token 都要"
+      },
+      "quote": "因为 AI 的计费、速度、记忆容量全都按 token 算。",
+      "comment": "这句改为不是比喻",
+      "author": "作者",
+      "replies": []
+    }
+  ],
+  "brief": "",
+  "preserve": [],
+  "contract": {
+    "write_scope": "target_only",
+    "locked_outside_scope": true,
+    "on_ambiguous_target": "ask_or_stop",
+    "verification": [
+      "仅修改定位目标；报告前后片段或 diff；不改其他文件。"
+    ]
+  }
+}
