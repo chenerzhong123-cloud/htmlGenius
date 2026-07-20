@@ -91,11 +91,30 @@
   let _hasUnsavedLocalSnapshot = false;
   let _lastReconcileStatus = "clean";
   let _artifactVerificationError = false;
-  // 该 clone 在 UI 注入之前同步完成；digest 异步不影响其输入。
+  // content-script 的源哈希必须 = host 读磁盘拿到的原始字节哈希(两者比对,否则误报 SOURCE_CHANGED)。
+  // 不能用 DOM 序列化(serializeCurrentArtifact),因为 Chrome 的 HTML parser 会规范化标记
+  // (属性重排/补 head/body/小写化/插 tbody…),DOM.outerHTML ≠ 文件字节 → 永远不匹配。
+  // 故改为 fetch 原始文件字节后直接 sha256。
   const _loadedArtifactHashReady = (isManagedArtifact && window.HgArtifactVersion)
-    ? window.HgArtifactVersion.sha256Hex(window.HgArtifactVersion.serializeCurrentArtifact(document.documentElement))
-      .then((hash) => { _loadedArtifactHash = hash; _renderedArtifactHash = hash; return hash; })
-      .catch((error) => { _lastReconcileStatus = "error"; console.error("[hg] artifact hash unavailable", error); throw error; })
+    ? (async () => {
+        try {
+          const resp = await fetch(_artifactUri);
+          const buf = await resp.arrayBuffer();
+          const digest = await crypto.subtle.digest("SHA-256", buf);
+          const hex = Array.prototype.map.call(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+          const hash = "sha256:" + hex;
+          _loadedArtifactHash = hash; _renderedArtifactHash = hash; return hash;
+        } catch (e) {
+          // fallback:DOM 序列化(旧逻辑;与 host 字节哈希可能不一致,仅用于 fetch 不可用场景)
+          try {
+            const hash = await window.HgArtifactVersion.sha256Hex(
+              window.HgArtifactVersion.serializeCurrentArtifact(document.documentElement));
+            _loadedArtifactHash = hash; _renderedArtifactHash = hash; return hash;
+          } catch (e2) {
+            _lastReconcileStatus = "error"; console.error("[hg] artifact hash unavailable", e2); throw e2;
+          }
+        }
+      })()
     : Promise.resolve(null);
 
   // Fix #3/#2: content-script 是编辑态的唯一真相源,sidepanel 经 get-annotations 同步。
