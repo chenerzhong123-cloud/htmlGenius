@@ -81,13 +81,14 @@ test("运行期 source 被改 → SOURCE_MUTATED_DURING_CANDIDATE,无 sibling", 
   assert.ok(!fs.existsSync(path.join(fix.dir, "report--htmlgenius-hgr_crun0123456789.candidate.html")), "mutated 不创建 sibling");
 });
 
-test("发送前 source 已变 → SOURCE_CHANGED_BEFORE_START", async () => {
+test("extension 哈希 ≠ 文件字节 → host 忽略、自算、正常产 candidate", async () => {
   const fix = mkFix();
+  const claude = makeFakeClaude({ onRun: (a) => fs.writeFileSync(path.join(a.cwd, "candidate.html"), "<!doctype html><html><body>ok</body></html>") });
   const msg = baseMsg(fix);
-  msg.source.base_artifact_hash = "sha256:" + "0".repeat(64);
+  msg.source.base_artifact_hash = "sha256:" + "0".repeat(64); // 故意给错
   const { events, emit } = collect();
-  await executeCandidateRun(msg, { emit, claude: makeFakeClaude() });
-  assert.equal(events.find((e) => e.type === "bridge_failed").code, "SOURCE_CHANGED_BEFORE_START");
+  await executeCandidateRun(msg, { emit, claude });
+  assert.ok(events.some((e) => e.type === "candidate-ready"), "host 自算源哈希,不与 extension 比对,正常产 candidate");
 });
 
 test("restructure 模式 → INVALID_MODE;continue 非法 UUID → NO_SAVED_SESSION", async () => {

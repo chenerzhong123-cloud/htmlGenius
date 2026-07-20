@@ -46,18 +46,18 @@ export async function executeHandoff(msg, { emit, claude } = {}) {
 
   status("checking");
 
-  // —— 2. source 解析 + base 哈希比对 ——
-  let sourcePath;
+  // —— 2. source 解析 + host 自算哈希(不与 extension 的 DOM 序列化哈希比对;两者方法不同必然不匹配) ——
+  let sourcePath, hostSourceHash;
   try {
     sourcePath = resolveSourceArtifact(source.artifact_uri).sourcePath;
-    verifySourceHash({ sourcePath, expectedHash: source.base_artifact_hash });
+    hostSourceHash = sha256File(sourcePath);
   } catch (e) { failed(e.code || "PREPARE_FAILED", e.message); return; }
 
   // —— 3. 稳定 workspace + task bundle(JSON + md,0600/0700)——
   let workspace, bundle;
   try {
     workspace = createWorkspace({ sourcePath, logicalDocumentId: source.logical_document_id });
-    bundle = writeTaskBundle({ workspace, runId, task, sourcePath, baseArtifactHash: source.base_artifact_hash });
+    bundle = writeTaskBundle({ workspace, runId, task, sourcePath, baseArtifactHash: hostSourceHash });
   } catch (e) { failed(e.code || "BUNDLE_FAILED", e.message); return; }
 
   // —— 4. auth(未登录/未安装即停)——
@@ -84,9 +84,10 @@ export async function executeHandoff(msg, { emit, claude } = {}) {
     }
   } catch (e) { failed(e.code || "RUN_FAILED", e.message); return; }
 
-  // —— 7. 重读 source:运行期被外部改动 → 不算成功交接(本版 Claude 无写权限,改动来自用户/其他进程)——
+  // —— 7. 重读 source:与 host 自己的运行前哈希比对(不与 extension 比对;方法不同) ——
   try {
-    verifySourceHash({ sourcePath, expectedHash: source.base_artifact_hash });
+    const afterHash = sha256File(sourcePath);
+    if (afterHash !== hostSourceHash) throw new Error("source changed during run");
   } catch (e) {
     emit({
       type: "bridge_failed", run_id: runId, code: "SOURCE_MUTATED_DURING_HANDOFF",
@@ -170,12 +171,13 @@ export async function executeCandidateRun(msg, { emit, claude } = {}) {
   status("checking");
 
   // 2. source 解析 + 稳定 workspace + task bundle
+  // host 自算源哈希(不与 extension 的 DOM 序列化哈希比对;两者方法不同必然不匹配,导致误报 SOURCE_CHANGED_BEFORE_START)
   let sourcePath, workspace, bundle;
   try {
     sourcePath = resolveSourcePath(source.artifact_uri);
-    verifySourceHash({ sourcePath, expectedHash: source.base_artifact_hash });
+    const hostHash = sha256File(sourcePath);
     workspace = createWorkspace({ sourcePath, logicalDocumentId: source.logical_document_id });
-    bundle = writeTaskBundle({ workspace, runId, task, sourcePath, baseArtifactHash: source.base_artifact_hash });
+    bundle = writeTaskBundle({ workspace, runId, task, sourcePath, baseArtifactHash: hostHash });
   } catch (e) { failed(e.code || "PREPARE_FAILED", e.message, null, { logicalDocumentId: source.logical_document_id, taskSha256: null }); return; }
 
   // 3. candidate 工作区:snapshot(0400)+ task 复制进 runs/<runId>(0700)

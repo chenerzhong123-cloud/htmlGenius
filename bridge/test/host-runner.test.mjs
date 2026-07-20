@@ -99,17 +99,15 @@ test("continue:只用保存的 UUID + 同一 workspace 调 resumeHandoff;非法 
   assert.equal(claude2.calls.resumeHandoff.length + claude2.calls.runHandoff.length, 0);
 });
 
-test("base 哈希不一致 → SOURCE_CHANGED_BEFORE_START,不调用 claude、无 completed", async () => {
+test("extension 哈希 ≠ 文件字节(host 自算)→ host 忽略 extension 哈希、正常完成", async () => {
   const fix = mkFixture();
   const claude = makeFakeClaude();
   const { events, emit } = collect();
   const msg = baseMsg(fix);
-  msg.source.base_artifact_hash = "sha256:" + "0".repeat(64);
+  msg.source.base_artifact_hash = "sha256:" + "0".repeat(64); // 故意给错的 DOM 序列化哈希
   await executeHandoff(msg, { emit, claude });
-  const fail = events.find((e) => e.type === "bridge_failed");
-  assert.equal(fail.code, "SOURCE_CHANGED_BEFORE_START");
-  assert.ok(!events.some((e) => e.type === "bridge_completed"));
-  assert.equal(claude.calls.runHandoff.length + claude.calls.checkAuth.length, 0, "未进入 claude 阶段");
+  assert.ok(events.some((e) => e.type === "bridge_completed"), "host 自算源哈希,不与 extension 比对,正常完成");
+  assert.equal(claude.calls.runHandoff.length, 1, "调用了 claude");
 });
 
 test("运行期 source 被外部改动 → SOURCE_MUTATED_DURING_HANDOFF(不算成功,不写 session)", async () => {
