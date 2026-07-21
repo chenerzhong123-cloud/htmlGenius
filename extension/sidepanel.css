@@ -527,6 +527,8 @@ button {
 /* 计数 chip(mockup .count) */
 .contract-count { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; margin: 0 0 12px; padding: 7px 9px; border: 1px solid var(--line-default); border-radius: var(--r-md); color: var(--text-secondary); background: var(--bg-surface); font-size: 12px; }
 .contract-count strong { color: var(--text-primary); }
+.contract-toggle-all { border: 0; background: transparent; color: var(--brand-hover); font: 600 11.5px var(--font-sans); cursor: pointer; padding: 4px 0; margin-bottom: 8px; height: auto; text-align: left; }
+.contract-toggle-all:hover { text-decoration: underline; }
 /* >20 条 warning banner(mockup .notice,项目 warning token) */
 .contract-notice { display: flex; gap: 8px; margin-bottom: 12px; padding: 9px 10px; border: 1px solid rgba(245,200,107,.3); border-radius: var(--r-md); color: var(--warning); background: var(--warning-soft); font-size: 11px; line-height: 1.5; }
 .contract-notice[hidden] { display: none; }

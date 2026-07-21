@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Token — AI 百科 #01</title>
+<style>* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  color: #1d1d1f;
+  background: #f5f5f7;
+  max-width: 430px;
+  margin: 0 auto;
+}
+:root {
+  --blue: #0066cc;
+  --blue-dark: #2997ff;
+  --white: #ffffff;
+  --parchment: #f5f5f7;
+  --tile-1: #272729;
+  --tile-2: #2a2a2c;
+  --tile-3: #252527;
+  --pure-black: #000000;
+  --ink: #1d1d1f;
+  --ink-80: #333333;
+  --ink-48: #7a7a7a;
+  --dark-body: #ffffff;
+  --dark-muted: #cccccc;
+  --hairline: #e0e0e0;
+  --divider: rgba(0,0,0,0.04);
+  --divider-soft: rgba(0,0,0,0.08);
+  --dark-div: rgba(255,255,255,0.08);
+}
+.tile { padding: 48px 20px; }
+.t-w { background: var(--white); }
+.t-p { background: var(--parchment); }
+.t-d1 { background: var(--tile-1); color: var(--dark-body); }
+.t-d2 { background: var(--tile-2); color: var(--dark-body); }
+.t-d3 { background: var(--tile-3); color: var(--dark-body); }
+.in { max-width: 390px; margin: 0 auto; }
+.hero { text-align: center; }
+.hero-h {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.07;
+  letter-spacing: -0.28px;
+  color: var(--dark-body);
+}
+.hero-lead {
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 1.14;
+  letter-spacing: 0.196px;
+  color: var(--dark-muted);
+  margin-top: 12px;
+}
+.section-h {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.10;
+  letter-spacing: 0;
+  margin-bottom: 20px;
+}
+.section-h-center { text-align: center; }
+.t-d .section-h { color: var(--dark-body); }
+.section-lead {
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 1.14;
+  letter-spacing: 0.196px;
+  color: var(--ink-48);
+  margin-bottom: 32px;
+  text-align: center;
+}
+.t-d .section-lead { color: var(--dark-muted); }
+.body {
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+}
+.t-d .body { color: var(--dark-muted); }
+.body + .body { margin-top: 16px; }
+strong { font-weight: 600; }
+.hl { color: var(--blue); font-weight: 600; }
+.t-d .hl { color: var(--blue-dark); }
+.cap {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.43;
+  letter-spacing: -0.224px;
+  color: var(--ink-48);
+}
+.t-d .cap { color: var(--dark-muted); }
+.fine {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.0;
+  letter-spacing: -0.12px;
+  color: var(--ink-48);
+}
+.code {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 15px;
+  background: var(--white);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--blue);
+}
+.t-p .code { background: var(--white); }
+/* Dark trends */
+.tr-stack { display: flex; flex-direction: column; }
+.tr {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--dark-div);
+}
+.tr:first-child { padding-top: 0; }
+.tr:last-child { border-bottom: none; padding-bottom: 0; }
+.tr-num {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: -0.224px;
+  color: var(--blue-dark);
+  margin-bottom: 6px;
+}
+.tr-title {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.19;
+  letter-spacing: 0.231px;
+  color: var(--dark-body);
+  margin-bottom: 8px;
+}
+.tr-body {
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+  color: var(--dark-muted);
+}
+/* Steps */
+.st + .st { margin-top: 28px; }
+.st-num {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.07;
+  letter-spacing: -0.28px;
+  color: var(--blue);
+  opacity: 0.12;
+  margin-bottom: 8px;
+}
+.st-title {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.24;
+  letter-spacing: -0.374px;
+  margin-bottom: 6px;
+}
+.st-body {
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+  color: var(--ink-48);
+}
+/* Compare table */
+.card {
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  overflow: hidden;
+}
+.cmp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.cmp-table { width: 100%; border-collapse: collapse; }
+.cmp-table th {
+  font-size: 14px; font-weight: 600; letter-spacing: -0.224px;
+  padding: 14px 16px; text-align: center;
+  background: var(--parchment); color: var(--ink-48);
+  border-bottom: 1px solid var(--hairline);
+}
+.cmp-table th:first-child { text-align: left; }
+.cmp-table td {
+  font-size: 15px; font-weight: 400; line-height: 1.47;
+  letter-spacing: -0.374px; padding: 16px; text-align: center;
+  border-bottom: 1px solid var(--divider); color: var(--ink-80);
+}
+.cmp-table td:first-child { text-align: left; font-weight: 600; color: var(--ink); }
+.cmp-table tr:last-child td { border-bottom: none; }
+.cmp-note {
+  padding: 16px 20px; font-size: 14px; font-weight: 400;
+  line-height: 1.43; letter-spacing: -0.224px;
+  color: var(--ink-48); border-top: 1px solid var(--divider);
+}
+/* Tips */
+.tip-stack { display: flex; flex-direction: column; gap: 12px; }
+.tip {
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+}
+.tip-title {
+  font-size: 17px; font-weight: 600; letter-spacing: -0.374px; margin-bottom: 6px;
+}
+.tip-body {
+  font-size: 17px; font-weight: 400; line-height: 1.47;
+  letter-spacing: -0.374px; color: var(--ink-48);
+}
+/* Summary */
+.sum { text-align: center; }
+.sum-h {
+  font-size: 28px; font-weight: 600; line-height: 1.07;
+  letter-spacing: -0.28px; color: var(--dark-body);
+}
+.sum-h em { font-style: normal; color: var(--blue-dark); }
+.sum-sub {
+  font-size: 17px; font-weight: 600; line-height: 1.19;
+  letter-spacing: 0.231px; color: var(--dark-muted); margin-top: 12px;
+}
+/* Footer */
+.foot {
+  background: var(--tile-1);
+  padding: 16px 20px;
+  text-align: center;
+}
+.foot-text {
+  font-size: 12px; font-weight: 400; letter-spacing: -0.12px;
+  color: rgba(255,255,255,0.5); line-height: 1.0;
+}
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<section class="tile t-d1">
+  <div class="in hero">
+    <h1 class="hero-h">Token</h1>
+    <p class="hero-lead">AI 理解世界的“最小单位”</p>
+  </div>
+</section>
+
+<!-- Definition -->
+<section class="tile t-p">
+  <div class="in">
+    <h2 class="section-h">它是什么？</h2>
+      <p class="body">Token 是 AI 的最小语义单元。</p>
+      <p class="body">把 AI 读文章想象成婴儿看世界：婴儿不会一开始就认识“苹果”这个词，而是先看到红色、圆形、光滑等碎片。Token 就是 AI 眼中的这些“碎片”——“苹果”可能被拆成“苹”和“果”两个 token。</p>
+      <p class="body">因为 AI 的计费、速度、记忆容量全都按 token 算。你给 ChatGPT 发消息，每 1000 个 token 都要钱；模型的“上下文窗口”能装多少 token，决定了它能记住多少对话。</p>
+  </div>
+</section>
+
+<!-- Trends -->
+<section class="tile t-d2">
+  <div class="in">
+    <h2 class="section-h section-h-center">为什么现在这么火？</h2>
+    <div class="tr-stack">
+        <div class="tr">
+          <p class="tr-num">01</p>
+          <h3 class="tr-title">计费模式的改变</h3>
+          <p class="tr-body">2023 年后几乎所有大模型都按 token 计价。GPT-4 的 API 定价是“每百万 token 若干美元”，开发者每天盯着 token 消耗报告，这个词从技术圈进入了商业圈。</p>
+        </div>
+        <div class="tr">
+          <p class="tr-num">02</p>
+          <h3 class="tr-title">token 经济学的诞生</h3>
+          <p class="tr-body">“token 优化”成了新的效率竞赛：同样的答案，谁用更少 token 表达清楚，谁就更省钱。这也催生了 Prompt 压缩、上下文缓存等技术。</p>
+        </div>
+        <div class="tr">
+          <p class="tr-num">03</p>
+          <h3 class="tr-title">争议：中文真的比英文贵？</h3>
+          <p class="tr-body">中英文 token 化方式不同。一个汉字约等于 1-2 个 token，而一个英文单词可能只占 0.75 个 token。有用户抱怨“中文对话比英文贵 2-3 倍”，这背后就是 token 切割逻辑的差异。</p>
+        </div>
+    </div>
+  </div>
+</section>
+
+<!-- Steps -->
+<section class="tile t-p">
+  <div class="in">
+    <h2 class="section-h section-h-center">核心原理</h2>
+      <div class="st">
+        <div class="st-num">01</div>
+        <h3 class="st-title">分词器上场</h3>
+        <p class="st-body">大模型内置一个分词器（如 BPE、SentencePiece），它会把你的输入“我今天很开心”拆成 [我, 今天, 很, 开心]。</p>
+      </div>
+      <div class="st">
+        <div class="st-num">02</div>
+        <h3 class="st-title">每个 token 变成一个向量</h3>
+        <p class="st-body">拆分后的每个 token 被查一张巨大的“词汇表”，转换成 768 维或更高维的数字向量——这就是 AI 能“看懂”的文字形式。</p>
+      </div>
+      <div class="st">
+        <div class="st-num">03</div>
+        <h3 class="st-title">模型处理 token 序列</h3>
+        <p class="st-body">模型按顺序读取 token 序列，通过注意力机制推断每个 token 之间的关系，最终输出下一个最可能的 token。这也是为什么 AI 是“一个字一个字蹦出来的”。</p>
+      </div>
+  </div>
+</section>
+
+<!-- Compare -->
+<section class="tile t-w">
+  <div class="in">
+    <h2 class="section-h">和 “字符/单词” 有什么区别？</h2>
+    <div class="card">
+      <div class="cmp-scroll">
+        <table class="cmp-table">
+          <thead>
+            <tr><th></th><th>Token</th><th>字符</th><th>单词</th></tr>
+          </thead>
+          <tbody>
+        <tr><td>核心思路</td><td>语义最小单元</td><td>书写最小单元</td><td>语言最小单元</td></tr>
+        <tr><td>典型场景</td><td>AI 模型输入输出</td><td>文本编辑显示</td><td>查词典</td></tr>
+        <tr><td>通俗类比</td><td>乐高积木块</td><td>原子</td><td>分子</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="cmp-note">一句话总结差异 字符和单词是为人定义的，token 是为 AI 的效率定义的——它是一道“翻译层”，把人类语言转换成 AI 能高效消化的格式。</p>
+    </div>
+  </div>
+</section>
+
+<!-- Tips -->
+<section class="tile t-p">
+  <div class="in">
+    <h2 class="section-h">怎么用上它？</h2>
+    <div class="tip-stack">
+        <div class="tip">
+          <h3 class="tip-title">OpenAI Tokenizer 工具</h3>
+          <p class="tip-body">OpenAI 官网提供免费的 Tokenizer 工具，你粘贴一段文字就能看到它被切成多少个 token，直观感受“说话的成本”。</p>
+        </div>
+        <div class="tip">
+          <h3 class="tip-title">写 Prompt 时注意精简</h3>
+          <p class="tip-body">同样的任务描述，用词越精简 token 越少。省 token = 省钱 + 更快响应。把“请你帮我……”改成“帮我……”可能就省了 5 个 token。</p>
+        </div>
+    </div>
+  </div>
+</section>
+
+<!-- Summary -->
+<section class="tile t-d3">
+  <div class="in sum">
+    <h2 class="sum-h">Token 是你和 AI 对话的“硬币”——你花的每一句话，都在花它。</h2>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="foot">
+  <p class="foot-text">AI 百科卡片 · #01 Token · 共 100 期</p>
+</footer>
+
+</body>
+</html>

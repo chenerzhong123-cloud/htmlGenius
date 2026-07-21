@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "htmlgenius_change_contract",
+  "mode": "precise_patch",
+  "artifact": {
+    "title": "Token — AI 百科 #01",
+    "url": "file:///Users/deuce/claudeproject/productlearning/htmlGenius/samples/01_token.html",
+    "is_local": true
+  },
+  "source": {
+    "root_annotation_ids": [
+      "ann_1784595912853_6rkq7o"
+    ],
+    "root_annotation_count": 1
+  },
+  "annotations": [
+    {
+      "id": "ann_1784595912853_6rkq7o",
+      "selector": {
+        "type": "TextQuoteSelector",
+        "exact": "Token 是 AI 大模型处理文本时的最小语义单元——它不是字符，也不是单词，而是介于两者之间的“语义碎片”",
+        "prefix": " Token AI 理解世界的“最小单位” 它是什么？ ",
+        "suffix": "。 把 AI 读文章想象成婴儿看世界：婴儿不会一开始就认识“苹果"
+      },
+      "quote": "Token 是 AI 大模型处理文本时的最小语义单元——它不是字符，也不是单词，而是介于两者之间的“语义碎片”",
+      "comment": "把这段话改到 15 个字以内",
+      "author": "作者",
+      "replies": []
+    }
+  ],
+  "brief": "",
+  "preserve": [],
+  "contract": {
+    "write_scope": "target_only",
+    "locked_outside_scope": true,
+    "on_ambiguous_target": "ask_or_stop",
+    "verification": [
+      "仅修改定位目标；报告前后片段或 diff；不改其他文件。"
+    ]
+  }
+}

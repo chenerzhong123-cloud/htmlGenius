@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "htmlgenius_candidate_manifest",
+  "run_id": "hgr_b152428ed60a43b0b1f6a903",
+  "logical_document_id": "hgd_1ca5ac01-bb69-4609-a7be-c13241033b6c",
+  "provider": "claude_code_cli",
+  "source": {
+    "path": "/Users/deuce/claudeproject/productlearning/htmlGenius/samples/01_token.html",
+    "sha256_before": "sha256:71de12abcdd0f23b25c87c4939db5b57f52d074167ca1b2227e9640a9db8a5c9",
+    "sha256_after": "sha256:71de12abcdd0f23b25c87c4939db5b57f52d074167ca1b2227e9640a9db8a5c9"
+  },
+  "candidate": {
+    "workspace_path": "/Users/deuce/claudeproject/productlearning/htmlGenius/samples/.htmlgenius-bridge/claude/hgd_1ca5ac01-bb69-4609-a7be-c13241033b6c/runs/hgr_b152428ed60a43b0b1f6a903/candidate.html",
+    "result_path": "/Users/deuce/claudeproject/productlearning/htmlGenius/samples/01_token--htmlgenius-hgr_b152428ed60a43b0b1f6a903.candidate.html",
+    "sha256": "sha256:c86ae9df9de4ab4843452dae8186343b88998ed8216859f459aafcbbbc51fc81",
+    "byte_length": 11372
+  },
+  "change_contract_sha256": "sha256:1b08b584527c39cfb769175b566c9b9d61b5e4d5b7f284331fdbc57e75588b17",
+  "session": {
+    "id": "174e02b2-b94f-403e-8e96-0e521693ea9b",
+    "ownership": "htmlgenius"
+  },
+  "created_at": "2026-07-21T01:08:39.327Z",
+  "status": "ready"
+}

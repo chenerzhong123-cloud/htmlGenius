@@ -502,6 +502,7 @@
   const selectManyWarning = document.getElementById("contract-many-warning");
   const selectList = document.getElementById("contract-select-list");
   const selectContinue = document.getElementById("contract-select-continue");
+  const selectToggleAll = document.getElementById("contract-toggle-all");
   // Night Pack A §5.2 只读成功态元素
   const candidateResult = document.getElementById("contract-candidate-result");
   const candidateAnchorStats = document.getElementById("candidate-anchor-stats");
@@ -700,6 +701,10 @@
     if (selectContinue) {
       selectContinue.disabled = m === 0;
       selectContinue.textContent = (m === 0) ? t("taskSelect.emptySelection") : t("taskSelect.continue").replace("{count}", String(m));
+    }
+    if (selectToggleAll) {
+      const total = allNonStaleNodeIds(_contractItems).length;
+      selectToggleAll.textContent = (m === total && total > 0) ? t("taskSelect.deselectAll") : t("taskSelect.selectAll");
     }
   }
   // B → C(spec §4.3):复用现有表单初始化,但不重置已填内容(C→B→C 保持 brief/preserve/mode)
@@ -971,6 +976,13 @@
     // 勾选/取消一个节点 → 连同其全部后代一起(子树)
     descendantIds(id, kids).forEach((x) => { if (cb.checked) _selectedNodeIds.add(x); else _selectedNodeIds.delete(x); });
     renderSelectStep(); // 重渲染同步嵌套勾选态 + 计数
+  });
+  // 全选/全不选:默认全选时点一下→全不选(方便逐个挑);不全选时点一下→全选
+  if (selectToggleAll) selectToggleAll.addEventListener("click", () => {
+    const nonStale = allNonStaleNodeIds(_contractItems);
+    const allSelected = selectedNodeCount() === nonStale.length && nonStale.length > 0;
+    _selectedNodeIds = new Set(allSelected ? [] : nonStale);
+    renderSelectStep();
   });
   // ? tooltip:click toggle(触屏可用),hover/focus 由 CSS 处理;同时关掉其他已开的
   document.addEventListener("click", (e) => {

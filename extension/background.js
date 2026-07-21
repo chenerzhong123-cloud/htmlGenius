@@ -248,9 +248,9 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
   if (completion.task_sha256 !== run.task_sha256 || completion.task_sha256 !== taskSha) {
     return failRun(tab_id, runId, "COMPLETION_MISMATCH", "task_sha256 mismatch");
   }
-  if (completion.source_sha256_before !== run.base_artifact_hash) {
-    return failRun(tab_id, runId, "COMPLETION_MISMATCH", "source_sha256_before mismatch");
-  }
+  // 注意:不比对 source_sha256_before 与 run.base_artifact_hash。
+  // host 用 sha256File(原始字节)算;extension 用 DOM 序列化(Chrome 规范化后)算 → 永远不匹配。
+  // host 内部已自校验(snapshot 前后 + 运行前后),background 无需跨侧再比。
   if (completion.logical_document_id !== run.logical_document_id || completion.logical_document_id !== logicalId) {
     return failRun(tab_id, runId, "COMPLETION_MISMATCH", "logical_document_id mismatch");
   }
