@@ -513,8 +513,10 @@ button {
 }
 #contract-sheet.show { display: flex; }
 .contract-step { display: none; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
-#contract-sheet[data-step="select"] #contract-step-select { display: flex; }
-#contract-sheet[data-step="compose"] #contract-step-compose { display: flex; }
+/* v0.8.1:三档 step —— compose(选择修改范围,默认)/ comment-scope(选择评论范围)/ plan-review(确认计划) */
+#contract-sheet[data-step="compose"] #contract-step-compose,
+#contract-sheet[data-step="comment-scope"] #contract-step-comment-scope,
+#contract-sheet[data-step="plan-review"] #contract-step-plan-review { display: flex; }
 .contract-scroll { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 14px 10px; }
 /* 固定底栏(还原 mockup:窄面板不被挤出,仅列表纵向滚动) */
 .contract-bottom { flex: none; min-width: 0; padding: 12px 14px; border-top: 1px solid var(--line-subtle); background: var(--bg-canvas); display: flex; flex-direction: column; gap: 8px; }
@@ -689,3 +691,53 @@ button {
 .contract-bridge-status.ok { color: var(--success); border-color: rgba(131,239,215,.3); }
 .contract-bridge-status.err { color: var(--danger); border-color: rgba(255,141,152,.3); }
 .contract-bridge-status.warn { color: var(--warning); border-color: rgba(245,200,107,.3); }
+
+/* === v0.8.1 创建编辑任务:compose action-grid / provider split / 高级选项 / plan-review === */
+/* 底部 action-grid:复制 Prompt / 发送给 {Agent} ⌄ / 先给我看修改计划(窄宽可换行,不横向溢出) */
+.action-grid { display: grid; grid-template-columns: 1fr 1.25fr; gap: 7px; min-width: 0; }
+.action-grid .contract-copy { grid-column: 1; }
+.action-grid .send-group { grid-column: 2; min-width: 0; }
+.plan-button { grid-column: 1 / -1; height: 39px; border: 1px solid var(--brand); border-radius: var(--r-md); color: var(--brand-hover); background: var(--brand-soft); font-size: 12px; font-weight: 700; cursor: pointer; }
+.plan-button:disabled { opacity: .5; cursor: not-allowed; }
+[data-theme="light"] .plan-button { color: var(--brand); }
+/* provider split button(发送给 X + ⌄) */
+.send-group.send-group { position: relative; display: flex; min-width: 0; }
+.send-main { flex: 1; min-width: 0; border: 0; border-radius: var(--r-md) 0 0 var(--r-md); color: var(--cta-fg, #10211f); background: var(--cta-bg, var(--brand)); font-size: 12px; font-weight: 700; cursor: pointer; }
+.send-main:disabled { opacity: .5; cursor: not-allowed; }
+.send-toggle { width: 33px; flex: 0 0 auto; border: 0; border-left: 1px solid rgba(255,255,255,.2); border-radius: 0 var(--r-md) var(--r-md) 0; color: var(--cta-fg, #10211f); background: var(--brand); font-size: 14px; cursor: pointer; }
+[data-theme="light"] .send-main, [data-theme="light"] .send-toggle { color: #fff; border-left-color: rgba(255,255,255,.2); }
+/* provider 下拉菜单 */
+.send-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 3; width: min(285px, calc(100vw - 42px)); padding: 7px; border: 1px solid var(--line-default); border-radius: var(--r-lg); background: var(--bg-overlay); box-shadow: var(--shadow); }
+.send-menu:not(.show) { display: none; }
+.send-menu .menu-head { padding: 7px 8px 5px; color: var(--text-muted); font-size: 10px; }
+.agent { display: flex; width: 100%; gap: 8px; align-items: flex-start; padding: 9px; border: 0; border-radius: var(--r-md); text-align: left; color: var(--text-primary); background: transparent; font: inherit; cursor: pointer; }
+.agent:hover:not(:disabled), .agent.active { background: var(--bg-surface-raised); }
+.agent:disabled { cursor: not-allowed; opacity: .65; }
+.agent-dot { width: 7px; height: 7px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: var(--text-faint); }
+.agent-dot.ready { background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+.agent-dot.warn { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-soft); }
+.agent b { display: block; font-size: 12px; font-weight: 700; }
+.agent-note, .agent small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10px; line-height: 1.35; }
+/* 高级选项 disclosure */
+.contract-advanced { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface); }
+.contract-advanced > summary { cursor: pointer; color: var(--text-primary); font-size: 12.5px; font-weight: 700; list-style: none; }
+.contract-advanced > summary::-webkit-details-marker { display: none; }
+.contract-advanced > summary::before { content: "▸"; display: inline-block; margin-right: 6px; color: var(--text-muted); transition: transform .15s; }
+.contract-advanced[open] > summary::before { transform: rotate(90deg); }
+.contract-advanced .opt { color: var(--text-muted); font-weight: 400; }
+.advanced-field { margin-top: 12px; }
+.advanced-field:first-of-type { margin-top: 10px; }
+.advanced-label { display: block; color: var(--text-secondary); font-size: 11.5px; font-weight: 700; }
+.contract-advanced textarea { width: 100%; min-height: 56px; margin-top: 5px; padding: 8px 9px; resize: vertical; outline: 0; border: 1px solid var(--line-subtle); border-radius: var(--r-md); color: var(--text-primary); background: var(--bg-input); font: 12px/1.5 var(--font); box-sizing: border-box; }
+.contract-advanced textarea:focus { border-color: var(--line-focus); box-shadow: 0 0 0 3px var(--brand-soft); }
+.contract-advanced .contract-link { margin-top: 4px; }
+/* plan-review */
+.plan-state { padding: 12px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface); }
+.plan-state-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+.plan-agent { color: var(--brand-hover); font-size: 11px; font-weight: 700; }
+.plan-state-title { color: var(--text-primary); font-size: 13px; font-weight: 700; }
+.plan-editor { width: 100%; min-height: 160px; padding: 9px 10px; resize: vertical; outline: 0; border: 1px solid var(--line-subtle); border-radius: var(--r-md); color: var(--text-primary); background: var(--bg-input); font: 12.5px/1.55 var(--font); box-sizing: border-box; }
+.plan-editor:focus { border-color: var(--line-focus); box-shadow: 0 0 0 3px var(--brand-soft); }
+.plan-actions { display: flex; gap: 7px; }
+.plan-actions .contract-secondary { flex: 1; }
+.plan-actions .contract-primary { flex: 1.4; }

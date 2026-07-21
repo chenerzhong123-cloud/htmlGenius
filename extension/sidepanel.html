@@ -135,104 +135,60 @@
   <div id="presence-count" class="presence-count" hidden></div>
 </div>
 
-<!-- v0.7.2 评论 → 编辑任务 选择流 + Change Contract Composer(覆盖式 sheet)
-     data-step 两个显式子状态:select(挑选评论)/ compose(契约表单)。返回/Esc/关闭 的状态语义见 sidepanel.js。 -->
-<div id="contract-sheet" class="sheet contract-sheet" role="dialog" aria-modal="true" aria-labelledby="contract-title" data-step="select" hidden>
+<!-- v0.8.1 创建编辑任务(覆盖式 sheet)。data-step:compose(选择修改范围,默认全选)/ comment-scope(选择评论范围,高级入口)/ plan-review(确认修改计划)。
+     每次派发都是新 task(session_mode=new);绝不续发 plan task,不接管用户外部会话。状态语义见 sidepanel.js。 -->
+<div id="contract-sheet" class="sheet contract-sheet" role="dialog" aria-modal="true" aria-labelledby="contract-title" data-step="compose" hidden>
 
-  <!-- issue 4:处于选择/契约流程中,页面试图新建评论时的醒目提示(置顶,两步骤均可见) -->
+  <!-- 处于任务流程中,页面试图新建评论时的醒目提示(置顶,所有步骤可见) -->
   <div id="contract-block-notice" class="contract-block-notice" hidden>
     <span class="cbn-icon" aria-hidden="true">!</span>
     <span class="cbn-text" data-i18n="contract.blockNotice">当前正在整理评论 / 创建任务，暂时不能新建评论。请先点「← 返回页面评论」回到收件箱后再添加。</span>
   </div>
 
-  <!-- ===== Step B:挑选这次要处理的评论 ===== -->
-  <div class="contract-step" id="contract-step-select">
-    <div class="contract-scroll">
-      <button id="contract-select-back" class="contract-back" type="button" data-i18n="taskSelect.backToComments">← 返回页面评论</button>
-      <div class="contract-title-row">
-        <div class="contract-title-text">
-          <div class="sheet-title" data-i18n="taskSelect.title">挑选这次要处理的评论</div>
-          <p class="contract-sub" data-i18n="taskSelect.sub">不是每条评论都要交给 Agent。先不确定的讨论可以不选。</p>
-        </div>
-        <button class="tip" type="button" aria-label="?"><span>?</span><span class="bubble" role="tooltip" data-i18n="taskSelect.help">默认会选中所有评论，保持原有「全部导出」的行为。取消勾选即表示这条评论不进入本次任务。</span></button>
-      </div>
-      <div id="contract-select-summary" class="contract-count"></div>
-      <button id="contract-toggle-all" class="contract-toggle-all" type="button">全不选</button>
-      <div id="contract-many-warning" class="contract-notice" hidden data-i18n="taskSelect.manyWarning">评论超过 20 条时，不建议逐条手选。可分批创建编辑任务。</div>
-      <div id="contract-select-list" class="contract-select-list"></div>
-    </div>
-    <div class="contract-bottom">
-      <button id="contract-select-continue" class="contract-primary" type="button">继续</button>
-    </div>
-  </div>
-
-  <!-- ===== Step C:Change Contract(复用 v0.6.1 表单与校验)===== -->
+  <!-- ===== compose:选择修改范围(主流程,默认全选直达)===== -->
   <div class="contract-step" id="contract-step-compose">
     <div class="contract-scroll">
-      <button id="contract-compose-back" class="contract-back" type="button" data-i18n="contract.backToSelect">← 返回挑选评论</button>
+      <button id="contract-compose-back" class="contract-back" type="button" data-i18n="contract.backToComments">← 返回页面评论</button>
       <div class="contract-head">
         <div class="contract-title-text">
-          <div id="contract-title" class="sheet-title" data-i18n="contract.title">先说清楚这次要怎么改</div>
-          <p class="contract-sub" data-i18n="contract.sub">评论已经带上；这里补充它们共同的目标和边界。</p>
+          <div id="contract-title" class="sheet-title" data-i18n="compose.title">选择修改范围</div>
         </div>
         <button id="contract-close" class="contract-close" data-i18n-title="contract.close" aria-label="">✕</button>
       </div>
 
-      <!-- 来源摘要(只读计数 + 更改;C 不重复逐条列表,与 mockup 一致) -->
-      <div id="contract-source-summary" class="task-summary">
-        <span id="contract-compose-summary-text"></span>
-        <button id="contract-change-comments" class="contract-link" type="button" data-i18n="taskSelect.change">更改</button>
+      <!-- 三档修改范围(spec §3.B;不再有 restructure / 执行 seg) -->
+      <div class="scope-cards" role="radiogroup" aria-label="scope">
+        <label class="scope-card"><input type="radio" name="contract-scope" value="precise_patch" checked><span class="scope-radio"></span><span class="scope-body"><b data-i18n="compose.mode.precise.name">精确：只改圈选处</b><small data-i18n="compose.mode.precise.desc">只修改评论指向的内容，其他地方保持不动。</small></span></label>
+        <label class="scope-card"><input type="radio" name="contract-scope" value="local_optimize"><span class="scope-radio"></span><span class="scope-body"><b data-i18n="compose.mode.local.name">局部：优化这一区块</b><small data-i18n="compose.mode.local.desc">可以连同附近内容一起调整，让这一块更完整。</small></span></label>
+        <label class="scope-card"><input type="radio" name="contract-scope" value="regenerate"><span class="scope-radio"></span><span class="scope-body"><b data-i18n="compose.mode.regenerate.name">全文：重做整页</b><small data-i18n="compose.mode.regenerate.desc">按这些要求重做整页，页面其他部分也可能改变。</small></span></label>
       </div>
 
-      <!-- step 1:目标 -->
-      <div class="cstep">
-        <div class="cstep-head"><span class="cstep-num">1</span><span class="cstep-title" data-i18n="contract.brief.label">你想让页面变成什么样？</span>
-          <button class="tip" type="button" aria-label="?"><span>?</span><span class="bubble" role="tooltip" data-i18n="contract.brief.tooltip">补充「所有已选评论共同想达成的效果」。例如目标读者、品牌语气或整体风格；不需要重复每一条评论。</span></button>
+      <!-- 高级选项(默认折叠,全部非必填) -->
+      <details class="contract-advanced">
+        <summary><span data-i18n="compose.advanced">高级选项</span> <span class="opt" data-i18n="compose.advancedOpt">（可选）</span></summary>
+        <div class="advanced-field">
+          <label class="advanced-label" data-i18n="compose.briefLabel">你想让页面变成什么样？</label>
+          <p class="field-hint" data-i18n="compose.briefHint">补充评论没有说清的目标、受众或整体风格。</p>
+          <textarea id="contract-brief" rows="3" maxlength="2000" data-i18n-placeholder="compose.briefHint" placeholder="补充评论没有说清的目标、受众或整体风格。"></textarea>
+          <div id="contract-brief-error" class="contract-error" hidden></div>
         </div>
-        <p class="field-hint" data-i18n="contract.brief.hint">评论里没说清的目标、受众或风格。</p>
-        <textarea id="contract-brief" rows="3" maxlength="2000" data-i18n-placeholder="contract.brief.hint" placeholder="评论里没说清的目标、受众或风格。"></textarea>
-        <div id="contract-brief-error" class="contract-error" hidden></div>
-      </div>
-
-      <!-- step 2:范围(3 张 scope 卡;restructure 不在此,而在 step3 的「先看方案」) -->
-      <div class="cstep">
-        <div class="cstep-head"><span class="cstep-num">2</span><span class="cstep-title" data-i18n="contract.scopeTitle">允许 Agent 改多大范围？</span>
-          <button class="tip" type="button" aria-label="?"><span>?</span><span class="bubble" role="tooltip" data-i18n="contract.scopeHelp">这是 Agent 的修改权限，不是「建议力度」。范围越大，允许它联动调整的内容越多。</span></button>
+        <div class="advanced-field">
+          <label class="advanced-label" data-i18n="compose.preserveLabel">有什么绝对不能动的内容？</label>
+          <p class="field-hint" data-i18n="compose.preserveHint">即使允许大改，也必须原样保留的内容。</p>
+          <textarea id="contract-preserve" rows="3" maxlength="2000" data-i18n-placeholder="compose.preservePh" placeholder="每行一条，必须原样保留的内容"></textarea>
         </div>
-        <div class="scope-cards" role="radiogroup" aria-label="scope">
-          <label class="scope-card"><input type="radio" name="contract-scope" value="precise_patch" checked><span class="scope-radio"></span><span class="scope-body"><b data-i18n="contract.mode.precise_patch.name">只改圈选处</b><small data-i18n="contract.mode.precise_patch.desc">只改我评论对应的内容，页面其他地方完全不动。</small></span></label>
-          <label class="scope-card"><input type="radio" name="contract-scope" value="local_optimize"><span class="scope-radio"></span><span class="scope-body"><b data-i18n="contract.mode.local_optimize.name">优化这一区块</b><small data-i18n="contract.mode.local_optimize.desc">可以连同周围这一块调整，但不要影响页面其他部分。</small></span></label>
-          <label class="scope-card"><input type="radio" name="contract-scope" value="regenerate"><span class="scope-radio"></span><span class="scope-body"><b data-i18n="contract.mode.regenerate.name">重做整页</b><small data-i18n="contract.mode.regenerate.desc">按新的要求重做这份页面，原来的任何部分都可能改变。</small></span></label>
+        <div class="advanced-field">
+          <button id="contract-goto-range" class="contract-link" type="button" data-i18n="compose.selectRange">选择评论范围</button>
+          <p class="field-hint" data-i18n="compose.selectRangeHint">有时不用把全部评论发给 Agent。</p>
         </div>
-      </div>
-
-      <!-- step 3:执行(直接生成 / 先看方案=内部 restructure) -->
-      <div class="cstep">
-        <div class="cstep-head"><span class="cstep-num">3</span><span class="cstep-title" data-i18n="contract.execTitle">现在就改，还是先看方案？</span>
-          <button class="tip" type="button" aria-label="?"><span>?</span><span class="bubble" role="tooltip" data-i18n="contract.execHelp">「先给我改法」只输出修改计划，不生成文件；适合你还没确定是否接受大范围调整时使用。</span></button>
-        </div>
-        <div class="exec-seg" role="radiogroup" aria-label="execution">
-          <button type="button" class="exec-opt active" data-exec="run" data-i18n="contract.exec.run">直接生成新版本</button>
-          <button type="button" class="exec-opt" data-exec="plan" data-i18n="contract.exec.plan">先给我改法</button>
-        </div>
-        <p class="field-hint" id="contract-exec-hint" data-i18n="contract.exec.runHint">Agent 会按上面的范围生成一个新版本；原文件不会被直接覆盖。</p>
-      </div>
-
-      <!-- 必须保留(可选,折叠) -->
-      <details class="contract-preserve-details">
-        <summary><span data-i18n="contract.preserve.label">有绝对不能动的内容吗？</span> <span class="opt" data-i18n="contract.preserve.opt">（可选）</span></summary>
-        <p class="field-hint" data-i18n="contract.preserve.hint">只写即使允许大改，也必须原样保留的内容。</p>
-        <textarea id="contract-preserve" rows="3" maxlength="2000" data-i18n-placeholder="contract.preservePh" placeholder="每行一条，必须原样保留的内容"></textarea>
       </details>
-
-      <div id="contract-plan-hint" class="contract-plan-hint" hidden data-i18n="contract.planHint"></div>
 
       <div id="contract-output-fallback" class="contract-fallback" hidden>
         <div class="contract-fallback-label" data-i18n="contract.fallbackLabel"></div>
         <textarea id="contract-fallback-text" readonly rows="6"></textarea>
       </div>
 
-      <!-- 最小只读成功态(非「接受修改」) -->
+      <!-- 候选版本只读成功态(发送成功后展示) -->
       <div id="contract-candidate-result" class="candidate-result" hidden>
         <div class="candidate-result-title" data-i18n="candidate.resultTitle">候选版本已生成</div>
         <ul class="candidate-result-facts">
@@ -247,26 +203,66 @@
       </div>
     </div>
 
-    <!-- 固定底栏:还原 mockup —— [复制 Prompt] [发送给 Claude Code ⌄ 菜单];JSON 收入菜单 -->
+    <!-- 固定底栏 action-grid:复制 Prompt / 发送给 {Agent} ⌄ / 先给我看修改计划 -->
     <div class="contract-bottom">
-      <div class="contract-actions">
+      <div class="action-grid">
         <button id="contract-copy-prompt" class="contract-copy" type="button"></button>
-        <div class="send-group" id="contract-send-group" hidden>
+        <div class="send-group" id="contract-send-group">
           <button id="contract-bridge" class="send-main" type="button"></button>
           <button id="contract-send-toggle" class="send-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="menu">⌄</button>
           <div class="send-menu" id="contract-send-menu" hidden>
-            <div class="menu-head" data-i18n="bridge.agentHead">已连接的 Agent</div>
-            <div class="menu-item static"><span class="dot-i"></span><span><b>Claude Code</b><small data-i18n="bridge.agentNote">本机已连接 · 使用你的 Claude 登录态</small></span></div>
-            <div class="menu-head" data-i18n="bridge.sessionHead">这次发到哪里？</div>
-            <button class="menu-item session-item" data-session="new" type="button"><span class="radio-i on"></span><span><b data-i18n="bridge.sessionNew">创建新的 Claude task</b><small data-i18n="bridge.sessionNewNote">从一份干净的上下文开始</small></span></button>
-            <button class="menu-item session-item" id="contract-session-continue-item" data-session="continue" type="button" hidden><span class="radio-i"></span><span><b data-i18n="bridge.sessionContinue">继续 HTML Genius 上次创建的 Claude task</b><small data-i18n="bridge.sessionContinueNote">沿用之前创建的上下文</small></span></button>
-            <div class="menu-head" data-i18n="bridge.exportHead">或导出</div>
-            <button class="menu-item" id="contract-copy-json-menu" type="button"><span><b data-i18n="contract.copyJson">复制 JSON</b></span></button>
-            <div class="menu-note" data-i18n="bridge.privacyNote">不会显示或接管你正在运行的其他 Claude 会话。</div>
+            <div class="menu-head" data-i18n="bridge.agentHead">已支持的 Agent</div>
+            <button class="agent" data-provider="claude_code_cli" type="button"><i class="agent-dot"></i><span><b>Claude Code</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span></button>
+            <button class="agent" data-provider="codex_app_server" type="button"><i class="agent-dot"></i><span><b>Codex</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span></button>
+            <div class="menu-note" data-i18n="bridge.privacyNote">这里只选择 Agent。每次默认创建新的 task；不显示历史会话或 JSON 导出。</div>
           </div>
         </div>
+        <button id="contract-plan" class="plan-button" type="button" data-i18n="compose.plan">先给我看修改计划</button>
       </div>
       <div id="contract-bridge-status" class="contract-bridge-status" hidden></div>
+    </div>
+  </div>
+
+  <!-- ===== comment-scope:选择评论范围(仅高级选项入口)===== -->
+  <div class="contract-step" id="contract-step-comment-scope" hidden>
+    <div class="contract-scroll">
+      <button id="contract-range-back" class="contract-back" type="button" data-i18n="compose.backToCompose">← 上一步</button>
+      <div class="contract-head">
+        <div class="contract-title-text">
+          <div class="sheet-title" data-i18n="range.title">选择评论范围</div>
+        </div>
+      </div>
+      <div id="contract-select-summary" class="contract-count"></div>
+      <button id="contract-toggle-all" class="contract-toggle-all" type="button">全不选</button>
+      <div id="contract-many-warning" class="contract-notice" hidden data-i18n="taskSelect.manyWarning">评论超过 20 条时，不建议逐条手选。可分批创建编辑任务。</div>
+      <div id="contract-select-list" class="contract-select-list"></div>
+    </div>
+    <div class="contract-bottom">
+      <button id="contract-range-confirm" class="contract-primary" type="button">确认选择</button>
+    </div>
+  </div>
+
+  <!-- ===== plan-review:确认修改计划(可编辑;确认→新 candidate task)===== -->
+  <div class="contract-step" id="contract-step-plan-review" hidden>
+    <div class="contract-scroll">
+      <button id="contract-plan-review-back" class="contract-back" type="button" data-i18n="plan.back">← 上一步</button>
+      <div class="contract-head">
+        <div class="contract-title-text">
+          <div class="sheet-title" data-i18n="plan.title">确认修改计划</div>
+          <p class="contract-sub" data-i18n="plan.sub">计划只用于确认修改范围；确认后会新建一个任务生成候选版本。</p>
+        </div>
+      </div>
+      <div class="plan-state">
+        <div class="plan-state-head"><span id="plan-review-agent" class="plan-agent"></span><span class="plan-state-title" data-i18n="plan.editorTitle">修改计划</span></div>
+        <textarea id="plan-editor" class="plan-editor" maxlength="12000"></textarea>
+        <div id="plan-stale-hint" class="contract-notice" hidden data-i18n="plan.staleHint">任务条件已变化，这份计划已失效。请返回调整后重新生成。</div>
+      </div>
+    </div>
+    <div class="contract-bottom">
+      <div class="plan-actions">
+        <button id="plan-regenerate" class="contract-secondary" type="button" data-i18n="plan.regenerate">重新生成计划</button>
+        <button id="plan-confirm" class="contract-primary" type="button" data-i18n="plan.confirm">确认计划，生成新版本</button>
+      </div>
     </div>
   </div>
 </div>

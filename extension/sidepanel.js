@@ -17,9 +17,8 @@
   let _contractArtifact = null;
   let _contractOpen = false;
   let _contractTriggerEl = null;  // 关闭 Composer 后恢复焦点
-  // v0.7 Codex Local Bridge 状态
+  // v0.8.1 bridge 状态
   let _contractMeta = null;              // {isLocal, logicalDocumentId, loadedArtifactHash}
-  let _contractSessionContinueAvail = false;
   let _contractRunning = false;
 
   async function getActiveTab() {
@@ -88,8 +87,8 @@
               _contractItems = ex.items || [];
               _contractArtifact = ex.artifact || _contractArtifact;
               _contractMeta = bridgeMeta(ex);
-              if (_contractStep === "select") renderSelectStep();
-              else renderContractSource();
+              if (_contractStep === "comment-scope") renderCommentScope();
+              else { refreshContractUI(); checkPlanStale(); }
             });
           }
         }
@@ -478,41 +477,51 @@
     return safe.replace(/https?:\/\/[^\s<]+/g, (u) => '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>');
   }
 
-  // === v0.6.1 修改契约 Composer → v0.7.2 评论选择流(状态机 spec §2)===
-  // 三个状态:A 评论收件箱(默认,sheet 关闭)/ B 挑选评论(data-step=select)/ C 契约表单(data-step=compose)。
-  // 临时选择只存内存(spec §4.1):关闭/Esc 清空;不写 annotation、chrome.storage 或 IndexedDB。
+  // === v0.8.1 创建编辑任务(状态机 spec §2/§4.1)===
+  // step: closed | compose(选择修改范围,默认全选直达)| comment-scope(选择评论范围,高级入口)
+  //       | plan-running | plan-review(确认修改计划)| candidate-running。
+  // 临时草稿只存内存:关闭/Esc 清空;不写 annotation、chrome.storage 或 IndexedDB。
+  // 每次派发均 session_mode=new;绝不续发 plan task,不接管用户外部会话。
   const contractSheet = document.getElementById("contract-sheet");
   const contractCloseBtn = document.getElementById("contract-close");
-  const contractSummaryText = document.getElementById("contract-compose-summary-text");
-  const contractSourceList = document.getElementById("contract-source-list");
   const contractBrief = document.getElementById("contract-brief");
   const contractBriefError = document.getElementById("contract-brief-error");
-  const contractBriefReq = document.getElementById("contract-brief-req");
   const contractPreserve = document.getElementById("contract-preserve");
-  const contractPlanHint = document.getElementById("contract-plan-hint");
   const contractCopyPrompt = document.getElementById("contract-copy-prompt");
-  const contractCopyJson = document.getElementById("contract-copy-json");
   const contractFallback = document.getElementById("contract-output-fallback");
   const contractFallbackText = document.getElementById("contract-fallback-text");
-  const contractBridgeWrap = document.getElementById("contract-bridge-wrap");
   const contractBridge = document.getElementById("contract-bridge");
   const contractBridgeStatus = document.getElementById("contract-bridge-status");
-  // B 状态(挑选评论)元素
+  const contractGotoRange = document.getElementById("contract-goto-range");
+  const contractPlanBtn = document.getElementById("contract-plan");
+  // comment-scope 步骤元素
   const selectSummary = document.getElementById("contract-select-summary");
   const selectManyWarning = document.getElementById("contract-many-warning");
   const selectList = document.getElementById("contract-select-list");
-  const selectContinue = document.getElementById("contract-select-continue");
   const selectToggleAll = document.getElementById("contract-toggle-all");
-  // Night Pack A §5.2 只读成功态元素
+  const contractRangeConfirm = document.getElementById("contract-range-confirm");
+  // plan-review 步骤元素
+  const planEditor = document.getElementById("plan-editor");
+  const planRegenerate = document.getElementById("plan-regenerate");
+  const planConfirmBtn = document.getElementById("plan-confirm");
+  const planStaleHint = document.getElementById("plan-stale-hint");
+  const planReviewAgent = document.getElementById("plan-review-agent");
+  // Night Pack A §5.2 候选只读成功态元素
   const candidateResult = document.getElementById("contract-candidate-result");
   const candidateAnchorStats = document.getElementById("candidate-anchor-stats");
   const candidateOpen = document.getElementById("candidate-open");
   const candidateBack = document.getElementById("candidate-back");
 
-  let _contractStep = "closed"; // closed | select | compose
-  let _selectedNodeIds = new Set(); // 本轮勾选的节点 id(root+reply;真相源)。回复也可选(用户反馈 v0.7.2)
-  let _contractRunKind = "candidate"; // sidepanel 发送 = candidate
+  let _contractStep = "closed"; // closed | compose | comment-scope | plan-running | plan-review | candidate-running
+  let _selectedNodeIds = new Set(); // 本轮勾选的节点 id(root+reply;真相源)
+  let _contractRunKind = "candidate"; // candidate | plan(sidepanel 本次派发)
   let _candidateResult = null;      // Night Pack A §5.2:最近一次 candidate-ready 结果(只读成功态)
+  // v0.8.1 provider probe + plan-first 状态(spec §3.D/§5)
+  let _provider = null;             // 当前选中 provider id(仅 ready 可选)
+  let _providerStates = {};         // { providerId: probe 记录 }
+  let _providerCacheAt = 0;         // probe 缓存时间戳(ms);30s 内不重探
+  let _plan = null;                 // 已校验计划记录(bridge-plan-ready):{ plan_id, plan_sha256, plan_markdown, provider, source_artifact_uri, base_artifact_hash, task_sha256 }
+  let _planStale = false;           // 计划后改 contract/artifact → true,阻止确认
 
   function countReplies(rootId, allItems) {
     const kids = {};
@@ -550,13 +559,11 @@
     let n = 0; _selectedNodeIds.forEach((id) => { if (nonStale.has(id)) n++; });
     return n;
   }
-  // 内部 mode 由 scope 卡 + 执行 seg 派生(mockup 还原;schema 仍单值):plan→restructure,否则=scope
+  // v0.8.1:mode 直接 = 三档 scope 卡选中值(spec §3.B/§4.2)。不再有 restructure / 执行 seg 派生。
   function getContractMode() {
-    const execEl = document.querySelector(".exec-opt.active");
-    const execVal = execEl ? execEl.dataset.exec : "run";
-    if (execVal === "plan") return "restructure";
     const scope = document.querySelector('input[name="contract-scope"]:checked');
-    return scope ? scope.value : "precise_patch";
+    const v = scope ? scope.value : "precise_patch";
+    return ["precise_patch", "local_optimize", "regenerate"].includes(v) ? v : "precise_patch";
   }
   function getContractDraft() {
     return {
@@ -568,63 +575,54 @@
       artifact: _contractArtifact || { title: "", url: "", isLocal: false }
     };
   }
-  // C 来源摘要(只读计数;C 不重复逐条列表,与 mockup 一致)
-  function renderContractSource() {
+  // 高级选项里「选择评论范围」链接的实时计数
+  function renderRangeLink() {
     const total = allNonStaleNodeIds(_contractItems).length;
     const selected = selectedNodeCount();
-    if (contractSummaryText) {
-      contractSummaryText.textContent = t("taskSelect.composeSummary")
+    if (contractGotoRange) {
+      contractGotoRange.textContent = t("compose.selectRangeCount")
         .replace("{selected}", String(selected)).replace("{total}", String(total));
     }
   }
   function refreshContractUI() {
     if (!_contractOpen) return;
     const draft = getContractDraft();
-    const meta = (window.ChangeContract.MODES || []).find((m) => m.id === draft.mode);
-    const req = !!(meta && meta.briefRequired);
-    if (contractBriefReq) contractBriefReq.hidden = !req;
-    const isPlan = draft.mode === "restructure";
-    if (contractPlanHint) contractPlanHint.hidden = !isPlan;
-    if (contractCopyPrompt) contractCopyPrompt.textContent = isPlan ? t("contract.copyPlan") : t("contract.copyPrompt");
+    if (contractCopyPrompt) contractCopyPrompt.textContent = t("contract.copyPrompt");
     if (contractCloseBtn) contractCloseBtn.setAttribute("aria-label", t("contract.close"));
     // scope 卡高亮兜底(:has 不支持的旧内核)
     document.querySelectorAll(".scope-card").forEach((c) => {
       const inp = c.querySelector("input"); c.classList.toggle("sel-fallback", !!(inp && inp.checked));
     });
-    // 执行 seg 文案
-    const execHint = document.getElementById("contract-exec-hint");
-    if (execHint) execHint.textContent = isPlan ? t("contract.exec.planHint") : t("contract.exec.runHint");
+    // brief 非必填(v0.8.1:三档 mode 均不强制 brief);隐藏旧错误
+    if (contractBriefError) contractBriefError.hidden = true;
     const v = window.ChangeContract.validateDraft(draft, _contractItems);
-    if (v.errors.brief) { contractBriefError.textContent = t("contract.briefRequired"); contractBriefError.hidden = false; }
-    else { contractBriefError.hidden = true; }
     const disable = !v.ok;
     const lock = _contractRunning;
-    // 发送组(发送给 Claude Code)仅 run 模式 + 本地 managed artifact 可用;plan 模式隐藏(只能复制规划)
-    const bridgeEligible = !!(_contractMeta && _contractMeta.isLocal && _contractMeta.logicalDocumentId
-      && _contractMeta.loadedArtifactHash && !isPlan);
-    const sendGroup = document.getElementById("contract-send-group");
-    if (sendGroup) sendGroup.hidden = !bridgeEligible;
-    if (contractBridge) { contractBridge.textContent = t("bridge.run"); contractBridge.disabled = disable || lock; }
-    const contItem = document.getElementById("contract-session-continue-item");
-    if (contItem) contItem.hidden = !_contractSessionContinueAvail;
-    if (contractCopyPrompt) contractCopyPrompt.disabled = disable || lock;
+    // 发送组 + 计划按钮:仅本地 managed artifact 可用(spec §3.B/§3.E)
+    const bridgeEligible = !!(_contractMeta && _contractMeta.isLocal && _contractMeta.logicalDocumentId && _contractMeta.loadedArtifactHash);
+    const providerReady = !!(_provider && _providerStates[_provider] && _providerStates[_provider].status === "ready");
+    const canDispatch = bridgeEligible && providerReady && !disable;
+    if (contractBridge) {
+      contractBridge.textContent = _provider ? (t("bridge.sendTo").replace("{agent}", providerLabel(_provider))) : t("bridge.run");
+      contractBridge.disabled = !canDispatch || lock;
+    }
+    if (contractPlanBtn) contractPlanBtn.disabled = !canDispatch || lock;
+    if (contractCopyPrompt) contractCopyPrompt.disabled = lock; // 复制 Prompt 不需要 provider ready
+    renderRangeLink();
+    renderPlanConfirmState();
   }
+  function providerLabel(id) { return id === "codex_app_server" ? "Codex" : "Claude Code"; }
   // 重置契约表单(新一轮开始 / 关闭清空时)
   function resetContractForm() {
     const precise = document.querySelector('input[name="contract-scope"][value="precise_patch"]');
     if (precise) precise.checked = true;
-    document.querySelectorAll(".exec-opt").forEach((b) => b.classList.toggle("active", b.dataset.exec === "run"));
-    const sessNew = document.querySelector('.session-item[data-session="new"] .radio-i');
-    document.querySelectorAll(".session-item .radio-i").forEach((r) => r.classList.remove("on"));
-    if (sessNew) sessNew.classList.add("on");
-    contractBrief.value = "";
-    contractPreserve.value = "";
-    contractBrief.disabled = false;
-    contractPreserve.disabled = false;
-    contractBriefError.hidden = true;
-    contractFallback.hidden = true;
-    contractFallbackText.value = "";
+    if (contractBrief) contractBrief.value = "";
+    if (contractPreserve) contractPreserve.value = "";
+    if (contractBriefError) contractBriefError.hidden = true;
+    if (contractFallback) { contractFallback.hidden = true; }
+    if (contractFallbackText) contractFallbackText.value = "";
     if (contractBridgeStatus) { contractBridgeStatus.hidden = true; contractBridgeStatus.className = "contract-bridge-status"; }
+    _plan = null; _planStale = false;
   }
   function showContractSheet() {
     accountSheet.classList.remove("show");
@@ -642,34 +640,40 @@
     const n = document.getElementById("contract-block-notice");
     if (n) n.hidden = true;
   }
-  // A → B 入口:默认全选所有 non-stale 节点(root+reply)+ 清空表单(新一轮)
-  function openContractSelector(roots, items, artifact, meta) {
+  // v0.8.1 入口:默认全选所有 non-stale 节点(root+reply)→ 直达 compose(选择修改范围)+ 探测 provider
+  function openContract(roots, items, artifact, meta) {
     _contractItems = items || [];
     _contractArtifact = artifact || { title: "", url: "", isLocal: false };
     _contractMeta = meta || { isLocal: !!(artifact && artifact.isLocal), logicalDocumentId: null, loadedArtifactHash: null };
     _selectedNodeIds = new Set(allNonStaleNodeIds(items)); // 默认全选(含回复)
     _contractRunning = false;
-    _contractSessionContinueAvail = false;
+    _provider = null; _providerStates = {}; _providerCacheAt = 0;
+    _plan = null; _planStale = false;
     _contractOpen = true;
     resetContractForm();
-    _contractStep = "select";
-    contractSheet.dataset.step = "select";
     hideBlockNotice();
-    renderSelectStep();
+    setContractStep("compose");
     showContractSheet();
+    queryProviders(true); // 打开即 probe(spec §3.D);30s 内不重探
+    getActiveTab().then((tab) => { if (tab && tab.id) loadCandidateEvidence(tab.id); }); // §6 持久证据
   }
-  // B 步骤渲染:嵌套回复树,每个节点(root+reply)一个 checkbox;整卡可点;子树随父勾选
-  function renderSelectStep() {
+  // 步骤切换:show/hide 三个 step 面板 + data-step
+  function setContractStep(step) {
+    _contractStep = step;
+    contractSheet.dataset.step = step;
+    const steps = ["compose", "comment-scope", "plan-review"];
+    const map = { compose: "contract-step-compose", "comment-scope": "contract-step-comment-scope", "plan-review": "contract-step-plan-review" };
+    steps.forEach((s) => { const el = document.getElementById(map[s]); if (el) el.hidden = (s !== step); });
+    if (step === "compose") refreshContractUI();
+    if (step === "comment-scope") renderCommentScope();
+    if (step === "plan-review") renderPlanReview();
+  }
+  // comment-scope:嵌套回复树,每个节点(root+reply)一个 checkbox;整卡可点;子树随父勾选(spec §3.C)
+  function renderCommentScope() {
     const items = _contractItems;
     const kids = buildChildrenIndex(items);
     const roots = window.ChangeContract.getRoots(items);
-    const total = allNonStaleNodeIds(items).length;     // N = 所有 non-stale 节点
-    const selectedCount = selectedNodeCount();          // M
-    if (selectSummary) {
-      selectSummary.innerHTML = t("taskSelect.summary")
-        .replace("{total}", "<strong>" + total + "</strong>")
-        .replace("{selected}", "<strong>" + selectedCount + "</strong>");
-    }
+    const total = allNonStaleNodeIds(items).length;
     if (selectManyWarning) selectManyWarning.hidden = !(total > 20);
     if (selectList) {
       const renderNode = (a, depth) => {
@@ -687,42 +691,24 @@
       };
       selectList.innerHTML = roots.map((r) => renderNode(r, 0)).join("");
     }
-    refreshSelectCounts();
+    refreshRangeCounts();
   }
-  // 计数行与继续按钮(M=0 禁用 + 动态文案)
-  function refreshSelectCounts() {
+  // comment-scope 计数行 + 确认按钮(M=0 禁用 + 动态文案)+ 全选/取消全选切换
+  function refreshRangeCounts() {
     const m = selectedNodeCount();
+    const total = allNonStaleNodeIds(_contractItems).length;
     if (selectSummary) {
-      const total = allNonStaleNodeIds(_contractItems).length;
-      selectSummary.innerHTML = t("taskSelect.summary")
+      selectSummary.innerHTML = t("range.summary")
         .replace("{total}", "<strong>" + total + "</strong>")
         .replace("{selected}", "<strong>" + m + "</strong>");
     }
-    if (selectContinue) {
-      selectContinue.disabled = m === 0;
-      selectContinue.textContent = (m === 0) ? t("taskSelect.emptySelection") : t("taskSelect.continue").replace("{count}", String(m));
+    if (contractRangeConfirm) {
+      contractRangeConfirm.disabled = m === 0;
+      contractRangeConfirm.textContent = t("range.confirm").replace("{selected}", String(m)).replace("{total}", String(total));
     }
     if (selectToggleAll) {
-      const total = allNonStaleNodeIds(_contractItems).length;
-      selectToggleAll.textContent = (m === total && total > 0) ? t("taskSelect.deselectAll") : t("taskSelect.selectAll");
+      selectToggleAll.textContent = (m === total && total > 0) ? t("range.deselectAll") : t("range.selectAll");
     }
-  }
-  // B → C(spec §4.3):复用现有表单初始化,但不重置已填内容(C→B→C 保持 brief/preserve/mode)
-  function gotoComposeStep() {
-    _contractStep = "compose";
-    contractSheet.dataset.step = "compose";
-    _contractRunning = false;
-    renderContractSource();
-    refreshContractUI();
-    queryBridgeSession();
-    getActiveTab().then((tab) => { if (tab && tab.id) loadCandidateEvidence(tab.id); }); // §6 持久证据
-    setTimeout(() => { try { contractBrief.focus(); } catch (e) {} }, 0);
-  }
-  // C → B:保留本轮选择与已填表单(spec §2/§6.8)
-  function gotoSelectStep() {
-    _contractStep = "select";
-    contractSheet.dataset.step = "select";
-    renderSelectStep();
   }
   // close / Esc → A:丢弃本轮 selectedRootIds 与 form draft(spec §2/§4.1)
   function closeContract() {
@@ -796,19 +782,21 @@
     if (staleSelected.length) {
       staleSelected.forEach((id) => _selectedNodeIds.delete(id));
       showToast(t("taskSelect.staleChanged"));
-      gotoSelectStep();
+      setContractStep("comment-scope");
       return false;
     }
+    checkPlanStale(); // 评论/artifact 变化可能使已生成计划失效(spec §3.E.9)
     return true;
   }
-  async function copyContract(kind) {
+  // 复制 Prompt(spec §4.3):renderPrompt 反映当前三档 mode + 已选评论 + brief + preserve。不需要 provider ready。
+  async function copyContract() {
     if (!(await refreshSelectionBeforeSubmit())) return;
     const draft = getContractDraft();
     let task;
     try { task = window.ChangeContract.buildTask(draft, _contractItems); }
     catch (e) { showToast(t("contract.copyFail")); return; }
-    const out = (kind === "json") ? window.ChangeContract.serialize(task) : window.ChangeContract.renderPrompt(task);
-    const btn = (kind === "json") ? (document.getElementById("contract-copy-json-menu") || contractCopyJson) : contractCopyPrompt;
+    const out = window.ChangeContract.renderPrompt(task);
+    const btn = contractCopyPrompt;
     const orig = btn ? btn.innerHTML : "";
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(out).then(() => {
@@ -829,22 +817,52 @@
       loadedArtifactHash: (resp && resp.loadedArtifactHash) || (resp && resp.artifact_state && resp.artifact_state.loaded_artifact_hash) || null
     };
   }
-  function queryBridgeSession() {
-    getActiveTab().then((tab) => {
-      if (!tab || !tab.id) return;
-      chrome.runtime.sendMessage({ type: "bridge-query-session", tab_id: tab.id }).then((r) => {
-        _contractSessionContinueAvail = !!(r && r.continuable);
-        if (!_contractOpen) return;
-        const cw = document.getElementById("contract-session-continue-item");
-        if (cw) cw.hidden = !_contractSessionContinueAvail;
-        if (!_contractSessionContinueAvail) {
-          document.querySelectorAll(".session-item .radio-i").forEach((r) => r.classList.remove("on"));
-          const n = document.querySelector('.session-item[data-session="new"] .radio-i');
-          if (n) n.classList.add("on");
-        }
-        refreshContractUI();
-      }).catch(() => {});
+  // v0.8.1 provider probe(spec §3.D/§5.1):bridge-query-providers → 30s 缓存 → 渲染菜单状态。
+  function queryProviders(force) {
+    if (!force && _providerCacheAt && (Date.now() - _providerCacheAt < 30000) && Object.keys(_providerStates).length) {
+      renderProviderMenu(); refreshContractUI(); return;
+    }
+    chrome.runtime.sendMessage({ type: "bridge-query-providers" }).then((r) => {
+      if (!r || !r.ok) return;
+      _providerStates = {};
+      (r.providers || []).forEach((p) => { _providerStates[p.id] = p; });
+      _providerCacheAt = Date.now();
+      // 恢复上次选择(仅 ready),否则选第一个 ready
+      if (!_provider || !(_providerStates[_provider] && _providerStates[_provider].status === "ready")) {
+        _provider = (Object.keys(_providerStates).find((id) => _providerStates[id].status === "ready")) || null;
+      }
+      if (_contractOpen) { renderProviderMenu(); refreshContractUI(); }
+    }).catch(() => {});
+  }
+  function providerStatusText(p) {
+    if (!p) return t("provider.checking");
+    const s = p.status;
+    if (s === "ready") return p.version ? (t("provider.ready") + " · " + p.version) : t("provider.ready");
+    if (s === "checking") return t("provider.checking");
+    if (s === "not_installed" || s === "not_found") return t("provider.notInstalled");
+    if (s === "auth_required") return t("provider.authRequired");
+    if (s === "incompatible" || s === "untrusted") return t("provider.incompatible");
+    return t("provider.error");
+  }
+  function renderProviderMenu() {
+    document.querySelectorAll(".send-menu .agent").forEach((btn) => {
+      const id = btn.dataset.provider;
+      const p = _providerStates[id];
+      const ready = !!(p && p.status === "ready");
+      btn.classList.toggle("active", id === _provider);
+      btn.disabled = !ready;
+      const dot = btn.querySelector(".agent-dot");
+      if (dot) dot.className = "agent-dot" + (ready ? " ready" : (p && p.status === "auth_required" ? " warn" : ""));
+      const note = btn.querySelector(".agent-note");
+      if (note) note.textContent = providerStatusText(p);
     });
+  }
+  function selectProvider(id) {
+    const p = _providerStates[id];
+    if (!p || p.status !== "ready") return; // 仅 ready 可选
+    _provider = id;
+    renderProviderMenu();
+    refreshContractUI();
   }
   function setBridgeStatus(text, cls) {
     if (!contractBridgeStatus) return;
@@ -854,94 +872,151 @@
   }
   function bridgeFailClass(code) {
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF"
-      || code === "SOURCE_MUTATED_DURING_CANDIDATE"
+      || code === "SOURCE_MUTATED_DURING_CANDIDATE" || code === "SOURCE_MUTATED_DURING_PLAN"
       || code === "BRIDGE_NOT_INSTALLED" || code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED"
-      || code === "CLAUDE_SESSION_UNAVAILABLE" || code === "NO_CONTINUABLE_SESSION") return "warn";
+      || code === "SESSION_MODE_NOT_ALLOWED" || code === "CODEX_AUTH_REQUIRED") return "warn";
     return "err";
   }
   function tBridgeFailed(code, host) {
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF") return t("bridge.sourceChanged");
     if (code === "SOURCE_MUTATED_DURING_CANDIDATE") return t("bridge.sourceMutated");
+    if (code === "SOURCE_MUTATED_DURING_PLAN") return t("bridge.planSourceMutated");
+    if (code === "PLAN_MISSING" || code === "PLAN_INVALID" || code === "PLAN_TOO_LARGE" || code === "PLAN_SYMLINK" || code === "PLAN_OUTPUT_PATH_INVALID") return t("bridge.planInvalid");
+    if (code === "CLAUDE_PLAN_FAILED" || code === "CLAUDE_PLAN_TIMEOUT" || code === "CODEX_PLAN_FAILED" || code === "CODEX_PLAN_TIMEOUT") return t("bridge.planFailed");
     if (code === "CANDIDATE_MISSING" || code === "CANDIDATE_INVALID_HTML" || code === "CANDIDATE_EMPTY"
       || code === "CANDIDATE_SYMLINK" || code === "CANDIDATE_NOT_FILE" || code === "CANDIDATE_TOO_LARGE" || code === "CANDIDATE_NOT_UTF8") return t("bridge.candidateInvalid");
     if (code === "BRIDGE_NOT_INSTALLED") return t("bridge.notInstalled");
-    if (code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED") return t("bridge.notLoggedIn");
-    if (code === "CLAUDE_SESSION_UNAVAILABLE" || code === "NO_CONTINUABLE_SESSION") return t("bridge.sessionUnavailable");
+    if (code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED" || code === "CODEX_AUTH_REQUIRED") return t("bridge.notLoggedIn");
+    if (code === "SESSION_MODE_NOT_ALLOWED") return t("bridge.sessionModeNotAllowed");
+    if (code === "PLAN_NOT_FOUND" || code === "PLAN_STALE_SOURCE" || code === "PLAN_CONTRACT_CHANGED" || code === "PLAN_EDIT_INVALID" || code === "PLAN_ALREADY_USED") return t("bridge.planConfirmFailed");
     return t("bridge.failed").replace("{msg}", (host && host.message) ? host.message : (code || ""));
   }
   function setContractRunning(running) {
     _contractRunning = !!running;
-    contractSheet.querySelectorAll('input[name="contract-scope"], .exec-opt, textarea').forEach((el) => { el.disabled = running; });
+    contractSheet.querySelectorAll('input[name="contract-scope"], textarea').forEach((el) => { el.disabled = running; });
     refreshContractUI();
   }
-  async function startBridgeRun() {
-    if (_contractRunning) {
-      // 卡死恢复:上一轮的失败事件可能因 SW 被杀而丢失,_contractRunning 卡在 true → 后续点击全被拦截。
-      // 查后台确认是否真有在跑的 run;不在则复位,允许重试。
-      const tab = await getActiveTab();
-      if (tab && tab.id) {
-        const resp = await chrome.runtime.sendMessage({ type: "bridge-query-active-run", tab_id: tab.id }).catch(() => null);
-        if (!resp || !resp.active) { _contractRunning = false; setContractRunning(false); }
-      }
-      if (_contractRunning) return; // 确实还在跑
+  // 卡死恢复:确认后台是否真有活跃 run
+  async function ensureNotStuckRunning() {
+    if (!_contractRunning) return true;
+    const tab = await getActiveTab();
+    if (tab && tab.id) {
+      const resp = await chrome.runtime.sendMessage({ type: "bridge-query-active-run", tab_id: tab.id }).catch(() => null);
+      if (!resp || !resp.active) { _contractRunning = false; setContractRunning(false); }
     }
-    if (!(await refreshSelectionBeforeSubmit())) return; // spec §4.3:发送前同样过 stale 防线
+    return !_contractRunning;
+  }
+  // 通用派发:run_kind = candidate | plan;candidate 可携带已确认 plan
+  async function dispatchBridgeRun(runKind, opts) {
+    if (!(await ensureNotStuckRunning())) return;
+    if (!(await refreshSelectionBeforeSubmit())) return; // spec §4.3:发送前过 stale 防线 + plan 失效检查
+    if (!_provider) { setBridgeStatus(t("bridge.noProvider"), "warn"); return; }
     const draft = getContractDraft();
     let task;
     try { task = window.ChangeContract.buildTask(draft, _contractItems); }
     catch (e) { setBridgeStatus(t("bridge.invalid"), "err"); return; }
-    const sessOn = document.querySelector('.session-item .radio-i.on');
-    const sessItem = sessOn ? sessOn.closest(".session-item") : null;
-    const session_mode = (sessItem && sessItem.dataset.session === "continue") ? "continue" : "new";
-    getActiveTab().then((tab) => {
-      if (!tab || !tab.id) { setBridgeStatus(t("bridge.failed").replace("{msg}", "no active tab"), "err"); return; }
-      // v0.7.1/Night Pack A: provider 固定 claude_code_cli;发送 = run_kind "candidate"(产受控 candidate,非 ack)
-      _contractRunKind = "candidate";
-      if (candidateResult) candidateResult.hidden = true; // 新 run 清掉上一轮只读结果
-      chrome.runtime.sendMessage({ type: "bridge-start", provider: "claude_code_cli", run_kind: "candidate", tab_id: tab.id, session_mode, change_contract: task }).then((resp) => {
-        if (resp && resp.ok) { setContractRunning(true); setBridgeStatus(t("bridge.candidateRunning"), "running"); }
-        else {
-          const code = resp && resp.code;
-          if (code === "BRIDGE_NOT_INSTALLED") setBridgeStatus(t("bridge.notInstalled"), "warn");
-          else if (code === "NOT_LOCAL" || code === "NO_ARTIFACT_VERSION" || code === "NO_CONTINUABLE_SESSION") setBridgeStatus(t("bridge.hint"), "warn");
-          else setBridgeStatus(tBridgeFailed(code, resp), bridgeFailClass(code));
-        }
-      }).catch(() => setBridgeStatus(t("bridge.notInstalled"), "warn"));
-    });
+    const tab = await getActiveTab();
+    if (!tab || !tab.id) { setBridgeStatus(t("bridge.failed").replace("{msg}", "no active tab"), "err"); return; }
+    _contractRunKind = runKind;
+    if (candidateResult) candidateResult.hidden = true;
+    const payload = { type: "bridge-start", provider: _provider, run_kind: runKind, tab_id: tab.id, session_mode: "new", change_contract: task };
+    if (runKind === "candidate" && opts && opts.plan) payload.plan = opts.plan;
+    chrome.runtime.sendMessage(payload).then((resp) => {
+      if (resp && resp.ok) {
+        setContractRunning(true);
+        if (runKind === "plan") setBridgeStatus(t("bridge.planRunning").replace("{agent}", providerLabel(_provider)), "running");
+        else setBridgeStatus(t("bridge.candidateRunning"), "running");
+      } else {
+        const code = resp && resp.code;
+        if (code === "BRIDGE_NOT_INSTALLED") setBridgeStatus(t("bridge.notInstalled"), "warn");
+        else if (code === "NOT_LOCAL" || code === "NO_ARTIFACT_VERSION") setBridgeStatus(t("bridge.hint"), "warn");
+        else setBridgeStatus(tBridgeFailed(code, resp), bridgeFailClass(code));
+      }
+    }).catch(() => setBridgeStatus(t("bridge.notInstalled"), "warn"));
+  }
+  function startBridgeRun() { return dispatchBridgeRun("candidate", _plan && !_planStale ? { plan: planPayload() } : null); }
+  // v0.8.1 plan 流:先给我看修改计划 → run_kind=plan → plan-running → bridge-plan-ready → plan-review
+  function startPlanRun() { return dispatchBridgeRun("plan"); }
+  // plan-ready 到达:存计划,进 plan-review(spec §5.3/§3.E)
+  function onPlanReady(msg) {
+    setContractRunning(false);
+    if (!msg || !msg.plan_id || !msg.plan) { setBridgeStatus(t("bridge.planFailed"), "err"); return; }
+    const draft = getContractDraft();
+    _plan = {
+      plan_id: msg.plan_id,
+      plan_sha256: msg.plan_sha256,
+      plan_markdown: msg.plan.plan_markdown || "",
+      summary: msg.plan.summary || "",
+      out_of_scope: msg.plan.out_of_scope || [],
+      provider: _provider,
+      source_artifact_uri: _contractArtifact && _contractArtifact.url,
+      base_artifact_hash: _contractMeta && _contractMeta.loadedArtifactHash,
+      task_sha256: null
+    };
+    try { _plan.task_sha256 = taskFingerprint(draft); } catch (e) {}
+    _planStale = false;
+    setContractStep("plan-review");
+    setBridgeStatus("", null);
+  }
+  // sidepanel 内 plan stale 检测用的契约指纹(canonical JSON 字符串)。真正的硬校验在 background(§5.4 task_sha256)。
+  function taskFingerprint(draft) {
+    const task = window.ChangeContract.buildTask(draft, _contractItems);
+    return JSON.stringify(task, null, 2);
+  }
+  function planPayload() {
+    if (!_plan) return null;
+    return { plan_id: _plan.plan_id, plan_sha256: _plan.plan_sha256, edited_plan_markdown: planEditor ? planEditor.value : _plan.plan_markdown };
+  }
+  function renderPlanReview() {
+    if (planReviewAgent && _provider) planReviewAgent.textContent = providerLabel(_provider) + " · ";
+    if (planEditor && _plan) planEditor.value = _plan.plan_markdown;
+    renderPlanConfirmState();
+  }
+  function renderPlanConfirmState() {
+    if (!planConfirmBtn || !_plan) return;
+    const edited = planEditor ? planEditor.value.trim() : "";
+    planConfirmBtn.disabled = _contractRunning || _planStale || !edited;
+    if (planStaleHint) planStaleHint.hidden = !_planStale;
+  }
+  // 计划后改 contract(mode/评论/brief/preserve/artifact)→ 标 stale,阻止确认(spec §3.E.9)
+  function checkPlanStale() {
+    if (!_plan || _planStale) return;
+    if (!_contractMeta || _plan.base_artifact_hash !== _contractMeta.loadedArtifactHash) { _planStale = true; }
+    const draft = getContractDraft();
+    try { if (taskFingerprint(draft) !== _plan.task_sha256) _planStale = true; } catch (e) {}
+    renderPlanConfirmState();
+  }
+  // 确认计划 → 新 candidate task(携带 plan);绝不 resume plan task(spec §3.E.8/§5.4)
+  function confirmPlan() {
+    if (_planStale) return;
+    return dispatchBridgeRun("candidate", { plan: planPayload() });
   }
 
   if (contractCloseBtn) contractCloseBtn.addEventListener("click", closeContract);
-  // scope 卡 / 执行 seg → 派生 mode + 刷新 UI(mockup 还原)
-  document.querySelectorAll('input[name="contract-scope"]').forEach((r) => r.addEventListener("change", refreshContractUI));
-  document.querySelectorAll(".exec-opt").forEach((b) => b.addEventListener("click", () => {
-    if (b.disabled) return;
-    document.querySelectorAll(".exec-opt").forEach((x) => x.classList.remove("active"));
-    b.classList.add("active");
-    refreshContractUI();
-  }));
-  if (contractBrief) contractBrief.addEventListener("input", refreshContractUI);
-  if (contractCopyPrompt) contractCopyPrompt.addEventListener("click", () => copyContract("prompt"));
+  // scope 卡 / brief / preserve 改动 → 刷新 UI + 计划失效检测(spec §3.E.9)
+  document.querySelectorAll('input[name="contract-scope"]').forEach((r) => r.addEventListener("change", () => { refreshContractUI(); checkPlanStale(); }));
+  if (contractBrief) contractBrief.addEventListener("input", () => { refreshContractUI(); checkPlanStale(); });
+  if (contractPreserve) contractPreserve.addEventListener("input", () => { refreshContractUI(); checkPlanStale(); });
+  if (contractCopyPrompt) contractCopyPrompt.addEventListener("click", () => copyContract());
   if (contractBridge) contractBridge.addEventListener("click", startBridgeRun);
-  // 发送组菜单(mockup):⌄ 切换;session-item 选会话;复制 JSON;外部点击关闭
+  if (contractPlanBtn) contractPlanBtn.addEventListener("click", startPlanRun);
+  if (contractGotoRange) contractGotoRange.addEventListener("click", () => setContractStep("comment-scope"));
+  // 发送组菜单:⌄ 切换 + 重新 probe(缓存过期);agent 选 provider;外部点击关闭
   const sendToggle = document.getElementById("contract-send-toggle");
   const sendMenu = document.getElementById("contract-send-menu");
   function closeSendMenu() { if (sendMenu) sendMenu.classList.remove("show"); if (sendToggle) sendToggle.setAttribute("aria-expanded", "false"); }
   if (sendToggle) sendToggle.addEventListener("click", (e) => {
     e.stopPropagation();
+    queryProviders(false); // 点开下拉时若缓存过期则重探(spec §3.D)
     const open = !sendMenu.classList.contains("show");
     if (open) { sendMenu.classList.add("show"); sendToggle.setAttribute("aria-expanded", "true"); } else closeSendMenu();
   });
   if (sendMenu) sendMenu.addEventListener("click", (e) => {
-    const si = e.target.closest(".session-item");
-    if (si && !si.hidden) {
-      document.querySelectorAll(".session-item .radio-i").forEach((r) => r.classList.remove("on"));
-      const ri = si.querySelector(".radio-i"); if (ri) ri.classList.add("on");
-      closeSendMenu(); return;
-    }
-    if (e.target.closest("#contract-copy-json-menu")) { copyContract("json"); closeSendMenu(); }
+    const ag = e.target.closest(".agent");
+    if (ag && !ag.disabled) { selectProvider(ag.dataset.provider); closeSendMenu(); return; }
   });
   document.addEventListener("click", (e) => { if (sendMenu && !e.target.closest(".send-group")) closeSendMenu(); });
-  // Night Pack A §5.2 只读成功态按钮:打开候选(新标签,便于对照)/ 返回原文件(当前标签导航回 source,清结果态)
+  // 候选只读成功态按钮:打开候选(新标签)/ 返回原文件(当前标签导航回 source)
   if (candidateOpen) candidateOpen.addEventListener("click", () => {
     if (_candidateResult && _candidateResult.candidate_uri) {
       try { chrome.tabs.create({ url: _candidateResult.candidate_uri }); } catch (e) {}
@@ -957,33 +1032,32 @@
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && _contractOpen) { e.preventDefault(); closeContract(); } });
 
-  // === v0.7.2 选择流事件(spec §2 状态转换)===
-  // B:返回 / 继续;C:返回挑选 / 更改评论
-  document.getElementById("contract-select-back").addEventListener("click", closeContract);          // B --返回--> A
-  document.getElementById("contract-select-continue").addEventListener("click", () => {              // B --继续--> C(M>0)
-    if (orderedSelectedRootIds().length > 0) gotoComposeStep();
-  });
-  document.getElementById("contract-compose-back").addEventListener("click", gotoSelectStep);        // C --返回--> B(保留)
-  document.getElementById("contract-change-comments").addEventListener("click", gotoSelectStep);     // C --更改--> B(保留)
-  // B 卡片勾选:事件委托(spec §4.4);label 原生整卡可点 + 键盘 focus/Space
-  selectList.addEventListener("change", (e) => {
+  // === v0.8.1 comment-scope / plan-review 事件 ===
+  document.getElementById("contract-range-back").addEventListener("click", () => setContractStep("compose")); // comment-scope --返回--> compose(保留草稿)
+  document.getElementById("contract-range-confirm").addEventListener("click", () => setContractStep("compose")); // 确认选择 → 回 compose
+  // comment-scope 卡片勾选:事件委托;子树随父勾选(spec §3.C/§4.4)
+  if (selectList) selectList.addEventListener("change", (e) => {
     const cb = e.target.closest('input[type="checkbox"]');
     if (!cb) return;
     const card = cb.closest(".select-card");
     if (!card) return;
     const id = card.dataset.id;
     const kids = buildChildrenIndex(_contractItems);
-    // 勾选/取消一个节点 → 连同其全部后代一起(子树)
     descendantIds(id, kids).forEach((x) => { if (cb.checked) _selectedNodeIds.add(x); else _selectedNodeIds.delete(x); });
-    renderSelectStep(); // 重渲染同步嵌套勾选态 + 计数
+    renderCommentScope();
   });
-  // 全选/全不选:默认全选时点一下→全不选(方便逐个挑);不全选时点一下→全选
+  // 全选/取消全选
   if (selectToggleAll) selectToggleAll.addEventListener("click", () => {
     const nonStale = allNonStaleNodeIds(_contractItems);
     const allSelected = selectedNodeCount() === nonStale.length && nonStale.length > 0;
     _selectedNodeIds = new Set(allSelected ? [] : nonStale);
-    renderSelectStep();
+    renderCommentScope();
   });
+  // plan-review:编辑计划 → 刷新确认态;重新生成 → 新 plan task(旧计划作废);确认 → 新 candidate task(携带 plan)
+  if (planEditor) planEditor.addEventListener("input", renderPlanConfirmState);
+  if (planRegenerate) planRegenerate.addEventListener("click", () => { _plan = null; _planStale = false; setContractStep("compose"); startPlanRun(); });
+  if (planConfirmBtn) planConfirmBtn.addEventListener("click", confirmPlan);
+  document.getElementById("contract-plan-review-back").addEventListener("click", () => setContractStep("compose")); // plan-review --返回--> compose(计划保留为未采纳草稿)
   // ? tooltip:click toggle(触屏可用),hover/focus 由 CSS 处理;同时关掉其他已开的
   document.addEventListener("click", (e) => {
     const tip = e.target.closest(".tip");
@@ -991,7 +1065,7 @@
     if (tip) { e.preventDefault(); e.stopPropagation(); tip.classList.toggle("open"); }
   });
 
-  // 底部「整理评论,创建编辑任务」(spec §4.2):get-export → roots → 默认全选 → 进入 B(选择步骤)
+  // 「创建编辑任务」(spec §3.A/§4.2):get-export → roots → 默认全选 → 直达 compose
   document.getElementById("export-btn").addEventListener("click", () => {
     sendToContent({ type: "get-export" }).then((resp) => {
       if (!resp || resp.type !== "export-data") return;
@@ -999,7 +1073,7 @@
       const roots = window.ChangeContract.getRoots(items);
       if (!roots.length) { showToast(t("contract.empty")); return; }
       _contractTriggerEl = document.getElementById("export-btn");
-      openContractSelector(roots, items, resp.artifact, bridgeMeta(resp));
+      openContract(roots, items, resp.artifact, bridgeMeta(resp));
     });
   });
 
@@ -1271,15 +1345,21 @@
       if (teamSetup) teamSetup.hidden = false;
       loginState.textContent = t("team.invitePrefill");
     }
-    // v0.7 bridge:background 推送的 run 进度/完成/失败(仅当前 tab 且 Composer 打开时处理)
+    // bridge:background 推送的 run 进度/完成/失败/计划就绪(仅当前 tab 且任务 sheet 打开时处理)
     if (_contractOpen && msg && msg.tab_id === currentTabId) {
-      if (msg.type === "bridge-progress" && _contractRunning) {
-        setBridgeStatus(_contractRunKind === "candidate" ? t("bridge.candidateRunning") : t("bridge.running"), "running");
+      if (msg.type === "bridge-plan-ready") { onPlanReady(msg); } // v0.8.1 plan run 完成 → plan-review
+      else if (msg.type === "bridge-progress" && _contractRunning) {
+        setBridgeStatus(_contractRunKind === "plan" ? t("bridge.planRunning").replace("{agent}", providerLabel(_provider)) : t("bridge.candidateRunning"), "running");
       } else if (msg.type === "bridge-completed") {
         setContractRunning(false);
-        if (msg.candidate) showCandidateResult(msg); // Night Pack A §5.2 最小只读成功态
+        if (msg.candidate) showCandidateResult(msg); // 候选只读成功态
         setBridgeStatus(msg.candidate ? t("bridge.candidateCompleted") : t("bridge.completed"), "ok");
-      } else if (msg.type === "bridge-failed") { setContractRunning(false); setBridgeStatus(tBridgeFailed(msg.code, msg), bridgeFailClass(msg.code)); }
+      } else if (msg.type === "bridge-failed") {
+        setContractRunning(false);
+        // plan 失败留在 compose(不进 plan-review);candidate 失败同理
+        if (_contractStep === "plan-running") setContractStep("compose");
+        setBridgeStatus(tBridgeFailed(msg.code, msg), bridgeFailClass(msg.code));
+      }
     }
   });
 
@@ -1380,8 +1460,10 @@
     renderMode();
     renderCards(_lastItems);
     if (_contractOpen) {
-      if (_contractStep === "select") renderSelectStep();          // B 步骤:卡片/计数/警告/按钮跟随语言
-      else { renderContractSource(); refreshContractUI(); }        // C 步骤:摘要/表单/bridge 跟随语言
+      if (_contractStep === "comment-scope") renderCommentScope();   // 评论范围:卡片/计数/警告/按钮跟随语言
+      else if (_contractStep === "plan-review") renderPlanReview();  // 计划审阅:文案跟随语言
+      else refreshContractUI();                                       // compose:scope/高级/bridge 跟随语言
+      renderProviderMenu();                                           // provider 状态文案跟随语言
     }
     refreshLoginState();
     // v0.8: 弹层条目(字号/标题/对齐/色板 title)跟随新语言 —— 清 built 缓存,下次打开时重建
