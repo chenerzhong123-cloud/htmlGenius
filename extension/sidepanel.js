@@ -621,7 +621,14 @@
     if (contractBriefError) contractBriefError.hidden = true;
     if (contractFallback) { contractFallback.hidden = true; }
     if (contractFallbackText) contractFallbackText.value = "";
-    if (contractBridgeStatus) { contractBridgeStatus.hidden = true; contractBridgeStatus.className = "contract-bridge-status"; }
+    if (contractBridgeStatus) {
+      contractBridgeStatus.hidden = true;
+      contractBridgeStatus.className = "contract-bridge-status";
+      const d = contractBridgeStatus.querySelector(".cbs-detail"); if (d) d.hidden = true;
+      const tx = contractBridgeStatus.querySelector(".cbs-text"); if (tx) tx.textContent = "";
+      const tm = contractBridgeStatus.querySelector(".cbs-timer"); if (tm) tm.textContent = "";
+    }
+    stopRunTimer(); resetRunEvents();
     _plan = null; _planStale = false;
   }
   function showContractSheet() {
@@ -656,6 +663,7 @@
     showContractSheet();
     queryProviders(true); // 打开即 probe(spec §3.D);30s 内不重探
     getActiveTab().then((tab) => { if (tab && tab.id) loadCandidateEvidence(tab.id); }); // §6 持久证据
+    loadRunHistory(); // 预载最近 3 次任务历史(展开状态栏时立即可见)
   }
   // 步骤切换:show/hide 三个 step 面板 + data-step
   function setContractStep(step) {
@@ -864,11 +872,56 @@
     renderProviderMenu();
     refreshContractUI();
   }
+  // === 状态栏:计时器 + 本次进度时间线 + 最近 3 次历史(可点击展开/收起)===
+  // 协议层无 token 流;用计时器(每秒跳)+ 阶段事件时间线 + 历史给用户「在动、没卡死」的可感知反馈。
+  let _runTimer = null;
+  let _runStartedAt = 0;
+  let _runEvents = [];               // 本次 run 事件时间线 [{ts, text}]
+  const RUN_LOG_KEY = "hg_recent_runs";
+  function cbsTextEl() { return contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-text"); }
   function setBridgeStatus(text, cls) {
     if (!contractBridgeStatus) return;
-    contractBridgeStatus.hidden = !text;
-    contractBridgeStatus.textContent = text || "";
-    contractBridgeStatus.className = "contract-bridge-status" + (cls ? " " + cls : "");
+    const expanded = contractBridgeStatus.classList.contains("expanded");
+    contractBridgeStatus.hidden = !text && !_runEvents.length;
+    const tx = cbsTextEl(); if (tx) tx.textContent = text || "";
+    contractBridgeStatus.className = "contract-bridge-status" + (cls ? " " + cls : "") + (expanded ? " expanded" : "");
+  }
+  function startRunTimer() { stopRunTimer(); _runStartedAt = Date.now(); updateRunTimer(); _runTimer = setInterval(updateRunTimer, 1000); }
+  function stopRunTimer() { if (_runTimer) { clearInterval(_runTimer); _runTimer = null; } }
+  function updateRunTimer() {
+    const el = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-timer");
+    if (!el || !_runStartedAt) return;
+    const secs = Math.max(0, Math.floor((Date.now() - _runStartedAt) / 1000));
+    el.textContent = secs + "s";
+  }
+  function runDurationSec() { return _runStartedAt ? Math.max(0, Math.floor((Date.now() - _runStartedAt) / 1000)) : 0; }
+  function nowHMS() { const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0") + ":" + String(d.getSeconds()).padStart(2, "0"); }
+  function pushProgress(text) { _runEvents.push({ ts: nowHMS(), text: String(text || "") }); renderProgress(); if (contractBridgeStatus) contractBridgeStatus.hidden = false; }
+  function renderProgress() {
+    const ul = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-progress");
+    if (!ul) return;
+    ul.innerHTML = _runEvents.slice(-12).map((e) => '<li><span class="cbs-ts">' + esc(e.ts) + "</span> " + esc(e.text) + "</li>").join("");
+  }
+  function resetRunEvents() { _runEvents = []; renderProgress(); }
+  function recordRun(entry) {
+    try { chrome.storage.local.get([RUN_LOG_KEY], (res) => {
+      const list = (res && Array.isArray(res[RUN_LOG_KEY])) ? res[RUN_LOG_KEY] : [];
+      list.unshift(entry); const trimmed = list.slice(0, 3);
+      chrome.storage.local.set({ [RUN_LOG_KEY]: trimmed }, () => renderHistoryFromList(trimmed));
+    }); } catch (e) {}
+  }
+  function loadRunHistory() {
+    try { chrome.storage.local.get([RUN_LOG_KEY], (res) => renderHistoryFromList((res && res[RUN_LOG_KEY]) || [])); } catch (e) {}
+  }
+  function renderHistoryFromList(list) {
+    const ul = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-history");
+    if (!ul) return;
+    if (!list || !list.length) { ul.innerHTML = '<li class="cbs-empty">' + esc(t("run.noHistory")) + "</li>"; return; }
+    ul.innerHTML = list.map((r) => {
+      const tag = (r.run_kind === "plan" ? t("run.kindPlan") : t("run.kindCandidate"));
+      const st = r.status === "completed" ? t("run.ok") : (r.status === "plan-ready" ? t("run.planOk") : t("run.fail"));
+      return '<li><span class="cbs-ts">' + esc(r.started_at || "") + "</span> " + esc(providerLabel(r.provider) || "?") + " · " + esc(tag) + " · " + esc(st) + (r.duration_s != null ? " · " + r.duration_s + "s" : "") + "</li>";
+    }).join("");
   }
   function bridgeFailClass(code) {
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF"
@@ -924,15 +977,22 @@
     chrome.runtime.sendMessage(payload).then((resp) => {
       if (resp && resp.ok) {
         setContractRunning(true);
-        if (runKind === "plan") setBridgeStatus(t("bridge.planRunning").replace("{agent}", providerLabel(_provider)), "running");
-        else setBridgeStatus(t("bridge.candidateRunning"), "running");
+        // 状态栏可见:plan 确认后从 plan-review 发的 candidate 也要回 compose 看进度
+        if (_contractStep !== "compose") setContractStep("compose");
+        resetRunEvents();
+        const startMsg = (runKind === "plan" ? t("bridge.planRunning") : t("bridge.candidateRunning")).replace("{agent}", providerLabel(_provider));
+        setBridgeStatus(startMsg, "running");
+        pushProgress(t("run.started").replace("{agent}", providerLabel(_provider)));
+        startRunTimer();
+        pushProgress(startMsg);
       } else {
         const code = resp && resp.code;
         if (code === "BRIDGE_NOT_INSTALLED") setBridgeStatus(t("bridge.notInstalled"), "warn");
         else if (code === "NOT_LOCAL" || code === "NO_ARTIFACT_VERSION") setBridgeStatus(t("bridge.hint"), "warn");
         else setBridgeStatus(tBridgeFailed(code, resp), bridgeFailClass(code));
+        pushProgress(tBridgeFailed(code, resp));
       }
-    }).catch(() => setBridgeStatus(t("bridge.notInstalled"), "warn"));
+    }).catch(() => { setBridgeStatus(t("bridge.notInstalled"), "warn"); pushProgress(t("bridge.notInstalled")); });
   }
   function startBridgeRun() { return dispatchBridgeRun("candidate", _plan && !_planStale ? { plan: planPayload() } : null); }
   // v0.8.1 plan 流:先给我看修改计划 → run_kind=plan → plan-running → bridge-plan-ready → plan-review
@@ -940,7 +1000,13 @@
   // plan-ready 到达:存计划,进 plan-review(spec §5.3/§3.E)
   function onPlanReady(msg) {
     setContractRunning(false);
-    if (!msg || !msg.plan_id || !msg.plan) { setBridgeStatus(t("bridge.planFailed"), "err"); return; }
+    stopRunTimer();
+    if (!msg || !msg.plan_id || !msg.plan) {
+      pushProgress(t("bridge.planFailed"));
+      recordRun({ provider: _provider, run_kind: "plan", status: "failed", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode() });
+      setBridgeStatus(t("bridge.planFailed"), "err");
+      return;
+    }
     const draft = getContractDraft();
     _plan = {
       plan_id: msg.plan_id,
@@ -955,6 +1021,8 @@
     };
     try { _plan.task_sha256 = taskFingerprint(draft); } catch (e) {}
     _planStale = false;
+    pushProgress(t("run.planReady"));
+    recordRun({ provider: _provider, run_kind: "plan", status: "plan-ready", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode() });
     setContractStep("plan-review");
     setBridgeStatus("", null);
   }
@@ -999,6 +1067,14 @@
   if (contractPreserve) contractPreserve.addEventListener("input", () => { refreshContractUI(); checkPlanStale(); });
   if (contractCopyPrompt) contractCopyPrompt.addEventListener("click", () => copyContract());
   if (contractBridge) contractBridge.addEventListener("click", startBridgeRun);
+  // 状态栏点击:展开/收起本次进度 + 最近 3 次历史(spec:点击展开,再次点击收起)
+  if (contractBridgeStatus) contractBridgeStatus.addEventListener("click", () => {
+    const d = contractBridgeStatus.querySelector(".cbs-detail");
+    if (!d) return;
+    d.hidden = !d.hidden;
+    contractBridgeStatus.classList.toggle("expanded", !d.hidden);
+    if (!d.hidden) loadRunHistory();
+  });
   if (contractPlanBtn) contractPlanBtn.addEventListener("click", startPlanRun);
   if (contractGotoRange) contractGotoRange.addEventListener("click", () => setContractStep("comment-scope"));
   // 发送组菜单:⌄ 切换 + 重新 probe(缓存过期);agent 选 provider;外部点击关闭
@@ -1349,16 +1425,23 @@
     if (_contractOpen && msg && msg.tab_id === currentTabId) {
       if (msg.type === "bridge-plan-ready") { onPlanReady(msg); } // v0.8.1 plan run 完成 → plan-review
       else if (msg.type === "bridge-progress" && _contractRunning) {
-        setBridgeStatus(_contractRunKind === "plan" ? t("bridge.planRunning").replace("{agent}", providerLabel(_provider)) : t("bridge.candidateRunning"), "running");
+        const m = _contractRunKind === "plan" ? t("bridge.planRunning").replace("{agent}", providerLabel(_provider)) : t("bridge.candidateRunning");
+        setBridgeStatus(m, "running");
+        if (msg.summary) pushProgress(msg.summary);
       } else if (msg.type === "bridge-completed") {
-        setContractRunning(false);
+        setContractRunning(false); stopRunTimer();
         if (msg.candidate) showCandidateResult(msg); // 候选只读成功态
-        setBridgeStatus(msg.candidate ? t("bridge.candidateCompleted") : t("bridge.completed"), "ok");
+        const doneText = msg.candidate ? t("bridge.candidateCompleted") : t("bridge.completed");
+        setBridgeStatus(doneText, "ok");
+        pushProgress(doneText);
+        recordRun({ provider: _provider, run_kind: "candidate", status: "completed", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode() });
       } else if (msg.type === "bridge-failed") {
-        setContractRunning(false);
-        // plan 失败留在 compose(不进 plan-review);candidate 失败同理
+        setContractRunning(false); stopRunTimer();
         if (_contractStep === "plan-running") setContractStep("compose");
-        setBridgeStatus(tBridgeFailed(msg.code, msg), bridgeFailClass(msg.code));
+        const failText = tBridgeFailed(msg.code, msg);
+        setBridgeStatus(failText, bridgeFailClass(msg.code));
+        pushProgress(failText);
+        recordRun({ provider: _provider, run_kind: _contractRunKind, status: "failed", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode(), code: msg.code });
       }
     }
   });

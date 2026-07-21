@@ -219,7 +219,15 @@
         </div>
         <button id="contract-plan" class="plan-button" type="button" data-i18n="compose.plan">先给我看修改计划</button>
       </div>
-      <div id="contract-bridge-status" class="contract-bridge-status" hidden></div>
+      <div id="contract-bridge-status" class="contract-bridge-status" hidden>
+        <div class="cbs-main"><span class="cbs-text"></span><span class="cbs-timer"></span><span class="cbs-chev" aria-hidden="true">▾</span></div>
+        <div class="cbs-detail" hidden>
+          <div class="cbs-section-label" data-i18n="run.thisRun">本次进度</div>
+          <ul class="cbs-progress"></ul>
+          <div class="cbs-section-label" data-i18n="run.recent">最近 3 次</div>
+          <ul class="cbs-history"></ul>
+        </div>
+      </div>
     </div>
   </div>
 

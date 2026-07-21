@@ -31,6 +31,17 @@ function fail(code, message, extra) {
   throw err;
 }
 function sha256Hex(s) { return crypto.createHash('sha256').update(s, 'utf8').digest('hex'); }
+// 提取 thread/start|resume 返回的 thread id。真实 Codex App Server 0.145+:result.thread.id(嵌套);
+// 兼容旧/其他实现的 result.threadId / result.id / result.thread_id。
+function extractThreadId(r) {
+  if (!r) return null;
+  if (r.thread) {
+    if (r.thread.id) return r.thread.id;
+    if (r.thread.threadId) return r.thread.threadId;
+    if (r.thread.thread_id) return r.thread.thread_id;
+  }
+  return r.threadId || r.id || r.thread_id || null;
+}
 
 // 最小 env 白名单:runtime 需要 HOME(~/.codex 登录态)、PATH、locale。extension 内容永不进 env。
 function sanitizedEnv() {
@@ -203,10 +214,10 @@ export class CodexAppServerClient {
   }
   _notify(method, params) { this._send({ jsonrpc: '2.0', method, params: params || {} }); }
 
-  // initialize → initialized(spec §2/§6.1;Preflight 实测 params={clientInfo, capabilities})
+  // initialize → initialized(spec §2/§6.1;真实 0.145 实测 params={clientInfo, protocolVersion:1, capabilities:{}})
   async initialize(timeoutMs) {
     this._spawn();
-    await this._request('initialize', { clientInfo: CLIENT_INFO, capabilities: null }, timeoutMs || HANDSHAKE_TIMEOUT_MS);
+    await this._request('initialize', { clientInfo: CLIENT_INFO, protocolVersion: 1, capabilities: {} }, timeoutMs || HANDSHAKE_TIMEOUT_MS);
     this._notify('initialized', {});
     return true;
   }
@@ -223,7 +234,7 @@ export class CodexAppServerClient {
       try {
         const r = await this._request('thread/resume',
           { threadId: storedThreadId, cwd: workspaceCwd, approvalPolicy: 'never', sandbox: 'workspace-write' }, turnTimeout);
-        threadId = (r && (r.threadId || r.id || r.thread_id)) || storedThreadId;
+        threadId = extractThreadId(r) || storedThreadId;
       } catch (e) {
         if (e && e.code === CODEX_TIMED_OUT) throw e;
         fail(CODEX_SESSION_UNAVAILABLE, 'thread/resume 失败: ' + (e && e.message)); // spec §6.2:resume 失败不退化到 start
@@ -231,8 +242,8 @@ export class CodexAppServerClient {
     } else {
       const r = await this._request('thread/start',
         { cwd: workspaceCwd, approvalPolicy: 'never', sandbox: 'workspace-write' }, turnTimeout);
-      threadId = r && (r.threadId || r.id || r.thread_id);
-      if (!threadId) fail(CODEX_TURN_FAILED, 'thread/start 未返回 threadId');
+      threadId = extractThreadId(r);
+      if (!threadId) fail(CODEX_TURN_FAILED, 'thread/start 未返回 threadId(result.thread.id):' + JSON.stringify(r).slice(0, 200));
     }
 
     // 等终态:turn/completed(notification);期间 error 视为 turn 失败(spec §6.1/§9)

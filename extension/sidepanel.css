@@ -512,6 +512,32 @@ button {
   display: none; flex-direction: column; overflow: hidden; /* 滚动交给 .contract-scroll;绝不出现横向滚动 */
 }
 #contract-sheet.show { display: flex; }
+/* v0.8.1 高保真:mint 深色主题(对齐 Demo #panel)。仅深色生效;浅色由下方 [data-theme=light] 回到全局近黑。
+   覆盖 Nebula 靛蓝 token,使 compose/comment-scope/plan-review 内所有元素(scope 卡/split/plan 按钮/agent 点)统一 mint。 */
+#contract-sheet {
+  --bg-canvas: #121722; --bg-surface: #1a2130; --bg-surface-raised: #202a3d; --bg-input: #111722;
+  --bg-overlay: #222c3e; --text-primary: #f2f5fb; --text-secondary: #d0d8e5; --text-muted: #9aa7bc;
+  --text-faint: #69758a; --line-subtle: rgba(180,196,221,.12); --line-default: #303b51; --line-focus: #88e6d1;
+  --brand: #88e6d1; --brand-hover: #a6f2e0; --brand-soft: rgba(136,230,209,.12); --success: #8fe7b2;
+  --warning: #f4cc76; --warning-soft: rgba(244,204,118,.10); --success-soft: rgba(143,231,178,.10);
+  --danger: #ff9aa5; --cta-bg: #88e6d1;
+}
+#contract-sheet .contract-primary,
+#contract-sheet .send-main,
+#contract-sheet .send-toggle { color: #10211f; }
+#contract-sheet .send-toggle { background: #88e6d1; }
+/* 浅色主题:contract-sheet 回到全局白底近黑(Demo #panel light 一致) */
+[data-theme="light"] #contract-sheet {
+  --bg-canvas: #fff; --bg-surface: #f8fafc; --bg-surface-raised: #eef0f3; --bg-input: #fff; --bg-overlay: #fff;
+  --text-primary: #181d26; --text-secondary: #333840; --text-muted: #41454d; --text-faint: #6b7079;
+  --line-subtle: #e8eaee; --line-default: #ddd; --line-focus: #458fff; --brand: #181d26; --brand-hover: #0d1218;
+  --brand-soft: rgba(24,29,38,.06); --success: #1f7a3d; --warning: #8a5a00; --warning-soft: rgba(138,90,0,.10);
+  --danger: #b3261e; --cta-bg: #181d26;
+}
+[data-theme="light"] #contract-sheet .contract-primary,
+[data-theme="light"] #contract-sheet .send-main,
+[data-theme="light"] #contract-sheet .send-toggle { color: #fff; }
+[data-theme="light"] #contract-sheet .send-toggle { background: #181d26; }
 .contract-step { display: none; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 /* v0.8.1:三档 step —— compose(选择修改范围,默认)/ comment-scope(选择评论范围)/ plan-review(确认计划) */
 #contract-sheet[data-step="compose"] #contract-step-compose,
@@ -741,3 +767,19 @@ button {
 .plan-actions { display: flex; gap: 7px; }
 .plan-actions .contract-secondary { flex: 1; }
 .plan-actions .contract-primary { flex: 1.4; }
+
+/* === v0.8.1 状态栏:计时器 + 可展开(本次进度时间线 + 最近 3 次)=== */
+.contract-bridge-status { cursor: pointer; user-select: none; }
+.contract-bridge-status .cbs-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.contract-bridge-status .cbs-text { flex: 1; min-width: 0; }
+.contract-bridge-status .cbs-timer { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--brand-hover); opacity: .92; }
+.contract-bridge-status .cbs-chev { flex: 0 0 auto; color: var(--text-muted); font-size: 10px; transition: transform .15s; }
+.contract-bridge-status.expanded .cbs-chev { transform: rotate(180deg); }
+.contract-bridge-status .cbs-detail { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line-subtle); }
+.contract-bridge-status .cbs-detail[hidden] { display: none; }
+.contract-bridge-status .cbs-section-label { color: var(--text-faint); font-size: 10px; font-weight: 700; margin: 4px 0 3px; text-transform: uppercase; letter-spacing: .04em; }
+.contract-bridge-status .cbs-section-label:first-child { margin-top: 0; }
+.contract-bridge-status .cbs-progress, .contract-bridge-status .cbs-history { list-style: none; margin: 0 0 4px; padding: 0; }
+.contract-bridge-status .cbs-progress li, .contract-bridge-status .cbs-history li { padding: 3px 0; color: var(--text-secondary); font-size: 11px; line-height: 1.45; word-break: break-word; }
+.contract-bridge-status .cbs-ts { color: var(--text-faint); font-variant-numeric: tabular-nums; margin-right: 4px; }
+.contract-bridge-status .cbs-empty { color: var(--text-faint); font-style: italic; }
