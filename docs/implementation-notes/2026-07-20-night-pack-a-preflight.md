@@ -12,7 +12,7 @@
 ## baseline 命令与结果（全绿）
 
 ```text
-cd bridge && node --test test/      # 55 pass / 0 fail
+cd bridge && node --test test/      # 69 pass / 0 fail(含 candidate-workspace 6 + candidate-run 7)
 tests/test_undo_history.js          # 29 pass
 # 浏览器测试页(jsdom 注入 crypto/indexedDB/fetch)：
 buildprompt / change-contract / apply-delta / sync / login / remote-store /
@@ -47,7 +47,26 @@ baseline 无新增失败；真实入口已识别；`CURRENT_IMPLEMENTATION_STATE
 3. `resolveSourcePath` 先 `lstat` 输入路径再 `realpath`，以捕获 symlink 逃逸（测试中暴露并修复的真实 bug）。
 4. `run_kind` 由 sidepanel→background→host 透传；`restructure` 在 background 与 host 两处均拒 `candidate`。
 
-**未完成 / 待用户：**
-- Gate 3.5 真实 Claude CLI smoke **未在夜间执行**（不消耗本地额度、登录态不确定）；自动测试全过，标记为「待用户手动验证」。
-- Gate 4 全跨进程手工测试：各组件已自动化验证（`handleArtifactUpdateReady` 经 artifact-version-test 覆盖；background 校验为代码级），端到端手工用例待用户。
-- M5（source/candidate diff、越界告警、用户显式 promote）**故意不在本包**（spec §9）。
+**最终测试结果（2026-07-21 复跑，直读当前 extension/）：**
+```text
+cd bridge && node --test test/                 # 69 pass / 0 fail
+tests/test_undo_history.js                      # 29 pass
+/tmp/hgtest/evidence-check.js                   # Gate5 证据持久化 6/6 PASS
+/tmp/hgtest/integration-test.js                 # execEdit/undo/stale 20/0
+/tmp/hgtest/final-check.js (浏览器页)           # 10 PASS / 1 FAIL(见下)
+git diff --check                                # clean
+```
+- `final-check.js` 唯一 FAIL = `remote-store-test.html: Response is not defined`：该 runner 仅在 `withEnv=true` 时向 jsdom 注入 `Response`，此页未启用 → **测试台环境缺口**，非代码回归；remote-store 上次改动在 v0.5.1，本包未碰。Night Pack A 相关页（change-contract / apply-delta / artifact-version / artifact-storage / comment-task-selection / buildprompt）全 PASS。
+
+**真实 Claude CLI smoke（Gate 3.5）：已通过。** 2026-07-21 09:27（本地）真实执行，产物在 `samples/`：
+- manifest `status:"ready"`；`source.sha256_before` == `sha256_after`（运行期 source 未被改）；
+- sibling `samples/01_token--htmlgenius-<runId>.candidate.html` 已发布（11372 B，合法 HTML）；
+- 任务要求「把这句改到 15 字以内」，Claude 只改了第 246 行 1 句（diff 仅 2 行），原文→`Token 是 AI 的最小语义单元。`，未越界。session UUID + ownership htmlgenius 齐全。
+- Gate 4 端到端：host 侧由上述产物证明；扩展消费侧最后一个阻塞点（`artifact-update-ready` 缺 `result_artifact_hash` + 跨侧哈希比对）已在 `952cce7` 修复，用户重试后未再报错。
+
+**已知轻微偏差（不阻断任何 gate，记录备查）：**
+1. `candidate-workspace.mjs:129` 大小上限表达式 `Math.min(MAX, Math.max(MAX, X))` 自抵消，有效上限恒为 10 MiB；spec §3.4.5「建议 source×10 且≤10MiB」的 source×10 收紧未生效。当前行为（10MiB 硬顶）仍安全，且避免小 source（如 11KB）下 110KB 上限误杀合法 candidate，故保留不改。
+2. 真实 smoke 的 runtime 产物（`samples/.htmlgenius-bridge/.../hgr_d69891a5.../`、`samples/01_token--htmlgenius-hgr_d69891a5....candidate.html`）为未跟踪文件，按 Gate 0「保留未知改动、不删除」原则原地保留。
+
+**未完成 / 不在本包：**
+- M5（source/candidate diff、越界告警、用户显式 promote）**故意不在本包**（spec §9），是下一包唯一方向。
