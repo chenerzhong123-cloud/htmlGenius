@@ -267,7 +267,7 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
     type: "artifact-update-ready",
     source: "bridge",
     result_kind: "new_artifact",
-    result_uri: completion.candidate_uri,
+    result_artifact_uri: completion.candidate_uri, // 必须是 result_artifact_uri(content-script handleArtifactUpdateReady 校验此字段名,见 content-script.js:1255);写 result_uri 会被判 VALIDATION_ERROR → CONSUMER_REJECTED → UI 卡在「生成中」
     result_artifact_hash: completion.candidate_sha256,
     base_artifact_hash: completion.source_sha256_before,
     run_id: runId,

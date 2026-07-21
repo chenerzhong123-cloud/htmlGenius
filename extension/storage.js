@@ -293,6 +293,9 @@ const Storage = {
   getActiveBridgeRunForTab(tabId) { return LocalStore.getActiveBridgeRunForTab(tabId); },
   saveBridgeRun(record) { return LocalStore.saveBridgeRun(record); },
   updateBridgeRun(runId, patch) { return LocalStore.updateBridgeRun(runId, patch); },
+  // Night Pack A §6:最近一次 completed candidate run。facade 之前漏挂这一行 → background.js:55 报
+  // "Storage.getLatestCompletedCandidateRun is not a function"(LocalStore 里早有实现,只是没转发)。
+  getLatestCompletedCandidateRun(logicalDocumentId) { return LocalStore.getLatestCompletedCandidateRun(logicalDocumentId); },
   canonicalArtifactUri,
   isManagedLocalUri,
   legacyDocumentIdForUri,

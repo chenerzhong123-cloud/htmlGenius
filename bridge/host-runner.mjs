@@ -20,8 +20,10 @@ import { pathToFileURL } from "node:url";
 
 const realClaude = { checkAuth, runHandoff, resumeHandoff };
 
-// candidate run 需要读写完整 HTML 文件,比 ack 回执慢得多;3 分钟太短(真实 Claude 编辑整页常需 3-5 分钟)
-const CANDIDATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 分钟
+// candidate run 需要读写完整 HTML 文件,比 ack 回执慢得多。实测:1 条评论约 3 分钟;
+// 3 条评论 local_optimize >5 分钟(2026-07-21 8:36 run timed_out 铁证 + CPU 监控显示 98% 时间在等 API)。
+// 故 8 分钟。再不够说明任务过大或模型卡顿,应减小任务范围,而非无限加时。
+const CANDIDATE_TIMEOUT_MS = 8 * 60 * 1000; // 8 分钟
 
 function truncateMsg(s) {
   const t = String(s || "");
