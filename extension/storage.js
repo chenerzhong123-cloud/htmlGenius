@@ -1,7 +1,7 @@
 // storage.js — IndexedDB 封装(annotations + legacy versions + artifact versions + bridge sessions/runs)
 // 用 globalThis(而非 window)以兼容 background service worker(无 window);在 content-script/sidepanel globalThis===window,行为不变。
 const DB_NAME = "htmlgenius";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -43,6 +43,15 @@ function openDB() {
         br.createIndex("logical_document_id", "logical_document_id", { unique: false });
         br.createIndex("tab_id", "tab_id", { unique: false });
         br.createIndex("status", "status", { unique: false });
+      }
+      // v0.8.1 (DB v5): plan-first bridge(spec §5.5)——新增 bridge_plans(只新增,不删 session/run)。
+      // 记录受控 plan(用户可编辑副本);不存 Agent stdout/完整 prompt/HTML/思维链。
+      if (!db.objectStoreNames.contains("bridge_plans")) {
+        const bp = db.createObjectStore("bridge_plans", { keyPath: "plan_id" });
+        bp.createIndex("logical_document_id", "logical_document_id", { unique: false });
+        bp.createIndex("tab_id", "tab_id", { unique: false });
+        bp.createIndex("status", "status", { unique: false });
+        bp.createIndex("plan_run_id", "plan_run_id", { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -256,6 +265,32 @@ const LocalStore = {
     cands.sort((a, b) => String(b.completed_at || "").localeCompare(String(a.completed_at || "")));
     return cands[0];
   },
+  // v0.8.1 bridge_plans(spec §5.5):受控 plan CRUD。长度上限在 background 校验层把关;
+  // 不存 Agent stdout/完整 prompt/HTML/思维链。
+  async saveBridgePlan(record) {
+    const now = new Date().toISOString();
+    const rec = Object.assign({}, record, { updated_at: record.updated_at || now, created_at: record.created_at || now });
+    return dbPut("bridge_plans", rec);
+  },
+  async getBridgePlan(planId) { return dbGet("bridge_plans", planId); },
+  async updateBridgePlan(planId, patch) {
+    const plan = await dbGet("bridge_plans", planId);
+    if (!plan) return null;
+    const updated = Object.assign({}, plan, patch, { updated_at: new Date().toISOString() });
+    await dbPut("bridge_plans", updated);
+    return updated;
+  },
+  async markDraftPlansStaleForDocument(logicalDocumentId, exceptPlanId) {
+    const plans = await dbGetAllByIndex("bridge_plans", "logical_document_id", logicalDocumentId);
+    const updated = [];
+    for (const p of (plans || [])) {
+      if (p && p.status === "draft" && p.plan_id !== exceptPlanId) {
+        const u = Object.assign({}, p, { status: "stale", updated_at: new Date().toISOString() });
+        await dbPut("bridge_plans", u); updated.push(u);
+      }
+    }
+    return updated;
+  },
 };
 
 // === mode 分派器 ===
@@ -296,6 +331,11 @@ const Storage = {
   // Night Pack A §6:最近一次 completed candidate run。facade 之前漏挂这一行 → background.js:55 报
   // "Storage.getLatestCompletedCandidateRun is not a function"(LocalStore 里早有实现,只是没转发)。
   getLatestCompletedCandidateRun(logicalDocumentId) { return LocalStore.getLatestCompletedCandidateRun(logicalDocumentId); },
+  // v0.8.1 bridge_plans(spec §5.5):facade 转发
+  saveBridgePlan(record) { return LocalStore.saveBridgePlan(record); },
+  getBridgePlan(planId) { return LocalStore.getBridgePlan(planId); },
+  updateBridgePlan(planId, patch) { return LocalStore.updateBridgePlan(planId, patch); },
+  markDraftPlansStaleForDocument(logicalDocumentId, exceptPlanId) { return LocalStore.markDraftPlansStaleForDocument(logicalDocumentId, exceptPlanId); },
   canonicalArtifactUri,
   isManagedLocalUri,
   legacyDocumentIdForUri,
