@@ -38,6 +38,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleQuerySession(msg).then(sendResponse, () => sendResponse({ ok: false, code: "NO_ARTIFACT_STATE" }));
     return true;
   }
+  if (msg.type === "bridge-query-active-run") {
+    // sidepanel 卡死恢复:查后台是否真有在跑的 run(若 SW 曾被杀、失败事件丢失,sidepanel 的 _contractRunning 会卡在 true)
+    (async () => {
+      const active = await Storage.getActiveBridgeRunForTab(msg.tab_id);
+      sendResponse({ active: !!active, run_id: active && active.run_id });
+    })();
+    return true;
+  }
   if (msg.type === "bridge-query-latest-candidate") {
     // Night Pack A §6:返回最近一次 completed candidate 的 run metadata(只读,无敏感内容)
     (async () => {
@@ -203,9 +211,9 @@ function onHostDisconnect(tab_id, runId) {
 async function failRun(tab_id, runId, code, message) {
   const entry = _runsByTab.get(tab_id);
   if (entry) entry.terminal = true;
-  await Storage.updateBridgeRun(runId, { status: "failed", error_code: code, completed_at: nowIso() }).catch(() => {});
-  // 失败不写 session(§6.2:任何对照失败均不写 session、不显示成功)
+  // 先广播再写库:SW 可能在 await IndexedDB 期间被 Chrome 杀掉 → broadcast 永远不执行 → sidepanel 卡死
   broadcast({ type: "bridge-failed", tab_id, run_id: runId, code, message });
+  await Storage.updateBridgeRun(runId, { status: "failed", error_code: code, completed_at: nowIso() }).catch(() => {});
 }
 
 async function completeRun(tab_id, runId, completion, taskSha, logicalId, artifactUrl) {
@@ -218,7 +226,8 @@ async function completeRun(tab_id, runId, completion, taskSha, logicalId, artifa
   const v = BridgeValidate.validateHandoffCompletion(run, completion, taskSha);
   if (!v.ok) return failRun(tab_id, runId, v.code, "completion rejected: " + v.code + (v.field ? " (" + v.field + ")" : ""));
 
-  // 2. 持久化 run(completed)+ session(bridge-owned;只在成功时写)
+  // 2. 先广播(用户可见关键操作);再持久化(SW 可能在 await 期间被杀)
+  broadcast({ type: "bridge-completed", tab_id, run_id: runId, session_id: v.session_id });
   await Storage.updateBridgeRun(runId, { status: "completed", session_id: v.session_id, completed_at: nowIso() }).catch(() => {});
   await Storage.saveBridgeSession({
     logical_document_id: logicalId, provider: PROVIDER, ownership: "htmlgenius",
@@ -226,9 +235,6 @@ async function completeRun(tab_id, runId, completion, taskSha, logicalId, artifa
     workspace_path: BridgeValidate.workspacePathForFileUrl(artifactUrl, logicalId),
     status: "completed"
   }).catch(() => {});
-
-  // 3. v0.7.1 到此为止:不写回、不 reload、不重锚定(§1)。仅通知 sidepanel 显示成功。
-  broadcast({ type: "bridge-completed", tab_id, run_id: runId, session_id: v.session_id });
 }
 
 // —— Night Pack A spec §5.1:candidate-ready → 逐字段比对 → 受控 new_artifact(复用 v0.6.2 消费者)→ 打开 candidate + 重锚 ——
@@ -271,8 +277,16 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
     return failRun(tab_id, runId, "CONSUMER_REJECTED", "artifact-update-ready consumer rejected: " + (consumerResp && consumerResp.code));
   }
 
-  // 持久化 run(completed)+ session(bridge-owned)
+  // 先广播(用户可见:侧边栏立即显示成功);再导航 + 持久化(SW 可能在 await 期间被杀,broadcast 已发则用户不受影响)
   const sessionId = (run.session_id) || null;
+  broadcast({
+    type: "bridge-completed", tab_id, run_id: runId, candidate: true,
+    candidate_uri: completion.candidate_uri, source_uri: completion.source_uri,
+    candidate_sha256: completion.candidate_sha256, source_sha256_before: completion.source_sha256_before
+  });
+  if (consumerResp.action === "navigate_required") {
+    chrome.tabs.update(tab_id, { url: completion.candidate_uri }).catch(() => {});
+  }
   await Storage.updateBridgeRun(runId, { status: "completed", completed_at: nowIso(),
     candidate_uri: completion.candidate_uri, candidate_sha256: completion.candidate_sha256,
     manifest_path: completion.manifest_path }).catch(() => {});
@@ -283,14 +297,4 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
       status: "completed"
     }).catch(() => {});
   }
-
-  // 打开 candidate(消费者返回 navigate_required);新页 content-script 重锚评论
-  if (consumerResp.action === "navigate_required") {
-    chrome.tabs.update(tab_id, { url: completion.candidate_uri }).catch(() => {});
-  }
-  broadcast({
-    type: "bridge-completed", tab_id, run_id: runId, candidate: true,
-    candidate_uri: completion.candidate_uri, source_uri: completion.source_uri,
-    candidate_sha256: completion.candidate_sha256, source_sha256_before: completion.source_sha256_before
-  });
 }

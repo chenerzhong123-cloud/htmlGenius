@@ -870,7 +870,16 @@
     refreshContractUI();
   }
   async function startBridgeRun() {
-    if (_contractRunning) return;
+    if (_contractRunning) {
+      // 卡死恢复:上一轮的失败事件可能因 SW 被杀而丢失,_contractRunning 卡在 true → 后续点击全被拦截。
+      // 查后台确认是否真有在跑的 run;不在则复位,允许重试。
+      const tab = await getActiveTab();
+      if (tab && tab.id) {
+        const resp = await chrome.runtime.sendMessage({ type: "bridge-query-active-run", tab_id: tab.id }).catch(() => null);
+        if (!resp || !resp.active) { _contractRunning = false; setContractRunning(false); }
+      }
+      if (_contractRunning) return; // 确实还在跑
+    }
     if (!(await refreshSelectionBeforeSubmit())) return; // spec §4.3:发送前同样过 stale 防线
     const draft = getContractDraft();
     let task;
