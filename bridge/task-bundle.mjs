@@ -191,3 +191,18 @@ export function buildCandidatePrompt({ runId, task }) {
   const rendered = ChangeContract.renderPrompt(task);
   return prelude + "\n\n## Change Contract (execute strictly)\n" + rendered;
 }
+
+// —— Codex App Server 执行前言(v0.8 spec §6.4,固定、不可由用户覆盖)——
+// 与 buildCandidatePrompt 语义等价(都是受控候选工作区),按 spec §6.4 中文原文;前言在 renderPrompt 之前拼接。
+export function buildCodexPrompt({ task }) {
+  const prelude = [
+    "你正在 HTML Genius 的受控候选工作区中执行任务。",
+    "",
+    "- 只读取当前目录中的 source.html 以及 task bundle。",
+    "- 只将最终、完整、可直接打开的 HTML 写入当前目录的 candidate.html。",
+    "- 不要修改 source.html、task bundle、其它文件;不要使用网络、MCP、外部插件或其它工作目录。",
+    "- 严格遵守 Change Contract。无法唯一定位目标时,保留该内容并在最终消息中说明。",
+    "- 不要以 Markdown、diff、解释文本或多个文件替代 candidate.html。"
+  ].join("\n");
+  return prelude + "\n\n## Change Contract (execute strictly)\n" + ChangeContract.renderPrompt(task);
+}

@@ -6,6 +6,7 @@
 import process from "node:process";
 import { NativeFrameDecoder, writeMessage } from "./native-protocol.mjs";
 import { executeHandoff, executeCandidateRun } from "./host-runner.mjs";
+import { executeCodexCandidateRun } from "./codex-adapter.mjs";
 
 function log(...args) {
   process.stderr.write("[htmlgenius-bridge] " + args.map(String).join(" ") + "\n");
@@ -15,18 +16,20 @@ function log(...args) {
 function dispatch(msg) {
   msg = msg || {};
   if (msg.type === "ping") return Promise.resolve({ type: "pong" });
-  if (msg.type === "claude_handoff_start") {
+  if (msg.type === "claude_handoff_start" || msg.type === "codex_handoff_start") {
     const emit = (payload) => {
       try { writeMessage(process.stdout, payload); }
       catch (e) { log("emit failed:", e && e.message); }
     };
+    const isCodex = msg.type === "codex_handoff_start";
     const isCandidate = msg.run_kind === "candidate";
     (async () => {
       try {
-        if (isCandidate) await executeCandidateRun(msg, { emit });
+        if (isCodex) await executeCodexCandidateRun(msg, { emit });
+        else if (isCandidate) await executeCandidateRun(msg, { emit });
         else await executeHandoff(msg, { emit });
       } catch (e) {
-        log((isCandidate ? "candidate" : "handoff") + " crashed:", (e && e.stack) || e);
+        log((isCodex ? "codex" : isCandidate ? "candidate" : "handoff") + " crashed:", (e && e.stack) || e);
         emit({ type: "bridge_failed", run_id: msg.run_id, code: "HOST_CRASH", message: (e && e.message) || "host crash" });
       }
     })();
