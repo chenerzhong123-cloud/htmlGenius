@@ -287,7 +287,7 @@ const Storage = {
   saveArtifactVersion(record) { return LocalStore.saveArtifactVersion(record); },
   markLatestArtifactVersionExported(logicalDocumentId) { return LocalStore.markLatestArtifactVersionExported(logicalDocumentId); },
   // v0.7 bridge:始终本地(LocalStore),与协同 mode 无关
-  getBridgeSession(logicalDocumentId) { return LocalStore.getBridgeSession(logicalDocumentId); },
+  getBridgeSession(logicalDocumentId, provider) { return LocalStore.getBridgeSession(logicalDocumentId, provider); },
   saveBridgeSession(record) { return LocalStore.saveBridgeSession(record); },
   getBridgeRun(runId) { return LocalStore.getBridgeRun(runId); },
   getActiveBridgeRunForTab(tabId) { return LocalStore.getActiveBridgeRunForTab(tabId); },

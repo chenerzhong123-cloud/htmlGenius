@@ -8,7 +8,9 @@ importScripts("storage.js", "bridge-validate.js");
 
 const NATIVE_HOST = "com.htmlgenius.local_bridge";
 const PROVIDER = "claude_code_cli";
-const BRIDGE_VERSION = "0.7.1";
+const CODEX_PROVIDER = "codex_app_server";
+const SUPPORTED_PROVIDERS = new Set([PROVIDER, CODEX_PROVIDER]);
+const BRIDGE_VERSION = "0.8.0";
 
 // tab -> { run_id, port, terminal }
 const _runsByTab = new Map();
@@ -65,20 +67,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // sidepanel 探测当前 tab 是否有可「继续」的 bridge-owned Claude session(供会话选择显示)
-async function handleQuerySession({ tab_id }) {
+async function handleQuerySession({ tab_id, provider }) {
+  const prov = SUPPORTED_PROVIDERS.has(provider) ? provider : PROVIDER;
   const ex = await chrome.tabs.sendMessage(tab_id, { type: "get-export" }).catch(() => null);
   if (!ex || ex.type !== "export-data") return { ok: false, code: "NO_ARTIFACT_STATE" };
   const logicalId = ex.logicalDocumentId || (ex.artifact_state && ex.artifact_state.logical_document_id);
   if (!logicalId) return { ok: false, code: "NO_LOGICAL_DOC" };
-  const sess = await Storage.getBridgeSession(logicalId, PROVIDER);
-  const continuable = !!(sess && sess.ownership === "htmlgenius" && sess.provider === PROVIDER
-    && isUuid(sess.session_id) && sess.status !== "running");
+  const sess = await Storage.getBridgeSession(logicalId, prov);
+  const continuable = !!(sess && sess.ownership === "htmlgenius" && sess.provider === prov
+    && sess.status !== "running" && (prov === CODEX_PROVIDER ? !!sess.thread_id : isUuid(sess.session_id)));
   return { ok: true, has_session: !!sess, continuable, last_status: sess && sess.status };
 }
 
 async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, change_contract }) {
   if (!tab_id) return { ok: false, code: "NO_TAB" };
-  if (provider !== PROVIDER) return { ok: false, code: "UNKNOWN_PROVIDER", message: "v0.7.1 only supports " + PROVIDER };
+  if (!SUPPORTED_PROVIDERS.has(provider)) return { ok: false, code: "UNKNOWN_PROVIDER", message: "unsupported provider: " + provider };
   if (session_mode !== "new" && session_mode !== "continue") return { ok: false, code: "BAD_SESSION_MODE" };
   const runKind = run_kind || "handoff"; // Night Pack A: "candidate" 产受控 candidate;缺省 "handoff"(v0.7.1 ack)
   if (runKind !== "handoff" && runKind !== "candidate") return { ok: false, code: "BAD_RUN_KIND" };
@@ -110,14 +113,21 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
   const active = await Storage.getActiveBridgeRunForTab(tab_id);
   if (active) return { ok: false, code: "RUN_IN_PROGRESS", run_id: active.run_id };
 
-  // 4. continue 必须有 bridge-owned、claude、非 running 的已存 session(只能用保存的 UUID 续发)
-  let session_id = null;
+  // 4. continue:按 provider 查 bridge-owned、非 running 的已存 session
+  //    claude 用保存的 session_id UUID;codex 用保存的 thread_id(spec §5/§6.2)
+  let continueRef = null;
   if (session_mode === "continue") {
-    const sess = await Storage.getBridgeSession(logicalId, PROVIDER);
-    if (!sess || sess.ownership !== "htmlgenius" || sess.provider !== PROVIDER || sess.status === "running" || !isUuid(sess.session_id)) {
+    const sess = await Storage.getBridgeSession(logicalId, provider);
+    if (!sess || sess.ownership !== "htmlgenius" || sess.provider !== provider || sess.status === "running") {
       return { ok: false, code: "NO_CONTINUABLE_SESSION" };
     }
-    session_id = sess.session_id;
+    if (provider === PROVIDER) {
+      if (!isUuid(sess.session_id)) return { ok: false, code: "NO_CONTINUABLE_SESSION" };
+      continueRef = sess.session_id;
+    } else {
+      if (!sess.thread_id) return { ok: false, code: "NO_CONTINUABLE_SESSION" };
+      continueRef = sess.thread_id;
+    }
   }
 
   // 5. task_sha256(与 host 同算法;background 自算,completion 时再对照)
@@ -127,7 +137,7 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
   const runId = newRunId();
   const run = {
     run_id: runId, logical_document_id: logicalId, tab_id,
-    provider: PROVIDER, session_mode, run_kind: runKind,
+    provider, session_mode, run_kind: runKind,
     session_id: null, task_sha256: taskSha,
     source_artifact_uri: art.url, base_artifact_hash: loadedHash,
     status: "starting",
@@ -154,7 +164,8 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
   port.onDisconnect.addListener(() => onHostDisconnect(tab_id, runId));
 
   port.postMessage({
-    type: "claude_handoff_start",
+    type: provider === CODEX_PROVIDER ? "codex_handoff_start" : "claude_handoff_start",
+    provider,
     run_id: runId,
     run_kind: runKind,
     source: {
@@ -162,11 +173,13 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
       artifact_uri: art.url,
       base_artifact_hash: loadedHash
     },
-    session: { mode: session_mode, session_id: session_id },
+    session: provider === CODEX_PROVIDER
+      ? { mode: session_mode, thread_id: continueRef }
+      : { mode: session_mode, session_id: continueRef },
     task: task
   });
 
-  return { ok: true, run_id: runId, mode: task.mode, session_mode, run_kind: runKind };
+  return { ok: true, run_id: runId, provider, mode: task.mode, session_mode, run_kind: runKind };
 }
 
 function onHostMessage(tab_id, runId, m, taskSha, logicalId, artifactUrl) {
@@ -279,7 +292,9 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
   }
 
   // 先广播(用户可见:侧边栏立即显示成功);再导航 + 持久化(SW 可能在 await 期间被杀,broadcast 已发则用户不受影响)
-  const sessionId = (run.session_id) || null;
+  const provider = run.provider || completion.provider || PROVIDER;
+  const isCodex = provider === CODEX_PROVIDER;
+  const sessionId = isCodex ? (completion.thread_id || null) : (run.session_id || null);
   broadcast({
     type: "bridge-completed", tab_id, run_id: runId, candidate: true,
     candidate_uri: completion.candidate_uri, source_uri: completion.source_uri,
@@ -288,14 +303,18 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
   if (consumerResp.action === "navigate_required") {
     chrome.tabs.update(tab_id, { url: completion.candidate_uri }).catch(() => {});
   }
-  await Storage.updateBridgeRun(runId, { status: "completed", completed_at: nowIso(),
+  const runPatch = { status: "completed", completed_at: nowIso(),
     candidate_uri: completion.candidate_uri, candidate_sha256: completion.candidate_sha256,
-    manifest_path: completion.manifest_path }).catch(() => {});
+    manifest_path: completion.manifest_path };
+  if (isCodex && sessionId) runPatch.thread_id = sessionId;
+  await Storage.updateBridgeRun(runId, runPatch).catch(() => {});
   if (sessionId) {
-    await Storage.saveBridgeSession({
-      logical_document_id: logicalId, provider: PROVIDER, ownership: "htmlgenius",
-      session_id: sessionId, workspace_path: BridgeValidate.workspacePathForFileUrl(artifactUrl, logicalId),
+    const sessionRec = {
+      logical_document_id: logicalId, provider, ownership: "htmlgenius",
+      workspace_path: BridgeValidate.workspacePathForFileUrl(artifactUrl, logicalId),
       status: "completed"
-    }).catch(() => {});
+    };
+    if (isCodex) sessionRec.thread_id = sessionId; else sessionRec.session_id = sessionId;
+    await Storage.saveBridgeSession(sessionRec).catch(() => {});
   }
 }
