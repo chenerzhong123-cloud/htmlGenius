@@ -19,6 +19,7 @@ const ChangeContract = require("../extension/change-contract.js");
 
 export const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024;      // 10 MiB(source 上限)
 export const MAX_TASK_JSON_BYTES = 1 * 1024 * 1024;      // 1 MiB(task bundle 不超过 native 帧上限)
+export const MAX_APPROVED_PLAN_BYTES = 12 * 1024;        // §6.8:approved-plan.md ≤12KiB(plan_markdown 上限)
 export const BRIDGE_DIR_NAME = ".htmlgenius-bridge";
 export const PROVIDER_DIR_NAME = "claude";
 
@@ -205,4 +206,44 @@ export function buildCodexPrompt({ task }) {
     "- 不要以 Markdown、diff、解释文本或多个文件替代 candidate.html。"
   ].join("\n");
   return prelude + "\n\n## Change Contract (execute strictly)\n" + ChangeContract.renderPrompt(task);
+}
+
+// —— v0.8.1 受控 Plan 执行前言(spec §6.4,固定英文原文,不可由用户覆盖)——
+// Agent 唯一允许输出 output/plan.json(schema v1)。Prompt 是协作约束;真正的强约束是
+// workspace 目录、source/task hash 前后校验、固定文件名、validator 和 Host completion 校验。
+export function buildPlanPrompt({ runId, task }) {
+  const prelude = [
+    "You are preparing an HTML Genius change plan in a controlled workspace.",
+    "- Read only source.html and the task bundle in the current directory.",
+    "- Do not modify source.html, task files, or any other input.",
+    "- Do not create candidate.html or edit the original document.",
+    "- Write exactly one UTF-8 JSON file to output/plan.json matching the required schema.",
+    "- State only the user-reviewable change plan and out-of-scope boundaries; do not include hidden reasoning.",
+    "- Do not use shell, network, browser, MCP, plugins, hooks, credentials, or other directories."
+  ].join("\n");
+  const schema = [
+    "",
+    "## Required output schema (output/plan.json, UTF-8, max 16 KiB)",
+    "```json",
+    "{",
+    '  "schema_version": 1,',
+    '  "kind": "htmlgenius_change_plan",',
+    '  "summary": "one-sentence goal (non-empty, <=1 KiB UTF-8)",',
+    '  "plan_markdown": "1. ...\\n2. ... (non-empty, <=12 KiB UTF-8)",',
+    '  "out_of_scope": ["will not change (0-20 items, each <=512 bytes)"]',
+    "}",
+    "```"
+  ].join("\n");
+  return prelude + schema + "\n\n## Change Contract (plan only within its boundaries)\n" + ChangeContract.renderPrompt(task);
+}
+
+// —— v0.8.1 §6.8:把用户审核后的计划作为 candidate 执行的辅助约束 ——
+// Host 限长(≤12KiB)后写入只读 approved-plan.md,并把这段固定前言 + 计划文本追加到 candidate prompt。
+// 原计划不是扩大修改范围的通行证:Agent 仍只能输出 candidate.html,且 Change Contract 是硬边界。
+export function approvedPlanPreamble(editedPlanMarkdown) {
+  const body = String(editedPlanMarkdown || "").slice(0, MAX_APPROVED_PLAN_BYTES);
+  return "\n\n## Approved implementation plan\n" +
+    "Implement this reviewed plan only insofar as it is consistent with the Change Contract.\n" +
+    "The Change Contract is the hard boundary. If the plan conflicts with it, preserve the Contract boundary.\n\n" +
+    body;
 }

@@ -41,16 +41,18 @@ function sanitizedEnv() {
 
 // —— argv 构造(纯函数,可单测断言「固定 argv」)——
 // prompt 永远是 argv 最后一个元素;resumeSessionId 只接受校验过的 UUID。
-// runKind: "handoff"(只读回执,v0.7.1) | "candidate"(Night Pack A:放行 Write,仍禁 Bash/Edit/网/MCP)。
+// runKind: "handoff"(只读回执,v0.7.1) | "candidate"(Night Pack A:放行 Write 写 candidate.html)
+//        | "plan"(v0.8.1:放行 Write 写 output/plan.json;§6.5 同 candidate 工具集,禁 Bash/Edit/网/MCP)。
 export function buildClaudeArgv({ promptText, resumeSessionId, runKind }) {
   if (typeof promptText !== "string" || !promptText.length) {
     fail("BAD_PROMPT", "promptText is required");
   }
-  const isCandidate = runKind === "candidate";
-  const allowed = isCandidate ? "Read,Glob,Grep,Write" : "Read,Glob,Grep";       // candidate 才放行 Write(只写 candidate.html)
-  const disallowed = isCandidate
-    ? ["Bash", "Edit", "WebFetch", "WebSearch", "mcp__*"]                          // candidate 禁 in-place Edit/网/MCP
-    : ["Bash", "Edit", "Write", "WebFetch", "WebSearch", "mcp__*"];                // handoff 全只读
+  const canWrite = runKind === "candidate" || runKind === "plan";
+  const allowed = canWrite ? "Read,Glob,Grep,Write" : "Read,Glob,Grep";            // candidate/plan 放行 Write(只写约定输出文件)
+  const disallowed = canWrite
+    ? ["Bash", "Edit", "WebFetch", "WebSearch", "mcp__*"]                           // candidate/plan 禁 in-place Edit/网/MCP
+    : ["Bash", "Edit", "Write", "WebFetch", "WebSearch", "mcp__*"];                 // handoff 全只读
+  const maxTurns = runKind === "candidate" ? "24" : runKind === "plan" ? "16" : "4"; // candidate 编辑多轮;plan 写 JSON 中等;handoff 回执少轮
   const argv = [
     "-p",
     "--output-format", "json",
@@ -59,7 +61,7 @@ export function buildClaudeArgv({ promptText, resumeSessionId, runKind }) {
     "--allowed-tools", allowed,
     "--disallowed-tools", ...disallowed,
     "--permission-mode", "dontAsk",   // 非交互:不弹权限询问
-    "--max-turns", isCandidate ? "24" : "4"  // candidate 编辑需更多轮;handoff 回执少轮
+    "--max-turns", maxTurns
   ];
   if (resumeSessionId != null) {
     if (!isSessionUuid(resumeSessionId)) fail("CLAUDE_SESSION_UNAVAILABLE", "resume session_id is not a valid UUID");

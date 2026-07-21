@@ -90,3 +90,27 @@ test('continue 成功:thread/resume 用 storedThreadId', async () => {
   const resume = readLog(logFile).find((x) => x.method === 'thread/resume');
   assert.equal(resume && resume.threadId, 'thr_stored_123');
 });
+
+// —— v0.8.1 §6.6:runPlan 永远 thread/start(绝不 resume);sandbox writableRoots 仅 cwd、networkAccess false ——
+test('§6.6: runPlan 永远 thread/start,绝不 thread/resume', async () => {
+  const { ws, logFile } = setup();
+  const c = new CodexAppServerClient(FAKE, { env: { CODEX_FAKE_LOG: logFile } });
+  const r = await c.runPlan({ workspaceCwd: ws, prompt: 'plan task', timeoutMs: 6000 });
+  await c.close();
+  assert.ok(r.threadId, 'runPlan 返回 threadId');
+  const methods = readLog(logFile).map((x) => x.method);
+  assert.ok(methods.includes('thread/start'), 'runPlan 发 thread/start');
+  assert.ok(!methods.includes('thread/resume'), 'runPlan 绝不发 thread/resume');
+});
+
+test('§6.6: runPlan turn/start sandboxPolicy writableRoots=[cwd] 且 networkAccess=false', async () => {
+  const { ws, logFile } = setup();
+  const c = new CodexAppServerClient(FAKE, { env: { CODEX_FAKE_LOG: logFile } });
+  await c.runPlan({ workspaceCwd: ws, prompt: 'plan task', timeoutMs: 6000 });
+  await c.close();
+  const turn = readLog(logFile).find((x) => x.method === 'turn/start');
+  assert.ok(turn && turn.sandboxPolicy, 'turn/start 含 sandboxPolicy');
+  assert.equal(turn.sandboxPolicy.type, 'workspaceWrite');
+  assert.deepEqual(turn.sandboxPolicy.writableRoots, [ws], 'writableRoots 仅限 plan 目录(cwd)');
+  assert.equal(turn.sandboxPolicy.networkAccess, false, '网络关闭');
+});

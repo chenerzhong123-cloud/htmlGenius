@@ -5,31 +5,46 @@
 // host 名 com.htmlgenius.local_bridge 是 provider-neutral 的:后续 Codex adapter 复用同一 host,不新建。
 import process from "node:process";
 import { NativeFrameDecoder, writeMessage } from "./native-protocol.mjs";
-import { executeHandoff, executeCandidateRun } from "./host-runner.mjs";
-import { executeCodexCandidateRun } from "./codex-adapter.mjs";
+import { executeHandoff, executeCandidateRun, executePlanRun } from "./host-runner.mjs";
+import { executeCodexCandidateRun, executeCodexPlanRun } from "./codex-adapter.mjs";
+import { probeProviders } from "./provider-probe.mjs";
 
 function log(...args) {
   process.stderr.write("[htmlgenius-bridge] " + args.map(String).join(" ") + "\n");
 }
 
-// 分发一条来自 extension 的消息。返回值作为立即回帧;handoff 不返回立即帧,改由 emit 持续发事件。
+// 分发一条来自 extension 的消息。返回值作为立即回帧;handoff/plan 不返回立即帧,改由 emit 持续发事件。
 function dispatch(msg) {
   msg = msg || {};
   if (msg.type === "ping") return Promise.resolve({ type: "pong" });
+  if (msg.type === "provider_probe") {
+    // v0.8.1 §5.1/§7:只读 provider 探测。立即回 provider_probe_result(单次往返;background 侧 30s 缓存)。
+    const providers = Array.isArray(msg.providers) ? msg.providers : ["claude_code_cli", "codex_app_server"];
+    return probeProviders(providers).then(
+      (r) => ({ type: "provider_probe_result", providers: r.providers }),
+      (e) => ({ type: "provider_probe_result", providers: [], error: (e && e.message) || "probe failed" })
+    );
+  }
   if (msg.type === "claude_handoff_start" || msg.type === "codex_handoff_start") {
     const emit = (payload) => {
       try { writeMessage(process.stdout, payload); }
       catch (e) { log("emit failed:", e && e.message); }
     };
     const isCodex = msg.type === "codex_handoff_start";
-    const isCandidate = msg.run_kind === "candidate";
+    const runKind = msg.run_kind;
     (async () => {
       try {
-        if (isCodex) await executeCodexCandidateRun(msg, { emit });
-        else if (isCandidate) await executeCandidateRun(msg, { emit });
-        else await executeHandoff(msg, { emit });
+        if (isCodex) {
+          if (runKind === "plan") await executeCodexPlanRun(msg, { emit });
+          else await executeCodexCandidateRun(msg, { emit }); // candidate + 旧 handoff
+        } else {
+          if (runKind === "plan") await executePlanRun(msg, { emit });
+          else if (runKind === "candidate") await executeCandidateRun(msg, { emit });
+          else await executeHandoff(msg, { emit });
+        }
       } catch (e) {
-        log((isCodex ? "codex" : isCandidate ? "candidate" : "handoff") + " crashed:", (e && e.stack) || e);
+        const label = isCodex ? (runKind === "plan" ? "codex-plan" : "codex") : (runKind === "plan" ? "plan" : runKind === "candidate" ? "candidate" : "handoff");
+        log(label + " crashed:", (e && e.stack) || e);
         emit({ type: "bridge_failed", run_id: msg.run_id, code: "HOST_CRASH", message: (e && e.message) || "host crash" });
       }
     })();

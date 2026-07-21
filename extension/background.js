@@ -406,8 +406,8 @@ async function completePlan(tab_id, runId, planReady, taskSha, logicalId, artifa
     created_at: nowIso(), updated_at: nowIso()
   };
   await Storage.saveBridgePlan(planRec).catch(() => {});
-  // run 记 completed(plan run 的终态)+ 关联 plan_id
-  await Storage.updateBridgeRun(runId, { status: "completed", plan_id: planId, completed_at: nowIso() }).catch(() => {});
+  // run 记 completed(plan run 的终态)+ 关联 plan_id + manifest_path(本地审计;不广播给 UI)
+  await Storage.updateBridgeRun(runId, { status: "completed", plan_id: planId, manifest_path: planReady.manifest_path || null, completed_at: nowIso() }).catch(() => {});
 
   // 广播:绝不含 manifest_path / session / thread / 路径(spec §5.3)。plan 是受控 plan.json 的可展示副本。
   broadcast({

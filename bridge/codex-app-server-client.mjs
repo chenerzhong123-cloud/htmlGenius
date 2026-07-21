@@ -211,9 +211,9 @@ export class CodexAppServerClient {
     return true;
   }
 
-  // —— runCandidate(spec §6.1 唯一允许序列):handshake → thread/start|resume → turn/start → 等 turn/completed ——
-  // 不接受任意 method;序列写死,杜绝 forbidden method。
-  async runCandidate({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs }) {
+  // —— runTask(spec §6.1 唯一允许序列,§6.6 抽出的共用执行):handshake → thread/start|resume → turn/start → 等 turn/completed ——
+  // 不接受任意 method;序列写死,杜绝 forbidden method。runCandidate / runPlan 都是它的薄封装。
+  async runTask({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs }) {
     const turnTimeout = timeoutMs || DEFAULT_TURN_TIMEOUT_MS;
     await this.initialize(HANDSHAKE_TIMEOUT_MS);
 
@@ -264,6 +264,16 @@ export class CodexAppServerClient {
 
     await done;
     return { threadId, terminal };
+  }
+
+  // runCandidate = runTask(向后兼容 codex-adapter 的 candidate 执行)。
+  async runCandidate({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs }) {
+    return this.runTask({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs });
+  }
+
+  // runPlan(spec §6.6):永远 thread/start,绝不 thread/resume;writableRoots 仅 plan 目录(调用方传 planDir 作 workspaceCwd)。
+  async runPlan({ workspaceCwd, prompt, timeoutMs }) {
+    return this.runTask({ sessionMode: 'new', storedThreadId: null, workspaceCwd, prompt, timeoutMs });
   }
 
   async close() {

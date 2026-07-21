@@ -9,13 +9,16 @@
 // 本版 Claude 无写文件权限:不产 candidate、不回写、不导航 —— 验收是「任务真实到达 Claude Code CLI」。
 import {
   resolveSourceArtifact, verifySourceHash, createWorkspace, writeTaskBundle,
-  buildHandoffPrompt, buildCandidatePrompt, rootAnnotationIdsOf, isSha256Tagged, sha256File
+  buildHandoffPrompt, buildCandidatePrompt, buildPlanPrompt, approvedPlanPreamble, rootAnnotationIdsOf, isSha256Tagged, sha256File
 } from "./task-bundle.mjs";
 import { isSessionUuid, checkAuth, runHandoff, resumeHandoff, HANDOFF_TIMEOUT_MS } from "./claude-cli.mjs";
 import {
   resolveSourcePath, prepareCandidateRun, writeManifest, validateCandidate,
-  publishSiblingCandidate, quarantineCandidate
+  publishSiblingCandidate, quarantineCandidate, writeApprovedPlan
 } from "./candidate-workspace.mjs";
+import {
+  preparePlanRun, verifyTaskBundleUnchanged, validatePlanJson, writePlanManifest, quarantinePlan
+} from "./plan-workspace.mjs";
 import { pathToFileURL } from "node:url";
 
 const realClaude = { checkAuth, runHandoff, resumeHandoff };
@@ -24,6 +27,8 @@ const realClaude = { checkAuth, runHandoff, resumeHandoff };
 // 3 条评论 local_optimize >5 分钟(2026-07-21 8:36 run timed_out 铁证 + CPU 监控显示 98% 时间在等 API)。
 // 故 8 分钟。再不够说明任务过大或模型卡顿,应减小任务范围,而非无限加时。
 const CANDIDATE_TIMEOUT_MS = 8 * 60 * 1000; // 8 分钟
+// v0.8.1 plan run(spec §6.5):Agent 只写一个 plan.json,不重写整页 HTML → 比 candidate 快得多。3 分钟,不无限等待。
+const CLAUDE_PLAN_TIMEOUT_MS = 3 * 60 * 1000; // 3 分钟
 
 function truncateMsg(s) {
   const t = String(s || "");
@@ -192,13 +197,20 @@ export async function executeCandidateRun(msg, { emit, claude } = {}) {
   } catch (e) { failed(e.code || "PREPARE_FAILED", e.message, null, { logicalDocumentId: source.logical_document_id, sourcePath }); return; }
   const ctxBase = { logicalDocumentId: source.logical_document_id, sourcePath, sourceSha256Before: prep.sourceSha256Before, taskSha256: bundle.taskSha256 };
 
+  // 3.1 v0.8.1 §6.8:candidate 携带 approved_plan → 写只读 approved-plan.md(辅助约束,不替代 Change Contract)
+  if (msg.approved_plan && typeof msg.approved_plan.edited_plan_markdown === "string") {
+    try { writeApprovedPlan({ runsDir: prep.runsDir, editedPlanMarkdown: msg.approved_plan.edited_plan_markdown }); }
+    catch (e) { failed("PREPARE_FAILED", "cannot write approved-plan.md: " + (e && e.message), prep.runsDir, ctxBase); return; }
+  }
+
   // 4. auth
   try { await cli.checkAuth({ cwd: prep.runsDir }); }
   catch (e) { failed(e.code || "CLAUDE_NOT_LOGGED_IN", e.message, prep.runsDir, ctxBase); return; }
 
   // 5. 执行:claude(Read,Glob,Grep,Write),cwd=runs/<runId>
   status("running");
-  const promptText = buildCandidatePrompt({ runId, task });
+  const promptText = buildCandidatePrompt({ runId, task })
+    + (msg.approved_plan ? approvedPlanPreamble(msg.approved_plan.edited_plan_markdown) : "");
   let sessionId;
   try {
     if (session.mode === "continue") {
@@ -252,6 +264,141 @@ export async function executeCandidateRun(msg, { emit, claude } = {}) {
     source_sha256_before: prep.sourceSha256Before,
     candidate_uri: pathToFileURL(resultPath).href,
     candidate_sha256: cand.sha256,
+    manifest_path: manifestPath
+  });
+}
+
+// —— v0.8.1 spec §6.5:Claude plan 执行编排(run_kind === "plan")——
+// 与 executeCandidateRun 并列;host.mjs 按 run_kind 分发。流程:
+// 校验 → source snapshot(0400)+ task 复制进 plans/<runId>(0700)+ output/(0700)→ auth
+// → claude(Read,Glob,Grep,Write,cwd=plans/<runId>,3min)→ 重读 source(变 → SOURCE_MUTATED_DURING_PLAN)
+// → task bundle hash 前后比对(变 → TASK_MUTATED_DURING_PLAN)→ 校验 output/plan.json(schema v1 + 路径安全)
+// → ready manifest → emit plan-ready。任何失败:quarantine + 失败 manifest(无 plan 正文)+ bridge_failed。
+// 绝不创建 candidate sibling / candidate.html(spec §6.7);plan 与 candidate 工作区物理隔离。
+const PLAN_FAIL_STATUS = {
+  BAD_REQUEST: "bad_request",
+  SOURCE_MUTATED_DURING_PLAN: "source_changed_during_run",
+  TASK_MUTATED_DURING_PLAN: "task_changed_during_run",
+  PLAN_MISSING: "plan_missing",
+  PLAN_INVALID: "plan_invalid",
+  PLAN_TOO_LARGE: "plan_invalid",
+  PLAN_SYMLINK: "plan_invalid",
+  PLAN_OUTPUT_PATH_INVALID: "plan_invalid",
+  CLAUDE_RUN_FAILED: "claude_failed",
+  CLAUDE_INVALID_RESULT: "claude_failed",
+  CLAUDE_TIMEOUT: "timed_out"
+};
+
+export async function executePlanRun(msg, { emit, claude } = {}) {
+  if (typeof emit !== "function") throw new Error("emit is required");
+  const cli = claude || realClaude;
+  const runId = msg && msg.run_id;
+  const status = (s) => emit({ type: "bridge_status", run_id: runId, status: s });
+  const failed = (code, message, plansDir, ctx) => {
+    if (plansDir) {
+      try { quarantinePlan(plansDir); } catch (_) {}
+      try {
+        writePlanManifest({
+          plansDir, runId,
+          logicalDocumentId: (ctx && ctx.logicalDocumentId) || (msg && msg.source && msg.source.logical_document_id) || null,
+          provider: "claude_code_cli",
+          sourcePath: (ctx && ctx.sourcePath) || null,
+          sourceSha256Before: (ctx && ctx.sourceSha256Before) || null,
+          sourceSha256After: (ctx && ctx.sourceSha256After) || null,
+          taskSha256: (ctx && ctx.taskSha256) || null,
+          status: "failed", errorCode: code
+        });
+      } catch (_) {}
+    }
+    emit({ type: "bridge_failed", run_id: runId, code, message: truncateMsg(message) });
+  };
+
+  // 1. 字段校验
+  if (!msg || typeof msg !== "object") { emit({ type: "bridge_failed", code: "BAD_REQUEST", message: "missing message" }); return; }
+  if (typeof runId !== "string" || !runId) { emit({ type: "bridge_failed", code: "BAD_REQUEST", message: "missing run_id" }); return; }
+  const source = msg.source || {};
+  const session = msg.session || {};
+  const task = msg.task;
+  if (typeof source.logical_document_id !== "string" || !source.logical_document_id) { failed("BAD_REQUEST", "missing source.logical_document_id"); return; }
+  if (typeof source.artifact_uri !== "string" || !source.artifact_uri) { failed("BAD_REQUEST", "missing source.artifact_uri"); return; }
+  if (!isSha256Tagged(source.base_artifact_hash)) { failed("BAD_REQUEST", "source.base_artifact_hash must be sha256:<64hex>"); return; }
+  if (session.mode !== "new" && session.mode !== "continue") { failed("BAD_REQUEST", "session.mode must be new|continue"); return; }
+  if (session.mode === "continue" && !isSessionUuid(session.session_id)) { failed("NO_SAVED_SESSION", "continue requires a stored UUID session_id"); return; }
+  if (task && task.mode === "restructure") { failed("INVALID_MODE", "restructure not allowed"); return; }
+
+  status("checking");
+
+  // 2. source 解析 + 稳定 workspace + task bundle
+  let sourcePath, workspace, bundle;
+  try {
+    sourcePath = resolveSourcePath(source.artifact_uri);
+    const hostHash = sha256File(sourcePath);
+    workspace = createWorkspace({ sourcePath, logicalDocumentId: source.logical_document_id });
+    bundle = writeTaskBundle({ workspace, runId, task, sourcePath, baseArtifactHash: hostHash });
+  } catch (e) { failed(e.code || "PREPARE_FAILED", e.message, null, { logicalDocumentId: source.logical_document_id, taskSha256: null }); return; }
+
+  // 3. plan 工作区:snapshot(0400)+ task 复制进 plans/<runId>(0700)+ output/(0700)
+  let prep;
+  try {
+    prep = preparePlanRun({ sourcePath, workspaceRoot: workspace, logicalDocumentId: source.logical_document_id, runId, taskJsonPath: bundle.jsonPath, taskMdPath: bundle.mdPath });
+  } catch (e) { failed(e.code || "PREPARE_FAILED", e.message, null, { logicalDocumentId: source.logical_document_id, sourcePath, taskSha256: bundle.taskSha256 }); return; }
+  const ctxBase = { logicalDocumentId: source.logical_document_id, sourcePath, sourceSha256Before: prep.sourceSha256Before, taskSha256: bundle.taskSha256 };
+
+  // 4. auth
+  try { await cli.checkAuth({ cwd: prep.plansDir }); }
+  catch (e) { failed(e.code || "CLAUDE_NOT_LOGGED_IN", e.message, prep.plansDir, ctxBase); return; }
+
+  // 5. 执行:claude(Read,Glob,Grep,Write),cwd=plans/<runId>,3min
+  status("running");
+  const promptText = buildPlanPrompt({ runId, task });
+  let sessionId;
+  try {
+    const r = await cli.runHandoff({ cwd: prep.plansDir, promptText, runKind: "plan", timeoutMs: CLAUDE_PLAN_TIMEOUT_MS });
+    sessionId = r.sessionId;
+  } catch (e) {
+    const code = (e && e.code === "CLAUDE_TIMEOUT") ? "CLAUDE_PLAN_TIMEOUT" : (e.code || "CLAUDE_PLAN_FAILED");
+    failed(code, e.message, prep.plansDir, ctxBase); return;
+  }
+
+  // 6. 重读 source:运行期被改 → 计划废弃(§6.2)
+  let sourceSha256After;
+  try { sourceSha256After = sha256File(sourcePath); }
+  catch (e) { failed("SOURCE_MUTATED_DURING_PLAN", "cannot re-read source after plan run", prep.plansDir, ctxBase); return; }
+  if (sourceSha256After !== prep.sourceSha256Before) {
+    failed("SOURCE_MUTATED_DURING_PLAN", "source changed during plan run; plan not adopted", prep.plansDir, { ...ctxBase, sourceSha256After }); return;
+  }
+
+  // 7. task bundle hash 前后比对(§6.2:task 文件运行前后 SHA 必须一致)
+  try { verifyTaskBundleUnchanged({ plansDir: prep.plansDir, taskJsonName: prep.taskJsonName, taskSha256Before: prep.taskSha256Before }); }
+  catch (e) { failed("TASK_MUTATED_DURING_PLAN", e.message, prep.plansDir, { ...ctxBase, sourceSha256After }); return; }
+
+  // 8. 校验 output/plan.json(schema v1 + 路径安全)
+  let planResult;
+  try { planResult = validatePlanJson(prep.planJsonPath); }
+  catch (e) { failed(e.code || "PLAN_MISSING", e.message, prep.plansDir, { ...ctxBase, sourceSha256After }); return; }
+
+  // 9. ready manifest
+  let manifestPath;
+  try {
+    manifestPath = writePlanManifest({
+      plansDir: prep.plansDir, runId, logicalDocumentId: source.logical_document_id, provider: "claude_code_cli",
+      sourcePath, sourceSha256Before: prep.sourceSha256Before, sourceSha256After,
+      taskSha256: bundle.taskSha256, planSha256: planResult.planSha256, planByteLength: planResult.byteLength,
+      status: "ready"
+    });
+  } catch (e) { failed("MANIFEST_FAILED", e.message, prep.plansDir, { ...ctxBase, sourceSha256After }); return; }
+
+  // 10. plan-ready(最小 completion;不含 Claude stdout/思维链;绝不附带 candidate)
+  const p = planResult.plan;
+  emit({
+    type: "plan-ready",
+    run_id: runId,
+    task_sha256: bundle.taskSha256,
+    logical_document_id: source.logical_document_id,
+    source_uri: pathToFileURL(sourcePath).href,
+    source_sha256_before: prep.sourceSha256Before,
+    plan_sha256: planResult.planSha256,
+    plan: { schema_version: p.schema_version, summary: p.summary, plan_markdown: p.plan_markdown, out_of_scope: Array.isArray(p.out_of_scope) ? p.out_of_scope.slice() : [] },
     manifest_path: manifestPath
   });
 }

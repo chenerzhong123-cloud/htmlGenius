@@ -8,7 +8,7 @@ import path from 'node:path';
 const LOG = process.env.CODEX_FAKE_LOG;
 function record(method, params) {
   if (!LOG) return;
-  try { fs.appendFileSync(LOG, JSON.stringify({ method, cwd: params && params.cwd, threadId: params && params.threadId }) + '\n'); } catch (e) {}
+  try { fs.appendFileSync(LOG, JSON.stringify({ method, cwd: params && params.cwd, threadId: params && params.threadId, sandboxPolicy: params && params.sandboxPolicy }) + '\n'); } catch (e) {}
 }
 
 let buf = '';

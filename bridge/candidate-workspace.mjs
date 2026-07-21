@@ -153,3 +153,13 @@ export function quarantineCandidate(runsDir) {
   const cp = path.join(runsDir, "candidate.html");
   try { if (fs.existsSync(cp)) fs.unlinkSync(cp); } catch (_) {}
 }
+
+// v0.8.1 §6.8:candidate 携带 approved_plan → 写只读 approved-plan.md(≤12KiB)进 run 目录。
+// 原计划只是辅助执行约束,不替代 Change Contract;Agent 仍只输出 candidate.html。
+export function writeApprovedPlan({ runsDir, editedPlanMarkdown }) {
+  const body = String(editedPlanMarkdown || "").slice(0, 12 * 1024);
+  const p = path.join(runsDir, "approved-plan.md");
+  fs.writeFileSync(p, body, { mode: 0o400 });
+  try { fs.chmodSync(p, 0o400); } catch (_) {}
+  return p;
+}
