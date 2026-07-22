@@ -42,6 +42,34 @@ function extractThreadId(r) {
   }
   return r.threadId || r.id || r.thread_id || null;
 }
+function streamBaseName(p) { const s = String(p || ''); const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\')); return i >= 0 ? s.slice(i + 1) : s; }
+// 把 Codex 中途 notification 转成 UI 可展示的进度事件(安全边界:不暴露完整命令/绝对路径/stderr/思维链正文)。
+// - agentMessage/delta → 逐字 token 流(kind=delta)
+// - fileChange → "写入 plan.json" 等(只 basename + 操作)
+// - commandExecution → 仅"执行命令"(不含命令体,可能含路径/敏感参数)
+// - reasoning → "思考中"(不含 summary/content)
+// - tokenUsage → token 总量
+function codexNotificationToStream(msg) {
+  const m = msg && (msg.method || msg.notification);
+  const p = (msg && msg.params) || {};
+  if (m === 'item/agentMessage/delta') return { kind: 'delta', text: String(p.delta || '') };
+  if (m === 'item/started' || m === 'item/completed') {
+    const it = p.item || {}; const starting = (m === 'item/started');
+    if (it.type === 'fileChange' && Array.isArray(it.changes)) {
+      const ch = it.changes[0] || {}; const op = (ch.kind && ch.kind.type) || 'change';
+      return { kind: 'file', text: op + ' ' + streamBaseName(ch.path), starting };
+    }
+    if (it.type === 'commandExecution') return { kind: 'command', starting };
+    if (it.type === 'reasoning') return { kind: 'reasoning', starting };
+    if (it.type === 'agentMessage' && !starting) return { kind: 'message', text: String(it.text || '').slice(0, 400) };
+    return null;
+  }
+  if (m === 'thread/tokenUsage/updated') {
+    const tot = p.tokenUsage && p.tokenUsage.total && p.tokenUsage.total.totalTokens;
+    return (tot != null) ? { kind: 'tokens', text: String(tot) } : null;
+  }
+  return null;
+}
 
 // 最小 env 白名单:runtime 需要 HOME(~/.codex 登录态)、PATH、locale。extension 内容永不进 env。
 function sanitizedEnv() {
@@ -224,7 +252,7 @@ export class CodexAppServerClient {
 
   // —— runTask(spec §6.1 唯一允许序列,§6.6 抽出的共用执行):handshake → thread/start|resume → turn/start → 等 turn/completed ——
   // 不接受任意 method;序列写死,杜绝 forbidden method。runCandidate / runPlan 都是它的薄封装。
-  async runTask({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs }) {
+  async runTask({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs, onStream }) {
     const turnTimeout = timeoutMs || DEFAULT_TURN_TIMEOUT_MS;
     await this.initialize(HANDSHAKE_TIMEOUT_MS);
 
@@ -246,7 +274,8 @@ export class CodexAppServerClient {
       if (!threadId) fail(CODEX_TURN_FAILED, 'thread/start 未返回 threadId(result.thread.id):' + JSON.stringify(r).slice(0, 200));
     }
 
-    // 等终态:turn/completed(notification);期间 error 视为 turn 失败(spec §6.1/§9)
+    // 等终态:turn/completed(notification);期间 error 视为 turn 失败(spec §6.1/§9)。
+    // 同时把中途 notification 转发为 stream 事件(onStream),给 UI 实时进度。
     let terminal = null;
     const done = new Promise((resolve, reject) => {
       let settled = false;
@@ -254,6 +283,7 @@ export class CodexAppServerClient {
         if (!settled) { settled = true; reject(Object.assign(new Error('turn 超过 ' + turnTimeout + 'ms'), { code: CODEX_TIMED_OUT })); }
       }, turnTimeout);
       this._onNotification = (msg) => {
+        if (typeof onStream === 'function') { try { const s = codexNotificationToStream(msg); if (s) onStream(s); } catch (e) { /* 非关键 */ } }
         if (settled) return;
         const m = msg.method || msg.notification;
         if (msg.__terminated) { settled = true; clearTimeout(timer); reject(Object.assign(new Error('app-server 终止'), { code: msg.code || CODEX_TURN_FAILED })); return; }
@@ -278,13 +308,13 @@ export class CodexAppServerClient {
   }
 
   // runCandidate = runTask(向后兼容 codex-adapter 的 candidate 执行)。
-  async runCandidate({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs }) {
-    return this.runTask({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs });
+  async runCandidate({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs, onStream }) {
+    return this.runTask({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs, onStream });
   }
 
   // runPlan(spec §6.6):永远 thread/start,绝不 thread/resume;writableRoots 仅 plan 目录(调用方传 planDir 作 workspaceCwd)。
-  async runPlan({ workspaceCwd, prompt, timeoutMs }) {
-    return this.runTask({ sessionMode: 'new', storedThreadId: null, workspaceCwd, prompt, timeoutMs });
+  async runPlan({ workspaceCwd, prompt, timeoutMs, onStream }) {
+    return this.runTask({ sessionMode: 'new', storedThreadId: null, workspaceCwd, prompt, timeoutMs, onStream });
   }
 
   async close() {

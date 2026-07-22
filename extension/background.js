@@ -252,6 +252,11 @@ function onHostMessage(tab_id, runId, m, taskSha, logicalId, artifactUrl) {
     completePlan(tab_id, runId, m, taskSha, logicalId, artifactUrl);
     return;
   }
+  if (m.type === "bridge_stream") {
+    // v0.8.1:Codex turn 中途进度(token 流/工具/文件)。只转发安全摘要,不含命令体/路径/stderr/思维链正文。
+    broadcast({ type: "bridge-stream", tab_id, run_id: runId, kind: m.kind || "info", text: String(m.text || "").slice(0, 800), starting: !!m.starting });
+    return;
+  }
   if (m.type === "bridge_failed") {
     failRun(tab_id, runId, m.code || "RUN_FAILED", m.message || "");
     return;

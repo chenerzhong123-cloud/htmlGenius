@@ -515,6 +515,8 @@
   let _contractStep = "closed"; // closed | compose | comment-scope | plan-running | plan-review | candidate-running
   let _selectedNodeIds = new Set(); // 本轮勾选的节点 id(root+reply;真相源)
   let _contractRunKind = "candidate"; // candidate | plan(sidepanel 本次派发)
+  let _contractRunId = null;          // 当前 sidepanel 跟踪的 run id(匹配 bridge-stream/完成事件)
+  let _streamText = "";               // Agent 实时输出累积(agentMessage delta)
   let _candidateResult = null;      // Night Pack A §5.2:最近一次 candidate-ready 结果(只读成功态)
   // v0.8.1 provider probe + plan-first 状态(spec §3.D/§5)
   let _provider = null;             // 当前选中 provider id(仅 ready 可选)
@@ -902,7 +904,7 @@
     if (!ul) return;
     ul.innerHTML = _runEvents.slice(-12).map((e) => '<li><span class="cbs-ts">' + esc(e.ts) + "</span> " + esc(e.text) + "</li>").join("");
   }
-  function resetRunEvents() { _runEvents = []; renderProgress(); }
+  function resetRunEvents() { _runEvents = []; _streamText = ""; renderProgress(); renderStreamText(); }
   function recordRun(entry) {
     try { chrome.storage.local.get([RUN_LOG_KEY], (res) => {
       const list = (res && Array.isArray(res[RUN_LOG_KEY])) ? res[RUN_LOG_KEY] : [];
@@ -922,6 +924,26 @@
       const st = r.status === "completed" ? t("run.ok") : (r.status === "plan-ready" ? t("run.planOk") : t("run.fail"));
       return '<li><span class="cbs-ts">' + esc(r.started_at || "") + "</span> " + esc(providerLabel(r.provider) || "?") + " · " + esc(tag) + " · " + esc(st) + (r.duration_s != null ? " · " + r.duration_s + "s" : "") + "</li>";
     }).join("");
+  }
+  // v0.8.1 Agent 实时流(Codex turn 中途):delta 逐字累积成「当前输出」;file/command/reasoning/tokens 作事件行
+  function handleStream(msg) {
+    if (!msg || msg.run_id !== _contractRunId) return;
+    if (msg.kind === "delta") { _streamText += msg.text; renderStreamText(); if (contractBridgeStatus) contractBridgeStatus.hidden = false; }
+    else if (msg.kind === "message") { _streamText = msg.text; renderStreamText(); }
+    else { const label = streamLabel(msg); if (label) pushProgress(label); }
+  }
+  function streamLabel(msg) {
+    if (msg.kind === "file") return msg.starting ? ("📄 " + t("run.file") + ":" + (msg.text ? " " + msg.text : "")) : null;
+    if (msg.kind === "command") return msg.starting ? ("🔧 " + t("run.command")) : null;
+    if (msg.kind === "reasoning") return msg.starting ? ("💭 " + t("run.reasoning")) : null;
+    if (msg.kind === "tokens") return "⚡ " + msg.text + " tokens";
+    return null;
+  }
+  function renderStreamText() {
+    const el = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-stream");
+    if (!el) return;
+    el.textContent = _streamText.slice(-400);
+    el.classList.toggle("typing", !!_streamText);
   }
   function bridgeFailClass(code) {
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF"
@@ -977,6 +999,7 @@
     chrome.runtime.sendMessage(payload).then((resp) => {
       if (resp && resp.ok) {
         setContractRunning(true);
+        if (resp.run_id) _contractRunId = resp.run_id;
         // 状态栏可见:plan 确认后从 plan-review 发的 candidate 也要回 compose 看进度
         if (_contractStep !== "compose") setContractStep("compose");
         resetRunEvents();
@@ -1423,6 +1446,7 @@
     }
     // bridge:background 推送的 run 进度/完成/失败/计划就绪(仅当前 tab 且任务 sheet 打开时处理)
     if (_contractOpen && msg && msg.tab_id === currentTabId) {
+      if (msg.type === "bridge-stream") { handleStream(msg); return; } // v0.8.1 Codex 实时流(delta/工具/文件)
       if (msg.type === "bridge-plan-ready") { onPlanReady(msg); } // v0.8.1 plan run 完成 → plan-review
       else if (msg.type === "bridge-progress" && _contractRunning) {
         const m = _contractRunKind === "plan" ? t("bridge.planRunning").replace("{agent}", providerLabel(_provider)) : t("bridge.candidateRunning");

@@ -1,45 +1,46 @@
 /* === Nebula Workspace 设计 token(深色;来自 htmlGenius-nebula-ui-design-spec) === */
 :root {
-  /* 面层(深色阶梯,逐级变亮) */
-  --bg-canvas: #080a12;
-  --bg-surface: #10131f;
-  --bg-surface-raised: #151929;
-  --bg-input: #0d101a;
-  --bg-overlay: #171b2a;
+  /* 面层(mint 深色阶梯,对齐 V0.8 高保真 Demo) */
+  --bg-canvas: #121722;
+  --bg-surface: #1a2130;
+  --bg-surface-raised: #202a3d;
+  --bg-input: #111722;
+  --bg-overlay: #222c3e;
   /* 文字四级 */
-  --text-primary: #f6f7fb;
-  --text-secondary: #c7ccdc;
-  --text-muted: #8d95aa;
-  --text-faint: #687086;
-  /* 边框(白色透明) */
-  --line-subtle: rgba(255,255,255,.08);
-  --line-default: rgba(255,255,255,.12);
-  --line-focus: rgba(139,153,255,.72);
-  /* brand / accent */
-  --brand: #7c8cff;
-  --brand-hover: #91a0ff;
-  --brand-strong: #6879fa;
-  --brand-soft: rgba(124,140,255,.14);
-  --cyan: #79e9f7;
-  --cyan-soft: rgba(121,233,247,.13);
-  --violet: #b09cff;
-  /* 语义(低饱和) */
-  --success: #83efd7;
-  --warning: #f5c86b;
-  --warning-soft: rgba(245,200,107,.14);
-  --success-soft: rgba(131,239,215,.13);
-  --danger: #ff8d98;
+  --text-primary: #f2f5fb;
+  --text-secondary: #d0d8e5;
+  --text-muted: #9aa7bc;
+  --text-faint: #69758a;
+  /* 边框 */
+  --line-subtle: rgba(180,196,221,.12);
+  --line-default: #303b51;
+  --line-focus: #88e6d1;
+  /* brand / accent(mint) */
+  --brand: #88e6d1;
+  --brand-hover: #a6f2e0;
+  --brand-strong: #6fe0c8;
+  --brand-soft: rgba(136,230,209,.12);
+  --cyan: #7fd4c0;
+  --cyan-soft: rgba(127,212,192,.13);
+  --violet: #9fd8c8;
+  /* 语义 */
+  --success: #8fe7b2;
+  --warning: #f4cc76;
+  --warning-soft: rgba(244,204,118,.10);
+  --success-soft: rgba(143,231,178,.10);
+  --danger: #ff9aa5;
   /* 圆角 */
   --r-sm: 6px; --r-md: 9px; --r-lg: 12px; --r-xl: 16px; --r-pill: 999px;
   /* 阴影/辉光 */
   --shadow-float: 0 14px 34px rgba(0,0,0,.34);
-  --glow-brand: 0 8px 24px rgba(104,121,250,.25);
-  /* 主 CTA(深色=靛蓝渐变;浅色主题覆盖为近黑实色) */
-  --cta-bg: linear-gradient(120deg, #8492ff, #a88bff);
-  --cta-border: rgba(163,177,255,.35);
+  --glow-brand: 0 8px 24px rgba(136,230,209,.22);
+  /* 主 CTA(深色=mint 实色 + 深色字;浅色主题覆盖为近黑 + 白字) */
+  --cta-bg: #88e6d1;
+  --on-cta: #10211f;
+  --cta-border: rgba(136,230,209,.35);
   --cta-shadow: var(--glow-brand);
-  --cta-hover-bg: linear-gradient(120deg, #91a0ff, #b89cff);
-  --cta-hover-shadow: 0 12px 30px rgba(104,121,250,.36);
+  --cta-hover-bg: #a6f2e0;
+  --cta-hover-shadow: 0 12px 30px rgba(136,230,209,.30);
   /* 字体(仅 Inter,本地;移除 Cormorant) */
   --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -87,6 +88,7 @@
   --shadow-float: 0 8px 24px rgba(24,29,38,.12);
   --glow-brand: 0 1px 2px rgba(24,29,38,.16);
   --cta-bg: #181d26;
+  --on-cta: #ffffff;
   --cta-border: transparent;
   --cta-shadow: 0 1px 2px rgba(24,29,38,.18);
   --cta-hover-bg: #0d1218;
@@ -512,32 +514,11 @@ button {
   display: none; flex-direction: column; overflow: hidden; /* 滚动交给 .contract-scroll;绝不出现横向滚动 */
 }
 #contract-sheet.show { display: flex; }
-/* v0.8.1 高保真:mint 深色主题(对齐 Demo #panel)。仅深色生效;浅色由下方 [data-theme=light] 回到全局近黑。
-   覆盖 Nebula 靛蓝 token,使 compose/comment-scope/plan-review 内所有元素(scope 卡/split/plan 按钮/agent 点)统一 mint。 */
-#contract-sheet {
-  --bg-canvas: #121722; --bg-surface: #1a2130; --bg-surface-raised: #202a3d; --bg-input: #111722;
-  --bg-overlay: #222c3e; --text-primary: #f2f5fb; --text-secondary: #d0d8e5; --text-muted: #9aa7bc;
-  --text-faint: #69758a; --line-subtle: rgba(180,196,221,.12); --line-default: #303b51; --line-focus: #88e6d1;
-  --brand: #88e6d1; --brand-hover: #a6f2e0; --brand-soft: rgba(136,230,209,.12); --success: #8fe7b2;
-  --warning: #f4cc76; --warning-soft: rgba(244,204,118,.10); --success-soft: rgba(143,231,178,.10);
-  --danger: #ff9aa5; --cta-bg: #88e6d1;
-}
-#contract-sheet .contract-primary,
-#contract-sheet .send-main,
-#contract-sheet .send-toggle { color: #10211f; }
-#contract-sheet .send-toggle { background: #88e6d1; }
-/* 浅色主题:contract-sheet 回到全局白底近黑(Demo #panel light 一致) */
-[data-theme="light"] #contract-sheet {
-  --bg-canvas: #fff; --bg-surface: #f8fafc; --bg-surface-raised: #eef0f3; --bg-input: #fff; --bg-overlay: #fff;
-  --text-primary: #181d26; --text-secondary: #333840; --text-muted: #41454d; --text-faint: #6b7079;
-  --line-subtle: #e8eaee; --line-default: #ddd; --line-focus: #458fff; --brand: #181d26; --brand-hover: #0d1218;
-  --brand-soft: rgba(24,29,38,.06); --success: #1f7a3d; --warning: #8a5a00; --warning-soft: rgba(138,90,0,.10);
-  --danger: #b3261e; --cta-bg: #181d26;
-}
-[data-theme="light"] #contract-sheet .contract-primary,
-[data-theme="light"] #contract-sheet .send-main,
-[data-theme="light"] #contract-sheet .send-toggle { color: #fff; }
-[data-theme="light"] #contract-sheet .send-toggle { background: #181d26; }
+/* mint 主题已由 :root 全局应用(深色)。CTA/brand 底按钮文字色统一用 --on-cta(深色深字 / 浅色白字)。 */
+#edit-btn, #join-btn, .artifact-reload-actions #artifact-reload-confirm-btn,
+.draft-acts .draft-save, .draft-acts .reply-save,
+.contract-primary, .send-main, .send-toggle,
+.adv-mode-btn.active { color: var(--on-cta); }
 .contract-step { display: none; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 /* v0.8.1:三档 step —— compose(选择修改范围,默认)/ comment-scope(选择评论范围)/ plan-review(确认计划) */
 #contract-sheet[data-step="compose"] #contract-step-compose,
@@ -783,3 +764,9 @@ button {
 .contract-bridge-status .cbs-progress li, .contract-bridge-status .cbs-history li { padding: 3px 0; color: var(--text-secondary); font-size: 11px; line-height: 1.45; word-break: break-word; }
 .contract-bridge-status .cbs-ts { color: var(--text-faint); font-variant-numeric: tabular-nums; margin-right: 4px; }
 .contract-bridge-status .cbs-empty { color: var(--text-faint); font-style: italic; }
+
+/* Agent 实时输出流(逐字滚动 + 光标) */
+.contract-bridge-status .cbs-stream { margin: 2px 0 6px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--bg-input); color: var(--text-secondary); font: 11px/1.55 var(--font-mono, ui-monospace, monospace); white-space: pre-wrap; word-break: break-word; max-height: 132px; overflow-y: auto; }
+.contract-bridge-status .cbs-stream:empty { display: none; }
+.contract-bridge-status .cbs-stream.typing::after { content: "▌"; color: var(--brand); animation: cbs-blink 1s steps(2) infinite; }
+@keyframes cbs-blink { 50% { opacity: 0; } }

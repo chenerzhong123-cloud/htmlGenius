@@ -33,6 +33,18 @@ export function codexWorkspacePathFor({ sourcePath, logicalDocumentId }) {
 }
 
 function truncateMsg(s) { const t = String(s || ''); return t.length > 400 ? t.slice(0, 400) + '…' : t; }
+// 把 client onStream 事件转成 host→background 的 bridge_stream 帧;delta 节流(累积 120ms 一帧,避免逐字刷屏)。
+function makeStreamer(runId, emit) {
+  let buf = ''; let timer = null;
+  const flush = () => { if (buf) { try { emit({ type: 'bridge_stream', run_id: runId, kind: 'delta', text: buf }); } catch (e) { /* 非关键 */ } buf = ''; } timer = null; };
+  return {
+    onStream(s) {
+      if (s && s.kind === 'delta') { buf += String(s.text || ''); if (!timer) timer = setTimeout(flush, 120); return; }
+      try { emit({ type: 'bridge_stream', run_id: runId, kind: (s && s.kind) || 'info', text: String((s && s.text) || ''), starting: !!(s && s.starting) }); } catch (e) { /* 非关键 */ }
+    },
+    flush() { if (timer) { clearTimeout(timer); timer = null; } flush(); }
+  };
+}
 function sanitizedEnv() {
   const keep = ['PATH', 'HOME', 'USER', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TZ'];
   const env = {}; for (const k of keep) { if (process.env[k] != null) env[k] = process.env[k]; } return env;
@@ -153,6 +165,7 @@ export async function executeCodexCandidateRun(msg, { emit, runtime, client, sch
   // 6. runCandidate:handshake → thread/start|resume → turn/start → turn/completed
   status('running');
   const c = client || new CodexAppServerClient(rt.runtimePath);
+  const streamer = makeStreamer(runId, emit);
   let result = null;
   try {
     result = await c.runCandidate({
@@ -160,12 +173,15 @@ export async function executeCodexCandidateRun(msg, { emit, runtime, client, sch
       storedThreadId: session.mode === 'continue' ? session.thread_id : null,
       workspaceCwd: prep.runsDir,
       prompt: buildCodexPrompt({ task }) + (msg.approved_plan ? approvedPlanPreamble(msg.approved_plan.edited_plan_markdown) : ''),
-      timeoutMs: DEFAULT_TURN_TIMEOUT_MS
+      timeoutMs: DEFAULT_TURN_TIMEOUT_MS,
+      onStream: streamer.onStream
     });
   } catch (e) {
+    streamer.flush();
     failed(e.code || CODEX_TURN_FAILED, e.message, prep.runsDir, { ...ctxBase, threadId: result && result.threadId });
     try { await c.close(); } catch (_) {} return;
   }
+  streamer.flush();
   try { await c.close(); } catch (_) {}
   const threadId = result && result.threadId;
 
@@ -292,18 +308,22 @@ export async function executeCodexPlanRun(msg, { emit, runtime, client, schemaDi
   // 6. runPlan(§6.6:永远 thread/start,writableRoots 仅 plan 目录,禁网)
   status('running');
   const c = client || new CodexAppServerClient(rt.runtimePath);
+  const streamer = makeStreamer(runId, emit);
   let result = null;
   try {
     result = await c.runPlan({
       workspaceCwd: prep.plansDir,
       prompt: buildPlanPrompt({ runId, task }),
-      timeoutMs: DEFAULT_TURN_TIMEOUT_MS
+      timeoutMs: DEFAULT_TURN_TIMEOUT_MS,
+      onStream: streamer.onStream
     });
   } catch (e) {
+    streamer.flush();
     const code = (e && e.code === CODEX_TIMED_OUT) ? 'CODEX_PLAN_TIMEOUT' : (e.code || 'CODEX_PLAN_FAILED');
     failed(code, e.message, prep.plansDir, ctxBase);
     try { await c.close(); } catch (_) {} return;
   }
+  streamer.flush();
   try { await c.close(); } catch (_) {}
 
   // 7. 重读 source:运行期被改 → 计划废弃(§6.2)
