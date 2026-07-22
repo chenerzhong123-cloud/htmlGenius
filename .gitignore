@@ -11,3 +11,8 @@ extension.pem
 dist/
 # Google OAuth 客户端密钥(敏感,严禁提交)
 docs/client_secret_*.json
+
+# htmlGenius 本机 bridge 运行时产物(候选/任务/snapshot/版本计数,本地测试生成,不入库)
+samples/.htmlgenius-bridge/
+samples/*candidate*.html
+samples/*--htmlgenius-*.html
