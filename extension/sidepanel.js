@@ -33,6 +33,28 @@
     try { return await chrome.tabs.sendMessage(tab.id, msg); }
     catch (e) { console.log("content script not ready:", e); return null; }
   }
+  // 重拉当前 tab 评论并刷新评论卡(+ 若 contract 开则同步本轮快照)。切 tab / 评论变化时用。
+  // sendToContent 已把 currentTabId 更新为活动 tab → sidepanel 按 tab 独立显示评论。
+  async function refreshAnnotations() {
+    const resp = await sendToContent({ type: "get-annotations" });
+    if (!resp || resp.type !== "annotations-list") return;
+    isLocal = resp.isLocal;
+    _editing = !!resp.editing;
+    _artifactState = resp.artifact_state || _artifactState;
+    renderMode();
+    renderCards(resp.items);
+    maybeShowReloadResult(resp.items);
+    if (_contractOpen) {
+      const ex = await sendToContent({ type: "get-export" }).catch(() => null);
+      if (ex && ex.type === "export-data" && _contractOpen) {
+        _contractItems = ex.items || [];
+        _contractArtifact = ex.artifact || _contractArtifact;
+        _contractMeta = bridgeMeta(ex);
+        if (_contractStep === "comment-scope") renderCommentScope();
+        else { refreshContractUI(); checkPlanStale(); }
+      }
+    }
+  }
 
   // 激活当前页:content-script 收到后才显示高亮/工具栏/编辑(关闭侧边栏时普通浏览零打扰)
   // showDialog=true 仅在打开侧边栏时用(弹编辑确认窗);切标签/刷新用 false(静默)
@@ -72,27 +94,7 @@
   // 接收 content-script 消息
   chrome.runtime.onMessage.addListener((msg, sender) => {
     if (msg.type === "annotations-updated") {
-      sendToContent({ type: "get-annotations" }).then((resp) => {
-        if (resp && resp.type === "annotations-list") {
-          isLocal = resp.isLocal;
-          _editing = !!resp.editing; // 以页面实际编辑态为准(刷新后复位为查看)
-          _artifactState = resp.artifact_state || _artifactState;
-          renderMode();
-          renderCards(resp.items);
-          maybeShowReloadResult(resp.items);
-          // v0.7.2 spec §4.1:任务 sheet 打开时页面评论实时更新 → 按最新 export 重算本轮快照与当前步骤
-          if (_contractOpen) {
-            sendToContent({ type: "get-export" }).then((ex) => {
-              if (!ex || ex.type !== "export-data" || !_contractOpen) return;
-              _contractItems = ex.items || [];
-              _contractArtifact = ex.artifact || _contractArtifact;
-              _contractMeta = bridgeMeta(ex);
-              if (_contractStep === "comment-scope") renderCommentScope();
-              else { refreshContractUI(); checkPlanStale(); }
-            });
-          }
-        }
-      });
+      refreshAnnotations();
     } else if (msg.type === "presence") {
       renderPresence(msg.users);
     } else if (msg.type === "start-comment") {
@@ -992,6 +994,7 @@
     catch (e) { setBridgeStatus(t("bridge.invalid"), "err"); return; }
     const tab = await getActiveTab();
     if (!tab || !tab.id) { setBridgeStatus(t("bridge.failed").replace("{msg}", "no active tab"), "err"); return; }
+    currentTabId = tab.id; // 确保 bridge 消息路由匹配当前 run 的 tab(修 candidate-ready 不终结)
     _contractRunKind = runKind;
     if (candidateResult) candidateResult.hidden = true;
     const payload = { type: "bridge-start", provider: _provider, run_kind: runKind, tab_id: tab.id, session_mode: "new", change_contract: task };
@@ -1580,7 +1583,8 @@
   }
 
   // 切换标签 / 当前页刷新完成:静默重新激活(确认窗只在侧边栏打开时弹,刷新后不再弹)
-  chrome.tabs.onActivated.addListener(() => activateActiveTab(false));
+  // 切换标签:激活新 tab + 重拉该 tab 评论(sidepanel 按 tab 独立显示评论,不再共享上一 tab 数据)
+  chrome.tabs.onActivated.addListener(() => { activateActiveTab(false); refreshAnnotations(); });
   chrome.tabs.onUpdated.addListener((_id, info) => { if (info && info.status === "complete") activateActiveTab(false); });
   // #1: 心跳 —— 只要侧边栏开着就持续 ping 活动标签(收起后停止 → content-script 看门狗失活)
   setInterval(pingActiveTab, 4000);

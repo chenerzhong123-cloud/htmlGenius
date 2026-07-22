@@ -273,6 +273,7 @@ function onHostDisconnect(tab_id, runId) {
 async function failRun(tab_id, runId, code, message) {
   const entry = _runsByTab.get(tab_id);
   if (entry) entry.terminal = true;
+  console.log("[hg] run FAILED run=", runId, "tab=", tab_id, "code=", code, "msg=", String(message || "").slice(0, 160));
   // 先广播再写库:SW 可能在 await IndexedDB 期间被 Chrome 杀掉 → broadcast 永远不执行 → sidepanel 卡死
   broadcast({ type: "bridge-failed", tab_id, run_id: runId, code, message });
   await Storage.updateBridgeRun(runId, { status: "failed", error_code: code, completed_at: nowIso() }).catch(() => {});
@@ -306,6 +307,7 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
 
   const run = await Storage.getBridgeRun(runId).catch(() => null);
   if (!run) return failRun(tab_id, runId, "RUN_NOT_FOUND", "no run record for candidate-ready");
+  console.log("[hg] candidate-ready run=", runId, "provider=", run.provider, "tab=", tab_id);
   // 逐字段对照(background 自存 run metadata;任一不一致即拒绝,不导航/不链接/不迁移)
   if (completion.task_sha256 !== run.task_sha256 || completion.task_sha256 !== taskSha) {
     return failRun(tab_id, runId, "COMPLETION_MISMATCH", "task_sha256 mismatch");
@@ -316,8 +318,11 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
   if (completion.logical_document_id !== run.logical_document_id || completion.logical_document_id !== logicalId) {
     return failRun(tab_id, runId, "COMPLETION_MISMATCH", "logical_document_id mismatch");
   }
-  const canon = (u) => { try { return Storage.canonicalArtifactUri ? Storage.canonicalArtifactUri(u) : u; } catch (e) { return u; } };
-  if (canon(completion.source_uri) !== canon(artifactUrl)) {
+  // source_uri:用 basename 比较。host 用 realpathSync 解析(可能解析 symlink,如 /var→/private/var、iCloud、
+  // 目录别名),扩展侧用原始 URL → 全路径 canon 比较会因 realpath 差异误判失败。logical_document_id +
+  // task_sha256 已校验防跨文档伪造,这里只需 basename 一致(同一源文件)。
+  const urlBasename = (u) => { try { return decodeURIComponent(new URL(u).pathname).replace(/^\/+/, "").split("/").pop(); } catch (e) { return ""; } };
+  if (urlBasename(completion.source_uri) !== urlBasename(artifactUrl)) {
     return failRun(tab_id, runId, "COMPLETION_MISMATCH", "source_uri mismatch");
   }
   if (typeof completion.candidate_uri !== "string" || !/^file:/i.test(completion.candidate_uri)) {
@@ -336,6 +341,7 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
     task_sha256: completion.task_sha256,
     logical_document_id: completion.logical_document_id
   }).catch(() => null);
+  console.log("[hg] consumer resp=", consumerResp && consumerResp.ok ? "ok" : "REJECT", consumerResp && consumerResp.code, consumerResp && consumerResp.action);
   if (!consumerResp || !consumerResp.ok) {
     return failRun(tab_id, runId, "CONSUMER_REJECTED", "artifact-update-ready consumer rejected: " + (consumerResp && consumerResp.code));
   }
