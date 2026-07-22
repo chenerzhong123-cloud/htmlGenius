@@ -676,7 +676,7 @@ button {
 .contract-fallback-label { font-size: 11px; color: var(--text-muted); margin-bottom: 5px; }
 .contract-fallback textarea { width: 100%; font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace); font-size: 10.5px; background: var(--bg-input); border: 1px solid var(--line-subtle); border-radius: var(--r-md); padding: 8px 9px; color: var(--text-secondary); box-sizing: border-box; white-space: pre; overflow: auto; }
 .contract-actions { display: flex; gap: 8px; margin-top: 0; }
-.contract-primary { flex: 1; background: var(--cta-bg); color: #fff; border: 0; font-weight: 600; height: 38px; border-radius: var(--r-md); cursor: pointer; font-family: var(--font-sans); font-size: 13px; transition: filter .14s; }
+.contract-primary { flex: 1; background: var(--cta-bg); color: var(--on-cta); border: 0; font-weight: 600; height: 38px; border-radius: var(--r-md); cursor: pointer; font-family: var(--font-sans); font-size: 13px; transition: filter .14s; }
 .contract-primary:hover { filter: brightness(1.06); }
 .contract-primary:disabled { opacity: .5; cursor: not-allowed; }
 .contract-secondary { background: var(--bg-surface-raised); color: var(--text-secondary); border: 1px solid var(--line-default); height: 38px; border-radius: var(--r-md); cursor: pointer; font-family: var(--font-sans); font-size: 12.5px; padding: 0 14px; }
