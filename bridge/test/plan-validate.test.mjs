@@ -220,3 +220,60 @@ test("utf8ByteLength:中文/emoji 按 UTF-8 字节计", () => {
   assert.equal(utf8ByteLength(""), 0);
   assert.equal(utf8ByteLength(null), 0);
 });
+
+// ---------- v0.8.2 Copilot provider 身份 / runtime 一致性(§3/§6.4)----------
+test("provider 身份:github_copilot 是合法 provider(确认可过、probe 保留)", () => {
+  // 确认:provider=github_copilot 通过 PROVIDER_RE
+  const rec = goodPlanRec({ provider: "github_copilot", provider_runtime: "local_cli" });
+  const ctx = goodCtx({ provider: "github_copilot", required_provider_runtime: "local_cli" });
+  assert.equal(validatePlanConfirmation(rec, ctx).ok, true);
+  // 未知 provider 仍拒
+  assert.equal(validatePlanConfirmation(goodPlanRec(), goodCtx({ provider: "rogue" })).code, "PLAN_CONTRACT_CHANGED");
+});
+
+test("validatePlanReady:provider_runtime 仅接受 local_cli|bundled_sdk_cli,非法 → PLAN_INVALID", () => {
+  assert.equal(validatePlanReady(goodRun({ provider: "github_copilot" }), goodPlanReady({ provider: "github_copilot", provider_runtime: "bundled_sdk_cli" }), SHA).ok, true);
+  assert.equal(validatePlanReady(goodRun({ provider: "github_copilot" }), goodPlanReady({ provider: "github_copilot", provider_runtime: null }), SHA).ok, true); // 可缺省
+  const bad = validatePlanReady(goodRun({ provider: "github_copilot" }), goodPlanReady({ provider: "github_copilot", provider_runtime: "/usr/local/bin/copilot" }), SHA);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.field, "provider_runtime");
+});
+
+test("validatePlanConfirmation:Copilot runtime 锁定 — 一致 ok;不一致 PLAN_CONTRACT_CHANGED(provider_runtime)", () => {
+  const rec = goodPlanRec({ provider: "github_copilot", provider_runtime: "local_cli" });
+  assert.equal(validatePlanConfirmation(rec, goodCtx({ provider: "github_copilot", required_provider_runtime: "local_cli" })).ok, true);
+  const mismatch = validatePlanConfirmation(rec, goodCtx({ provider: "github_copilot", required_provider_runtime: "bundled_sdk_cli" }));
+  assert.equal(mismatch.code, "PLAN_CONTRACT_CHANGED");
+  assert.equal(mismatch.field, "provider_runtime");
+  // 旧记录无 provider_runtime → 跳过锁定
+  const legacy = goodPlanRec({ provider: "github_copilot" });
+  assert.equal(validatePlanConfirmation(legacy, goodCtx({ provider: "github_copilot" })).ok, true);
+});
+
+test("sanitizeProbeResult:Copilot runtime 枚举+标签保留(≤64);路径类信息不保留", () => {
+  const r = sanitizeProbeResult({
+    providers: [{
+      id: "github_copilot", status: "ready", runtime: "local_cli",
+      runtime_label: "本地 Copilot CLI" + "x".repeat(200),
+      version: "9.9.9", capabilities: ["candidate", "plan"],
+      cli_path: "/opt/homebrew/bin/copilot", path: "/leak" // host 不该发,发了也必须被丢
+    }]
+  });
+  const c = r.providers.find((p) => p.id === "github_copilot");
+  assert.equal(c.status, "ready");
+  assert.equal(c.runtime, "local_cli");
+  assert.equal(c.runtime_label.length, 64);
+  assert.equal(c.cli_path, undefined);
+  assert.equal(c.path, undefined);
+  // 非法 runtime 枚举被丢
+  const r2 = sanitizeProbeResult({ providers: [{ id: "github_copilot", status: "ready", runtime: "../../evil" }] });
+  assert.equal(r2.providers.find((p) => p.id === "github_copilot").runtime, undefined);
+});
+
+test("sanitizeProbeResult:三个 provider 都出现(copilot 缺失归一 not_found)", () => {
+  const r = sanitizeProbeResult({ providers: [] });
+  const ids = r.providers.map((p) => p.id).sort();
+  assert.deepEqual(ids, ["claude_code_cli", "codex_app_server", "github_copilot"]);
+  assert.equal(r.providers.find((p) => p.id === "github_copilot").status, "not_found");
+  assert.equal(r.providers.find((p) => p.id === "github_copilot").label, "GitHub Copilot");
+});

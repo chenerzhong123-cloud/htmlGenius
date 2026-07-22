@@ -17,7 +17,7 @@
 - **层层回复**：可以在一条评论下继续讨论，形成讨论线索。
 - **修改契约**：把选中的评论整理成带「允许范围 / 保护规则 / 歧义处理 / 验收条件」的结构化契约，复制 Prompt / JSON 粘给 AI，或发给本机 Agent。
 - **直接编辑（本地文档）**：本地的 HTML 还能直接在页面上改文字、调样式（加粗 / 斜体 / 颜色 / 字号 / 对齐 / 元素级编辑）。
-- **交给本机 Codex / Claude Code（v0.8.1）**：把契约交给你本机已登录的 Codex（推荐）或 Claude Code，产出一份**新的候选 HTML（只写候选，绝不覆盖原文件）**，以 `原名V1.1.html` 这样带版本号的独立文件发布，打开后评论自动重定位；状态栏实时显示 Agent 输出，完成后自动新开页签 + 系统通知。仅 macOS + Chrome + Node 20+，详见 [`docs/LOCAL_BRIDGE.md`](docs/LOCAL_BRIDGE.md) 与 [Agent 说明](https://www.deuce.monster/htmlgenius/agents.html)。
+- **交给本机 Codex / Claude Code / GitHub Copilot（v0.8.2）**：把契约交给你本机已登录的 Codex（推荐，常驻热服务最快）、GitHub Copilot（官方 Copilot SDK 接入，本机 Copilot CLI 或 SDK 自带 runtime）或 Claude Code，产出一份**新的候选 HTML（只写候选，绝不覆盖原文件）**，以 `原名V1.1.html` 这样带版本号的独立文件发布，打开后评论自动重定位；状态栏实时显示 Agent 输出，完成后自动新开页签 + 系统通知。仅 macOS + Chrome + Node 20.19+/22.12+，详见 [`docs/LOCAL_BRIDGE.md`](docs/LOCAL_BRIDGE.md) 与 [Agent 说明](https://www.deuce.monster/htmlgenius/agents.html)。
 
 ## 安装
 
@@ -30,13 +30,22 @@
 1. 在网页上选中一段文字 → 选区上方点「**评论**」。
 2. 在侧边栏的输入框写下意见 → 按 **Enter** 保存（Shift+Enter 换行，Esc 取消）。
 3. 重复，把所有想讨论的地方都标出来。
-4. 点底部「**基于评论修改文档**」→ 勾选本次要处理的评论 → 「继续」→ 在契约里补充目标 / 保护项 → 「**复制 Prompt**」粘给 AI，或「**发送给 Codex / Claude Code**」交给本机 Agent。
+4. 点底部「**基于评论修改文档**」→ 勾选本次要处理的评论 → 「继续」→ 在契约里补充目标 / 保护项 → 「**复制 Prompt**」粘给 AI，或在发送下拉菜单选「**发送给 Codex / Claude Code / GitHub Copilot**」交给本机 Agent。
 
 > 在一条评论上悬停，可以**回复**、**编辑**或**删除**（编辑 / 删除仅限作者本人；删除会连同其下所有回复一起删）。
 
 ## 最近更新
 
-### v0.8 / v0.8.1（2026-07-22 · 当前版本）
+### v0.8.2（2026-07-23 · 当前版本）
+
+- **GitHub Copilot 接入**：Agent 菜单新增第三项 GitHub Copilot（单一入口，不暴露两个重复产品）。Host 通过官方 `@github/copilot-sdk`（精确锁定 1.0.7）连接：优先以 SDK stdio 模式连你本机的 `copilot` CLI（`local_cli`），CLI 缺失或不兼容时自动改用 SDK 自带 runtime（`bundled_sdk_cli`），菜单实时显示所用 runtime。
+- **受控安全边界**：Copilot session 跑在 SDK empty 模式——只开放文件读写类工具并逐个 `onPreToolUse` 校验（candidate 只允许写 `candidate.html`、plan 只允许写 `output/plan.json`，路径围栏 + symlink 逃逸检查）；shell / 网络 / subagent / MCP 全禁；每个 run 一个新 session，永不读取或续发你在 Copilot CLI / VS Code 里的已有会话。
+- **Plan→Candidate runtime 一致性**：确认计划生成 candidate 时锁定生成计划所用的 runtime；不可用则明确失败（COPILOT_RUNTIME_CHANGED），不静默切换。
+- **plan-first 闭环修复**：`bridge-plan-ready` 广播补上缺失的 `plan_sha256`，「确认计划，生成新版本」链路对三家 provider 恢复可用（前端按钮仍按计划隐去）。
+- **installer provider-neutral 化**：安装 Local Bridge 不再强制要求本机有 Claude CLI（只用 Copilot / Codex 也可装）；Node 版本要求对齐 SDK：`^20.19.0 || >=22.12.0`。
+- **测试基建修复**：`npm test` 改为显式 `test/*.test.mjs`——旧目录参数会把 fake app-server 当测试文件执行导致套件挂起（此前全量套件从未真正跑完）；现 206 项全绿。
+
+### v0.8 / v0.8.1（2026-07-22）
 
 - **Codex App Server 接入（推荐优先）**：除 Claude Code 外，现在支持把修改契约交给本机 Codex（ChatGPT.app 内置 `codex app-server`）生成候选版本。Codex 是常驻热服务，handshake 快、token 逐字流式输出，整页重做通常几分钟完成；Claude Code 走 CLI 冷启动，等待更久属正常。两者都只写候选、永不覆盖原文件，只用本机登录态、不存任何凭证。
 - **修改契约重做（compose-first）**：「基于评论修改文档」入口默认全选直达「选择修改范围」（精确 / 局部 / 全文重做三档）；全文重做不再强制填 brief，评论即输入。
@@ -81,5 +90,5 @@
 - **回灌需手动粘贴**：复制指令后要自己粘进 AI 对话框（除非用本机 Agent 闭环）。
 - **远程网页的编辑是临时的**：刷新或关闭页面即丢失，无法存回原网站。
 - **协同需登录**：多人实时评论需用飞书账号登录自托管后端；本地单人用法不受影响。
-- **本机 Agent 闭环需准备**：Codex 需安装 Codex Mac App 并登录；Claude Code 需 `claude auth login` 并安装 host（仅 macOS + Node 20+）。候选闭环的真实运行消耗你本机额度，自动化测试用假 CLI / 假 app-server 覆盖。
+- **本机 Agent 闭环需准备**：Codex 需安装 Codex Mac App 并登录；Claude Code 需 `claude auth login`；GitHub Copilot 需本机已登录 Copilot（CLI 可选，缺失时走 SDK 自带 runtime）；三者都需安装 host（仅 macOS + Node 20.19+/22.12+）。候选闭环的真实运行消耗你本机额度，自动化测试用假 CLI / 假 app-server / 假 Copilot SDK 覆盖（**真实 Copilot 端到端 smoke 尚未执行**，mock 通过不等于真机验证）。
 - **候选 ≠ 接受修改**：候选版本不会自动覆盖原文件；diff / 审查 / 显式提升（promote）尚在路线图，未实现。

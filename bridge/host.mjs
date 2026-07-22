@@ -7,6 +7,7 @@ import process from "node:process";
 import { NativeFrameDecoder, writeMessage } from "./native-protocol.mjs";
 import { executeHandoff, executeCandidateRun, executePlanRun } from "./host-runner.mjs";
 import { executeCodexCandidateRun, executeCodexPlanRun } from "./codex-adapter.mjs";
+import { executeCopilotCandidateRun, executeCopilotPlanRun } from "./copilot-adapter.mjs";
 import { probeProviders } from "./provider-probe.mjs";
 
 function log(...args) {
@@ -19,11 +20,31 @@ function dispatch(msg) {
   if (msg.type === "ping") return Promise.resolve({ type: "pong" });
   if (msg.type === "provider_probe") {
     // v0.8.1 §5.1/§7:只读 provider 探测。立即回 provider_probe_result(单次往返;background 侧 30s 缓存)。
-    const providers = Array.isArray(msg.providers) ? msg.providers : ["claude_code_cli", "codex_app_server"];
+    // v0.8.2:默认三 provider(claude / codex / github_copilot)。
+    const providers = Array.isArray(msg.providers) ? msg.providers : ["claude_code_cli", "codex_app_server", "github_copilot"];
     return probeProviders(providers).then(
       (r) => ({ type: "provider_probe_result", providers: r.providers }),
       (e) => ({ type: "provider_probe_result", providers: [], error: (e && e.message) || "probe failed" })
     );
+  }
+  if (msg.type === "copilot_handoff_start") {
+    // v0.8.2 §6.1:GitHub Copilot 独立分支,绝不落到 claude 默认分支。run_kind 必须显式 plan|candidate。
+    const emit = (payload) => {
+      try { writeMessage(process.stdout, payload); }
+      catch (e) { log("emit failed:", e && e.message); }
+    };
+    const runKind = msg.run_kind;
+    (async () => {
+      try {
+        if (runKind === "plan") await executeCopilotPlanRun(msg, { emit });
+        else if (runKind === "candidate") await executeCopilotCandidateRun(msg, { emit });
+        else emit({ type: "bridge_failed", run_id: msg.run_id, code: "BAD_RUN_KIND", message: "copilot run_kind must be plan|candidate" });
+      } catch (e) {
+        log("copilot-" + (runKind || "?") + " crashed:", (e && e.stack) || e);
+        emit({ type: "bridge_failed", run_id: msg.run_id, code: "HOST_CRASH", message: (e && e.message) || "host crash" });
+      }
+    })();
+    return Promise.resolve(null);
   }
   if (msg.type === "claude_handoff_start" || msg.type === "codex_handoff_start") {
     const emit = (payload) => {

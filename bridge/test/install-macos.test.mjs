@@ -90,12 +90,26 @@ test("install: 非法 extension id -> 失败且无残留文件", async () => {
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
 });
 
-test("install: claude 不存在 -> CLAUDE_NOT_IN_PATH 且无残留", async () => {
+test("install: claude 不存在 -> 只告警不失败(v0.8.2 §4.2:安装前提仅 Node/host/ID/可写)", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hg-bridge-noclaude-"));
   try {
-    await assert.rejects(() => install({ extensionId: VALID_ID, hostsDir: tmp, claudePath: "/definitely/not/here/claude",
-      bridgeDir: path.resolve(new URL(".", import.meta.url).pathname, "..") }),
-      (e) => e.code === "CLAUDE_NOT_IN_PATH");
-    assert.deepEqual(fs.readdirSync(tmp), []);
+    const r = await install({ extensionId: VALID_ID, hostsDir: tmp, claudePath: "/definitely/not/here/claude",
+      bridgeDir: path.resolve(new URL(".", import.meta.url).pathname, "..") });
+    assert.ok(fs.existsSync(r.manifestPath), "无 claude 也应写出 manifest");
+    assert.ok(fs.existsSync(r.launcherPath), "无 claude 也应写出 launcher");
+    const launcher = fs.readFileSync(r.launcherPath, "utf8");
+    assert.ok(!launcher.includes("/definitely/not/here"), "失效的 claude 路径不得烘焙进 PATH");
+    assert.deepEqual(fs.readdirSync(tmp).sort(), [HOST_NAME + ".json", HOST_NAME + ".launcher.sh"]);
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
+});
+
+test("nodeEngineOk: ^20.19.0 || >=22.12.0(@github/copilot-sdk engines)", async () => {
+  const { nodeEngineOk } = await import("../install-macos.mjs");
+  assert.equal(nodeEngineOk("20.19.0"), true);
+  assert.equal(nodeEngineOk("20.20.2"), true);
+  assert.equal(nodeEngineOk("20.18.1"), false);
+  assert.equal(nodeEngineOk("21.7.3"), false);
+  assert.equal(nodeEngineOk("22.11.0"), false);
+  assert.equal(nodeEngineOk("22.12.0"), true);
+  assert.equal(nodeEngineOk("24.1.0"), true);
 });

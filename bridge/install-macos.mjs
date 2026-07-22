@@ -2,10 +2,11 @@
 // 用法:node install-macos.mjs --extension-id <chrome-extension-id> [--hosts-dir <dir>] [--claude-path <path>] [--uninstall]
 //   --extension-id  必填,Chrome 扩展 ID(32 位 [a-p])
 //   --hosts-dir     可选,覆盖 manifest 输出目录(测试用);默认 ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/
-//   --claude-path   可选,显式 claude 可执行文件路径;不提供则 `which claude`
+//   --claude-path   可选(v0.8.2 起非安装前提),显式 claude 可执行文件路径;找到则烘焙进 launcher PATH,找不到只告警不失败
 //   --uninstall     仅移除本 host 写的 launcher + manifest
-// host 名是 provider-neutral 的(com.htmlgenius.local_bridge):v0.7.1 实现 Claude Code adapter,
-// 后续 Codex adapter 复用同一 host,不另装。
+// host 名是 provider-neutral 的(com.htmlgenius.local_bridge):Claude Code / Codex / GitHub Copilot 三个 adapter 复用同一 host。
+// v0.8.2 §4.2:安装只校验 Node(>=20.19.0 或 >=22.12.0,@github/copilot-sdk 要求)、host.mjs 存在、extension ID、manifest 可写;
+// 用户可以只用 Copilot 或 Codex,因此不再把「找到 Claude CLI」作为安装成功条件。
 // 安全(§4.3):allowed_origins 只含传入的单个 origin;launcher 用绝对 node + 绝对 host.mjs,无 shell 拼接;失败清理。
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -37,7 +38,7 @@ export function buildManifest({ extensionId, launcherPath }) {
   }
   return {
     name: HOST_NAME,
-    description: "HTML Genius Local Bridge (Claude Code handoff)",
+    description: "HTML Genius Local Bridge (local AI agent handoff)",
     path: launcherPath,
     type: "stdio",
     allowed_origins: ["chrome-extension://" + extensionId + "/"]
@@ -78,30 +79,46 @@ function parseArgs(argv) {
   return out;
 }
 
-function assertNode20() {
-  const major = Number(process.versions.node.split(".")[0]);
-  if (!(major >= 20)) { const e = new Error("node >= 20 required, got " + process.versions.node); e.code = "NODE_TOO_OLD"; throw e; }
+// v0.8.2 §4.2:Node 版本须满足 @github/copilot-sdk engines:^20.19.0 || >=22.12.0。不能只查 major>=20。
+export function nodeEngineOk(version = process.versions.node) {
+  const [maj, min] = String(version).split(".").map((n) => Number(n));
+  if (!Number.isInteger(maj)) return false;
+  if (maj === 20) return min >= 19;   // ^20.19.0
+  if (maj === 21) return false;       // 21.x 不在范围内
+  return maj > 22 || min >= 12;       // >=22.12.0(23+ 均可)
 }
 
-function resolveClaude(claudePath) {
+function assertNodeEngine() {
+  if (!nodeEngineOk()) {
+    const e = new Error("Node ^20.19.0 || >=22.12.0 required (@github/copilot-sdk), got " + process.versions.node);
+    e.code = "NODE_TOO_OLD"; throw e;
+  }
+}
+
+// v0.8.2 §4.2:Claude CLI 不再是安装前提——用户可能只用 Copilot 或 Codex。
+// 找到(显式 --claude-path 或 which)则烘焙进 launcher PATH;找不到只告警,安装继续。
+function resolveClaudeOptional(claudePath) {
   if (claudePath) {
-    if (!path.isAbsolute(claudePath)) { const e = new Error("--claude-path must be absolute"); e.code = "PATH_NOT_ABSOLUTE"; throw e; }
-    try { fs.accessSync(claudePath, fs.constants.X_OK); } catch (_) { const e = new Error("claude not executable: " + claudePath); e.code = "CLAUDE_NOT_IN_PATH"; throw e; }
-    return claudePath;
+    if (!path.isAbsolute(claudePath)) {
+      process.stderr.write("warning: --claude-path is not absolute; ignoring it\n");
+      return null;
+    }
+    try { fs.accessSync(claudePath, fs.constants.X_OK); return claudePath; }
+    catch (_) { process.stderr.write("warning: --claude-path not executable (" + claudePath + "); continuing without it\n"); return null; }
   }
   const r = spawnSync("which", ["claude"], { encoding: "utf8" });
-  if (r.status !== 0 || !r.stdout || !r.stdout.trim()) { const e = new Error("`claude` not found in PATH — install Claude Code and run `claude auth login` first"); e.code = "CLAUDE_NOT_IN_PATH"; throw e; }
+  if (r.status !== 0 || !r.stdout || !r.stdout.trim()) return null;
   return r.stdout.trim();
 }
 
 export async function install({ extensionId, hostsDir, claudePath, bridgeDir }) {
-  assertNode20();
+  assertNodeEngine();
   validateExtensionId(extensionId);
   const dir = bridgeDir || path.dirname(new URL(import.meta.url).pathname);
   if (!path.isAbsolute(dir)) { const e = new Error("bridge dir must be absolute"); e.code = "PATH_NOT_ABSOLUTE"; throw e; }
   const hostPath = path.join(dir, "host.mjs");
   try { fs.accessSync(hostPath, fs.constants.R_OK); } catch (_) { const e = new Error("host.mjs not found in bridge dir: " + dir); e.code = "HOST_MISSING"; throw e; }
-  const resolvedClaude = resolveClaude(claudePath); // 验证 claude 就绪,并把其目录烘焙进 launcher PATH
+  const resolvedClaude = resolveClaudeOptional(claudePath); // 可选:找到则烘焙进 launcher PATH;找不到不阻塞安装(v0.8.2 §4.2)
 
   const outDir = hostsDir || DEFAULT_HOSTS_DIR;
   fs.mkdirSync(outDir, { recursive: true });
@@ -154,7 +171,7 @@ export async function main(argv) {
     }
     if (!opts.extensionId) throw new Error("usage: install-macos.mjs --extension-id <id> [--hosts-dir <dir>] [--claude-path <path>]");
     const r = await install({ extensionId: opts.extensionId, hostsDir: opts.hostsDir, claudePath: opts.claudePath, bridgeDir: opts.bridgeDir });
-    process.stdout.write("installed htmlGenius local bridge host (Claude Code handoff):\n");
+    process.stdout.write("HTML Genius Local Bridge installed (provider-neutral: Claude Code / Codex / GitHub Copilot):\n");
     process.stdout.write("  manifest:     " + r.manifestPath + "\n");
     process.stdout.write("  launcher:     " + r.launcherPath + "\n");
     process.stdout.write("  allowed_origins: " + JSON.stringify(r.allowed_origins) + "\n");

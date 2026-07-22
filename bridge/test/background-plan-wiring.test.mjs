@@ -58,6 +58,9 @@ test("background bridge-plan-ready 广播不含 manifest_path / session_id / thr
   // 必须带 plan_id + plan
   assert.match(block, /plan_id:/);
   assert.match(block, /plan:/);
+  // v0.8.2 §1.1 回归:广播必须携带 plan_sha256(取自 planRec),否则 Side Panel 确认计划时
+  // planPayload() 回传 undefined → validatePlanConfirmation 恒 PLAN_INVALID,Plan-first 闭环断裂。
+  assert.match(block, /plan_sha256:\s*planRec\.plan_sha256/);
 });
 
 test("background candidate 携带 plan → startMsg 注入 approved_plan(§6.8)", () => {
@@ -78,4 +81,39 @@ test("background provider probe 缓存 30s(makeProviderProbeCache)", () => {
   assert.match(bg, /PlanValidate\.makeProviderProbeCache\(\)/);
   assert.match(bg, /_providerProbe\.get\(\)/);
   assert.match(bg, /_providerProbe\.set\(result\)/);
+});
+
+// —— v0.8.2 §6.3:GitHub Copilot provider 接线(源码级)——
+test("background v0.8.2:COPILOT_PROVIDER 与 SUPPORTED_PROVIDERS 含 github_copilot", () => {
+  assert.match(bg, /COPILOT_PROVIDER = "github_copilot"/);
+  assert.match(bg, /SUPPORTED_PROVIDERS = new Set\(\[PROVIDER, CODEX_PROVIDER, COPILOT_PROVIDER\]\)/);
+});
+
+test("background v0.8.2:每 provider 明确 handoff type(禁 ternary 默认),copilot → copilot_handoff_start", () => {
+  assert.match(bg, /HANDOFF_START_TYPES = \{/);
+  assert.match(bg, /\[COPILOT_PROVIDER\]: "copilot_handoff_start"/);
+  assert.match(bg, /type: HANDOFF_START_TYPES\[provider\]/);
+  assert.doesNotMatch(bg, /provider === CODEX_PROVIDER \? "codex_handoff_start" : "claude_handoff_start"/);
+});
+
+test("background v0.8.2:Copilot session 字段只发 { mode }(不带 session_id/thread_id,永不续发)", () => {
+  assert.match(bg, /else if \(provider === COPILOT_PROVIDER\) sessionField = \{ mode: session_mode \}/);
+  assert.match(bg, /provider === COPILOT_PROVIDER\) return \{ ok: false, code: "NO_CONTINUABLE_SESSION" \}/);
+});
+
+test("background v0.8.2:copilot candidate 携带 plan → startMsg.required_provider_runtime 锁定计划 runtime", () => {
+  assert.match(bg, /startMsg\.required_provider_runtime = \(confirmedPlanRec && confirmedPlanRec\.provider_runtime\) \|\| null/);
+});
+
+test("background v0.8.2:completePlan 落库 provider_runtime(枚举把关在 validator)", () => {
+  assert.match(bg, /provider_runtime: planReady\.provider_runtime \|\| null/);
+});
+
+test("background v0.8.2:completeCandidate 对 Copilot 不读/不存 session_id", () => {
+  assert.match(bg, /const sessionId = isCopilot \? null :/);
+});
+
+test("background v0.8.2:provider probe 三 provider(含 github_copilot),全局失败各自 error", () => {
+  assert.match(bg, /providers: \[PROVIDER, CODEX_PROVIDER, COPILOT_PROVIDER\]/);
+  assert.match(bg, /\{ id: COPILOT_PROVIDER, status: "error" \}/);
 });

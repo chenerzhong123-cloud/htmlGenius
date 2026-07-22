@@ -616,7 +616,8 @@
     renderRangeLink();
     renderPlanConfirmState();
   }
-  function providerLabel(id) { return id === "codex_app_server" ? "Codex" : "Claude Code"; }
+  const PROVIDER_LABELS = { claude_code_cli: "Claude Code", codex_app_server: "Codex", github_copilot: "GitHub Copilot" };
+  function providerLabel(id) { return PROVIDER_LABELS[id] || "Claude Code"; }
   // 重置契约表单(新一轮开始 / 关闭清空时)
   function resetContractForm() {
     const precise = document.querySelector('input[name="contract-scope"][value="precise_patch"]');
@@ -855,13 +856,27 @@
       if (_contractOpen) { renderProviderMenu(); refreshContractUI(); }
     }).catch(() => {});
   }
+  // v0.8.2:Copilot 的 runtime 摘要(host probe 返回的 runtime 枚举 → 三语标签;退化用 host 的 runtime_label,≤64 已在 sanitize 把关)
+  function providerRuntimeNote(p) {
+    if (!p) return null;
+    if (p.runtime === "local_cli") return t("provider.copilotLocalCli");
+    if (p.runtime === "bundled_sdk_cli") return t("provider.copilotSdkRuntime");
+    return (typeof p.runtime_label === "string" && p.runtime_label) ? p.runtime_label : null;
+  }
   function providerStatusText(p) {
     if (!p) return t("provider.checking");
     const s = p.status;
-    if (s === "ready") return p.version ? (t("provider.ready") + " · " + p.version) : t("provider.ready");
+    if (s === "ready") {
+      const rn = providerRuntimeNote(p);
+      if (rn) return t("provider.ready") + " · " + rn;
+      return p.version ? (t("provider.ready") + " · " + p.version) : t("provider.ready");
+    }
     if (s === "checking") return t("provider.checking");
     if (s === "not_installed" || s === "not_found") return t("provider.notInstalled");
-    if (s === "auth_required") return t("provider.authRequired");
+    if (s === "auth_required") {
+      const rn = providerRuntimeNote(p);
+      return rn ? (t("provider.authRequired") + " · " + rn) : t("provider.authRequired");
+    }
     if (s === "incompatible" || s === "untrusted") return t("provider.incompatible");
     return t("provider.error");
   }
@@ -982,12 +997,23 @@
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF"
       || code === "SOURCE_MUTATED_DURING_CANDIDATE" || code === "SOURCE_MUTATED_DURING_PLAN"
       || code === "BRIDGE_NOT_INSTALLED" || code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED"
-      || code === "SESSION_MODE_NOT_ALLOWED" || code === "CODEX_AUTH_REQUIRED") return "warn";
+      || code === "SESSION_MODE_NOT_ALLOWED" || code === "CODEX_AUTH_REQUIRED"
+      || code === "COPILOT_SDK_NOT_INSTALLED" || code === "COPILOT_CLI_NOT_FOUND" || code === "COPILOT_CLI_INCOMPATIBLE"
+      || code === "COPILOT_AUTH_REQUIRED" || code === "COPILOT_RUNTIME_CHANGED" || code === "COPILOT_TIMEOUT"
+      || code === "COPILOT_PLAN_TIMEOUT") return "warn";
     return "err";
   }
   function tBridgeFailed(code, host) {
     if (code === "USER_CANCELLED") return t("bridge.cancelled");
     if (code === "CODEX_TIMED_OUT") return t("bridge.codexTimeout");
+    // v0.8.2 Copilot 失败码(§5.5)
+    if (code === "COPILOT_SDK_NOT_INSTALLED" || code === "COPILOT_CLI_NOT_FOUND") return t("bridge.copilotNotInstalled");
+    if (code === "COPILOT_CLI_INCOMPATIBLE") return t("bridge.copilotIncompatible");
+    if (code === "COPILOT_AUTH_REQUIRED") return t("bridge.copilotAuthRequired");
+    if (code === "COPILOT_RUNTIME_CHANGED") return t("bridge.copilotRuntimeChanged");
+    if (code === "COPILOT_PERMISSION_DENIED") return t("bridge.copilotPermissionDenied");
+    if (code === "COPILOT_TIMEOUT" || code === "COPILOT_PLAN_TIMEOUT") return t("bridge.copilotTimeout");
+    if (code === "COPILOT_PLAN_FAILED") return t("bridge.planFailed");
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF") return t("bridge.sourceChanged");
     if (code === "SOURCE_MUTATED_DURING_CANDIDATE") return t("bridge.sourceMutated");
     if (code === "SOURCE_MUTATED_DURING_PLAN") return t("bridge.planSourceMutated");

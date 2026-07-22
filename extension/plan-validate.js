@@ -6,7 +6,9 @@
   "use strict";
 
   var SHA_RE = /^sha256:[0-9a-f]{64}$/;
-  var PROVIDER_RE = /^(claude_code_cli|codex_app_server)$/;
+  var PROVIDER_RE = /^(claude_code_cli|codex_app_server|github_copilot)$/;
+  // v0.8.2 §3.1:Copilot 的 Host-only runtime 枚举(UI 最多显示 runtime_label,不显示路径)
+  var PROVIDER_RUNTIME_RE = /^(local_cli|bundled_sdk_cli)$/;
   var PLAN_MAX_MARKDOWN_BYTES = 12 * 1024;
   var PLAN_MAX_SUMMARY_BYTES = 1024;
   var PLAN_MAX_OUT_OF_SCOPE = 20;
@@ -85,6 +87,11 @@
     if (typeof planReady.plan_sha256 !== "string" || !SHA_RE.test(planReady.plan_sha256)) {
       return { ok: false, code: "PLAN_INVALID", field: "plan_sha256" };
     }
+    // v0.8.2 §6.4:Copilot plan-ready 若带 provider_runtime,仅接受允许枚举(落库后供确认时锁定 runtime)
+    if (planReady.provider_runtime != null &&
+        (typeof planReady.provider_runtime !== "string" || !PROVIDER_RUNTIME_RE.test(planReady.provider_runtime))) {
+      return { ok: false, code: "PLAN_INVALID", field: "provider_runtime" };
+    }
     var pv = validatePlanSchema(planReady.plan);
     if (!pv.ok) return pv;
     return { ok: true };
@@ -111,6 +118,16 @@
       return { ok: false, code: "PLAN_STALE_SOURCE", field: "base_artifact_hash" };
     }
     if (planRec.task_sha256 !== ctx.task_sha256) return { ok: false, code: "PLAN_CONTRACT_CHANGED", field: "task_sha256" };
+    // v0.8.2 §6.4:Copilot 计划确认必须锁定生成计划时的 runtime(发往 Host 的 required_provider_runtime 必须一致);
+    // runtime 是否仍可用由 Host 最终确认(不可用 → COPILOT_RUNTIME_CHANGED)。旧记录无该字段则跳过。
+    if (planRec.provider === "github_copilot" && planRec.provider_runtime) {
+      if (typeof planRec.provider_runtime !== "string" || !PROVIDER_RUNTIME_RE.test(planRec.provider_runtime)) {
+        return { ok: false, code: "PLAN_INVALID", field: "provider_runtime" };
+      }
+      if (ctx.required_provider_runtime !== planRec.provider_runtime) {
+        return { ok: false, code: "PLAN_CONTRACT_CHANGED", field: "provider_runtime" };
+      }
+    }
     // plan_sha256:消息携带的必须与存储原 SHA(host 算的不可编辑原计划)一致
     if (typeof ctx.plan_sha256 !== "string" || !SHA_RE.test(ctx.plan_sha256)) {
       return { ok: false, code: "PLAN_INVALID", field: "plan_sha256" };
@@ -144,7 +161,7 @@
   // 把 host probe 结果裁剪成 UI 安全的 providers 数组(spec §3.D/§5.1:绝不返回 runtime 路径/TeamID/schema 路径/stderr/认证)。
   // hostResult:{ providers: [{ id, label?, status, version?, capabilities? }] }
   // 返回 { providers: [{ id, label, status, capabilities, version? }] } —— 缺失 provider 归一为 not_found;未知 status 归一为 error。
-  var _PROBE_LABELS = { claude_code_cli: "Claude Code", codex_app_server: "Codex" };
+  var _PROBE_LABELS = { claude_code_cli: "Claude Code", codex_app_server: "Codex", github_copilot: "GitHub Copilot" };
   var _PROBE_VALID_STATUS = { ready: 1, checking: 1, not_installed: 1, not_found: 1, auth_required: 1, incompatible: 1, untrusted: 1, error: 1 };
 
   function sanitizeProbeResult(hostResult) {
@@ -163,6 +180,13 @@
       // 仅 ready 时附简短版本摘要(截断,非完整 stderr/路径)
       if (status === "ready" && typeof p.version === "string" && p.version) {
         rec.version = String(p.version).slice(0, 64);
+      }
+      // v0.8.2 §6.4:Copilot runtime 摘要——仅保留枚举与短标签,绝不保留 runtime 路径
+      if (typeof p.runtime === "string" && PROVIDER_RUNTIME_RE.test(p.runtime)) {
+        rec.runtime = p.runtime;
+      }
+      if (typeof p.runtime_label === "string" && p.runtime_label) {
+        rec.runtime_label = String(p.runtime_label).slice(0, 64);
       }
       out.push(rec);
     }

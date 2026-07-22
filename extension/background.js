@@ -9,7 +9,14 @@ importScripts("storage.js", "bridge-validate.js", "plan-validate.js");
 const NATIVE_HOST = "com.htmlgenius.local_bridge";
 const PROVIDER = "claude_code_cli";
 const CODEX_PROVIDER = "codex_app_server";
-const SUPPORTED_PROVIDERS = new Set([PROVIDER, CODEX_PROVIDER]);
+const COPILOT_PROVIDER = "github_copilot"; // v0.8.2:GitHub Copilot(Copilot SDK;Host-only runtime:local_cli / bundled_sdk_cli)
+const SUPPORTED_PROVIDERS = new Set([PROVIDER, CODEX_PROVIDER, COPILOT_PROVIDER]);
+// v0.8.2 §6.3.2:每个 provider 有明确的 handoff message type;禁止「非 Codex 即 Claude」的默认 ternary。
+const HANDOFF_START_TYPES = {
+  [PROVIDER]: "claude_handoff_start",
+  [CODEX_PROVIDER]: "codex_handoff_start",
+  [COPILOT_PROVIDER]: "copilot_handoff_start"
+};
 const BRIDGE_VERSION = "0.8.1";
 // v0.8.1 §5.2/§6.7:candidate + plan 是新主流程;handoff 旧路径保留兼容(V0.8.1 UI 不再创建)。
 const ALLOWED_RUN_KINDS = new Set(["candidate", "plan", "handoff"]);
@@ -89,8 +96,10 @@ async function handleQuerySession({ tab_id, provider }) {
   const logicalId = ex.logicalDocumentId || (ex.artifact_state && ex.artifact_state.logical_document_id);
   if (!logicalId) return { ok: false, code: "NO_LOGICAL_DOC" };
   const sess = await Storage.getBridgeSession(logicalId, prov);
+  // v0.8.2 §6.3.4:Copilot 不存 bridge session、不支持续发 → 恒不可 continue
   const continuable = !!(sess && sess.ownership === "htmlgenius" && sess.provider === prov
-    && sess.status !== "running" && (prov === CODEX_PROVIDER ? !!sess.thread_id : isUuid(sess.session_id)));
+    && sess.status !== "running" && prov !== COPILOT_PROVIDER
+    && (prov === CODEX_PROVIDER ? !!sess.thread_id : isUuid(sess.session_id)));
   return { ok: true, has_session: !!sess, continuable, last_status: sess && sess.status };
 }
 
@@ -134,14 +143,18 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
 
   // 3.1 v0.8.1 §5.4:candidate 携带 plan 时,launch 前确认校验(plan_id 存在/draft/provider/doc/tab/artifact/contract/edited/plan_sha256)。
   //     通过后由 launch 成功步骤把 plan 标 approved + 记 candidate_run_id(plan 只能背一次 candidate launch)。
+  //     v0.8.2 §6.4:Copilot 还校验 provider_runtime 一致性(ctx.required_provider_runtime = 将发给 Host 的锁定值)。
+  let confirmedPlanRec = null;
   if (runKind === "candidate" && plan) {
     const planRec = await Storage.getBridgePlan(plan.plan_id).catch(() => null);
     const pv = PlanValidate.validatePlanConfirmation(planRec, {
       provider, logical_document_id: logicalId, tab_id,
       source_artifact_uri: art.url, loaded_artifact_hash: loadedHash,
-      task_sha256: taskSha, edited_plan_markdown: plan.edited_plan_markdown, plan_sha256: plan.plan_sha256
+      task_sha256: taskSha, edited_plan_markdown: plan.edited_plan_markdown, plan_sha256: plan.plan_sha256,
+      required_provider_runtime: provider === COPILOT_PROVIDER ? (planRec && planRec.provider_runtime) || null : undefined
     });
     if (!pv.ok) return { ok: false, code: pv.code, message: "plan confirmation rejected: " + pv.code + (pv.field ? " (" + pv.field + ")" : "") };
+    confirmedPlanRec = planRec;
   }
 
   // 4. tab lock:同一 tab 不允许并发 run
@@ -149,9 +162,10 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
   if (active) return { ok: false, code: "RUN_IN_PROGRESS", run_id: active.run_id };
 
   // 5. continue:按 provider 查 bridge-owned、非 running 的已存 session(仅 handoff 旧路径可达;candidate/plan 已被 session_mode 门禁拦下)
-  //    claude 用保存的 session_id UUID;codex 用保存的 thread_id(spec §5/§6.2)
+  //    claude 用保存的 session_id UUID;codex 用保存的 thread_id(spec §5/§6.2);copilot 永不续发(v0.8.2 §7.6)
   let continueRef = null;
   if (session_mode === "continue") {
+    if (provider === COPILOT_PROVIDER) return { ok: false, code: "NO_CONTINUABLE_SESSION" };
     const sess = await Storage.getBridgeSession(logicalId, provider);
     if (!sess || sess.ownership !== "htmlgenius" || sess.provider !== provider || sess.status === "running") {
       return { ok: false, code: "NO_CONTINUABLE_SESSION" };
@@ -198,8 +212,14 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
   port.onMessage.addListener((m) => onHostMessage(tab_id, runId, m, taskSha, logicalId, art.url));
   port.onDisconnect.addListener(() => onHostDisconnect(tab_id, runId));
 
+  // v0.8.2 §6.3.2:session 字段按 provider 明确构造;Copilot 只发 { mode }(不带任何 session 引用,永不续发)
+  let sessionField;
+  if (provider === CODEX_PROVIDER) sessionField = { mode: session_mode, thread_id: continueRef };
+  else if (provider === COPILOT_PROVIDER) sessionField = { mode: session_mode };
+  else sessionField = { mode: session_mode, session_id: continueRef };
+
   const startMsg = {
-    type: provider === CODEX_PROVIDER ? "codex_handoff_start" : "claude_handoff_start",
+    type: HANDOFF_START_TYPES[provider],
     provider,
     run_id: runId,
     run_kind: runKind,
@@ -208,14 +228,16 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
       artifact_uri: art.url,
       base_artifact_hash: loadedHash
     },
-    session: provider === CODEX_PROVIDER
-      ? { mode: session_mode, thread_id: continueRef }
-      : { mode: session_mode, session_id: continueRef },
+    session: sessionField,
     task: task
   };
   // v0.8.1 §6.8:candidate 携带已确认 plan → 装入 approved_plan(plan_id/原 plan_sha256/用户审核后的 edited_plan_markdown)
   if (runKind === "candidate" && plan) {
     startMsg.approved_plan = { plan_id: plan.plan_id, plan_sha256: plan.plan_sha256, edited_plan_markdown: plan.edited_plan_markdown };
+    // v0.8.2 §6.3.6:Copilot 锁定生成计划时的 runtime;Host 必须匹配,否则 COPILOT_RUNTIME_CHANGED
+    if (provider === COPILOT_PROVIDER) {
+      startMsg.required_provider_runtime = (confirmedPlanRec && confirmedPlanRec.provider_runtime) || null;
+    }
   }
   port.postMessage(startMsg);
 
@@ -428,7 +450,9 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
   // 先广播(用户可见:侧边栏立即显示成功);version_label 来自 host(文档级版本号 V1.N,已写进文件名)。
   const provider = run.provider || completion.provider || PROVIDER;
   const isCodex = provider === CODEX_PROVIDER;
-  const sessionId = isCodex ? (completion.thread_id || null) : (run.session_id || null);
+  const isCopilot = provider === COPILOT_PROVIDER;
+  // v0.8.2 §6.3.4:Copilot 不读/不存 session_id(每 run 一个 ephemeral session,不落 bridge_sessions)
+  const sessionId = isCopilot ? null : (isCodex ? (completion.thread_id || null) : (run.session_id || null));
   const versionLabel = completion.version_label || null;
   broadcast({
     type: "bridge-completed", tab_id, run_id: runId, candidate: true, version_label: versionLabel,
@@ -491,6 +515,7 @@ async function completePlan(tab_id, runId, planReady, taskSha, logicalId, artifa
     host_source_sha256_before: planReady.source_sha256_before || null, // host 原始字节 hash(证据,绝不跨侧比)
     task_sha256: taskSha,
     plan_sha256: planReady.plan_sha256,
+    provider_runtime: planReady.provider_runtime || null,      // v0.8.2 §6.3.5:Copilot 计划确认时锁定同 runtime(枚举已在 validator 把关)
     mode: run.mode || null,
     root_annotation_ids: (run.root_annotation_ids || []).slice(),
     selected_annotation_ids: (run.selected_annotation_ids || []).slice(),
@@ -505,8 +530,11 @@ async function completePlan(tab_id, runId, planReady, taskSha, logicalId, artifa
   await Storage.updateBridgeRun(runId, { status: "completed", plan_id: planId, manifest_path: planReady.manifest_path || null, completed_at: nowIso() }).catch(() => {});
 
   // 广播:绝不含 manifest_path / session / thread / 路径(spec §5.3)。plan 是受控 plan.json 的可展示副本。
+  // plan_sha256 必须随广播送达 Side Panel:v0.8.2 §1.1 — onPlanReady 存入 _plan,确认计划时 planPayload() 回传,
+  // PlanValidate.validatePlanConfirmation() 要求该值与 bridge_plans 记录一致;缺失则确认永远 PLAN_INVALID。
   broadcast({
     type: "bridge-plan-ready", tab_id, run_id: runId, plan_id: planId,
+    plan_sha256: planRec.plan_sha256,
     plan: { schema_version: p.schema_version, summary: p.summary, plan_markdown: p.plan_markdown, out_of_scope: planRec.out_of_scope }
   });
 }
@@ -519,8 +547,8 @@ async function handleQueryProviders() {
   let raw;
   try { raw = await probeProvidersViaHost(); }
   catch (e) {
-    // probe 整体失败:两个 provider 归一为 error(sanitize 会补齐缺失项);仍缓存 30s 避免频繁重探。
-    raw = { providers: [{ id: PROVIDER, status: "error" }, { id: CODEX_PROVIDER, status: "error" }] };
+    // probe 整体失败:三个 provider 归一为 error(sanitize 会补齐缺失项);仍缓存 30s 避免频繁重探。
+    raw = { providers: [{ id: PROVIDER, status: "error" }, { id: CODEX_PROVIDER, status: "error" }, { id: COPILOT_PROVIDER, status: "error" }] };
   }
   const result = { ok: true, providers: PlanValidate.sanitizeProbeResult(raw).providers, checked_at: nowIso() };
   _providerProbe.set(result);
@@ -528,7 +556,7 @@ async function handleQueryProviders() {
 }
 
 // 连 native host 发 provider_probe;host 回 provider_probe_result。单次往返,~10s 超时。
-// M2 host 实现前,host 不识别 provider_probe → 返回 bridge_failed/unknown_message → 归一为 error(两个 provider 各自暂不可用),不抛错。
+// host 不识别 provider_probe → 返回 bridge_failed/unknown_message → 归一为 error(各 provider 各自暂不可用),不抛错。
 function probeProvidersViaHost() {
   return new Promise((resolve) => {
     let port, settled = false, timer = null;
@@ -545,7 +573,7 @@ function probeProvidersViaHost() {
       if (m.type === "bridge_failed") return finish(ERR_BOTH);
     });
     port.onDisconnect.addListener(() => finish(ERR_BOTH));
-    try { port.postMessage({ type: "provider_probe", providers: [PROVIDER, CODEX_PROVIDER] }); }
+    try { port.postMessage({ type: "provider_probe", providers: [PROVIDER, CODEX_PROVIDER, COPILOT_PROVIDER] }); }
     catch (e) { finish(ERR_BOTH); }
   });
 }

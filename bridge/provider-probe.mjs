@@ -9,6 +9,7 @@ import {
   CODEX_APP_NOT_FOUND, CODEX_APP_UNTRUSTED, CODEX_INCOMPATIBLE, CODEX_AUTH_REQUIRED, CODEX_TIMED_OUT
 } from './codex-app-server-client.mjs';
 import { spawnGenerateSchema } from './codex-adapter.mjs';
+import { probeCopilot } from './copilot-runtime.mjs';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -83,13 +84,15 @@ async function probeCodex({ codexDiscover, generateSchema, codexHandshake, schem
   }
 }
 
-// 主入口:并发探测请求的 providers(默认两个都探),每 provider 独立失败。返回 { providers: [...] }。
-// opts 透传给各 probe 的注入点(测试用)。
-export async function probeProviders(providers = ['claude_code_cli', 'codex_app_server'], opts = {}) {
+// 主入口:并发探测请求的 providers(默认三个都探),每 provider 独立失败。返回 { providers: [...] }。
+// opts 透传给各 probe 的注入点(测试用);copilot 的注入点在 opts.copilot。
+export async function probeProviders(providers = ['claude_code_cli', 'codex_app_server', 'github_copilot'], opts = {}) {
   const wanted = new Set(Array.isArray(providers) ? providers : []);
   const tasks = [];
   if (wanted.has('claude_code_cli')) tasks.push(probeClaude(opts).catch((e) => ({ id: 'claude_code_cli', status: 'error', capabilities: [] })));
   if (wanted.has('codex_app_server')) tasks.push(probeCodex(opts).catch((e) => ({ id: 'codex_app_server', status: 'error', capabilities: [] })));
+  // v0.8.2:GitHub Copilot。独立失败域——copilot probe 炸了不影响 claude/codex(§9 隔离要求)。
+  if (wanted.has('github_copilot')) tasks.push(probeCopilot((opts && opts.copilot) || {}).catch((e) => ({ id: 'github_copilot', status: 'error', capabilities: [] })));
   const settled = await Promise.all(tasks);
   return { providers: settled };
 }

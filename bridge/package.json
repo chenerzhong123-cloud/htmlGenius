@@ -1,14 +1,17 @@
 {
   "name": "htmlgenius-local-bridge",
-  "version": "0.7.1",
-  "description": "HTML Genius Local Bridge — Chrome Native Messaging host that hands a Change Contract to the user's locally signed-in Claude Code CLI (acknowledgement-only handoff; never writes files). Host name is provider-neutral; the Codex adapter reuses this host later.",
+  "version": "0.8.2",
+  "description": "HTML Genius Local Bridge — Chrome Native Messaging host that hands a Change Contract to the user's locally signed-in AI agent (Claude Code CLI / Codex App Server / GitHub Copilot via @github/copilot-sdk). One provider-neutral host; writes only candidate/plan files, never the source HTML.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": { "node": "^20.19.0 || >=22.12.0" },
   "private": true,
   "bin": { "htmlgenius-bridge-host": "host.mjs" },
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test test/*.test.mjs",
     "install:macos": "node install-macos.mjs"
+  },
+  "dependencies": {
+    "@github/copilot-sdk": "1.0.7"
   },
   "license": "UNLICENSED"
 }
