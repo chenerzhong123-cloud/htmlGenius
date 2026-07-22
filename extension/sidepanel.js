@@ -493,6 +493,20 @@
   const contractFallbackText = document.getElementById("contract-fallback-text");
   const contractBridge = document.getElementById("contract-bridge");
   const contractBridgeStatus = document.getElementById("contract-bridge-status");
+  // v0.9 Connection Center
+  const connCenter = document.getElementById("conn-center");
+  const connHead = document.getElementById("conn-head");
+  const connTitle = document.getElementById("conn-title");
+  const connDesc = document.getElementById("conn-desc");
+  const connProviders = document.getElementById("conn-providers");
+  const connPrimary = document.getElementById("conn-primary");
+  const connSecondary = document.getElementById("conn-secondary");
+  const connCheck = document.getElementById("conn-check");
+  const connDiag = document.getElementById("conn-diag");
+  const connHint = document.getElementById("conn-hint");
+  const connRepairConfirm = document.getElementById("conn-repair-confirm");
+  const connRepairOk = document.getElementById("conn-repair-ok");
+  const connRepairCancel = document.getElementById("conn-repair-cancel");
   const contractGotoRange = document.getElementById("contract-goto-range");
   const contractPlanBtn = document.getElementById("contract-plan");
   // comment-scope 步骤元素
@@ -671,6 +685,10 @@
     setContractStep("compose");
     showContractSheet();
     queryProviders(true); // 打开即 probe(spec §3.D);30s 内不重探
+    // v0.9 Connection Center:连接状态并行检查(无副作用);重置折叠/health
+    _health = null; _connCollapsed = null;
+    queryHealth();
+    fetchBootstrap().then(() => renderConnCenter());
     getActiveTab().then((tab) => {
       if (!tab || !tab.id) return;
       loadCandidateEvidence(tab.id); // §6 持久证据
@@ -753,6 +771,8 @@
   }
   // close / Esc → A:丢弃本轮 selectedRootIds 与 form draft(spec §2/§4.1)
   function closeContract() {
+    _health = null; _connCollapsed = null;
+    if (connCenter) connCenter.hidden = true;
     _contractOpen = false;
     _contractStep = "closed";
     _selectedNodeIds = new Set(); // 清空临时 Set
@@ -900,6 +920,238 @@
     renderProviderMenu();
     refreshContractUI();
   }
+
+  // === v0.9 Connection Center(§5):health 驱动的连接状态与用户级初始化入口 ===
+  // health 只认 reason_code/枚举,不解析文本;任何状态都保留「复制 Prompt」降级路径(§0.2)。
+  let _health = null;            // bridge-query-health 结果(§3.4 脱敏契约)
+  let _connCollapsed = null;     // null=按状态自动;true/false=用户手动覆盖
+  let _bootstrap = null;         // bridge-get-bootstrap 缓存(纯本地模板)
+  let _connHintTimer = null;
+  let _connPermanentHint = "";
+
+  const CONN_REASON_TEXT = {
+    CLAUDE_NOT_INSTALLED: "conn.status.claudeNotInstalled",
+    CLAUDE_AUTH_REQUIRED: "conn.status.claudeAuth",
+    CODEX_APP_NOT_FOUND: "conn.status.codexNotFound",
+    CODEX_APP_UNTRUSTED: "conn.status.codexIncompatible",
+    CODEX_APP_INCOMPATIBLE: "conn.status.codexIncompatible",
+    CODEX_AUTH_REQUIRED: "conn.status.codexAuth",
+    COPILOT_RUNTIME_NOT_FOUND: "conn.status.copilotNotFound",
+    COPILOT_AUTH_REQUIRED: "conn.status.copilotAuth",
+    COPILOT_RUNTIME_INCOMPATIBLE: "conn.status.copilotIncompatible",
+    PROVIDER_PROBE_FAILED: "conn.status.probeFailed",
+    PROVIDER_POLICY_BLOCKED: "conn.status.probeFailed"
+  };
+
+  async function queryHealth() {
+    if (!_contractOpen) return;
+    if (connCenter) connCenter.hidden = false;
+    if (connTitle) connTitle.textContent = t("conn.titleChecking");
+    const resp = await chrome.runtime.sendMessage({ type: "bridge-query-health" }).catch(() => null);
+    _health = (resp && resp.health) ? resp.health : null;
+    renderConnCenter();
+  }
+  async function fetchBootstrap() {
+    if (_bootstrap) return _bootstrap;
+    const resp = await chrome.runtime.sendMessage({ type: "bridge-get-bootstrap" }).catch(() => null);
+    if (resp && resp.ok && resp.bootstrap) _bootstrap = resp.bootstrap;
+    return _bootstrap;
+  }
+  function connCopy(text, hintKey) {
+    if (!text) return;
+    const done = () => connSetHint(t(hintKey), "ok");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, done);
+    } else {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); done();
+      } catch (e) { /* 非关键 */ }
+    }
+  }
+  function connSetPermanent(text) {
+    _connPermanentHint = text || "";
+    if (connHint && (!connHint.dataset.temp || connHint.hidden)) {
+      connHint.textContent = _connPermanentHint;
+      connHint.className = "conn-hint" + (_connPermanentHint ? " warn" : "");
+      connHint.hidden = !_connPermanentHint;
+    }
+  }
+  function connSetHint(text, cls) {
+    if (!connHint) return;
+    connHint.dataset.temp = "1";
+    connHint.textContent = text || "";
+    connHint.className = "conn-hint" + (cls ? " " + cls : "");
+    connHint.hidden = !text;
+    if (_connHintTimer) clearTimeout(_connHintTimer);
+    _connHintTimer = setTimeout(() => {
+      delete connHint.dataset.temp;
+      connHint.textContent = _connPermanentHint;
+      connHint.className = "conn-hint" + (_connPermanentHint ? " warn" : "");
+      connHint.hidden = !_connPermanentHint;
+    }, 5000);
+  }
+  function connProviderStatusText(p) {
+    if (p && p.status === "ready") return t("conn.status.ready");
+    const key = p && CONN_REASON_TEXT[p.reason_code];
+    return key ? t(key) : t("conn.status.probeFailed");
+  }
+  function connProviderStatusClass(p) {
+    if (p && p.status === "ready") return "ready";
+    if (p && (p.status === "auth_required" || p.status === "not_installed")) return "warn";
+    return "err";
+  }
+  function renderConnProviders(list) {
+    if (!connProviders) return;
+    connProviders.innerHTML = "";
+    const arr = Array.isArray(list) ? list : [];
+    if (!arr.length) { connProviders.hidden = true; return; }
+    for (const p of arr) {
+      const li = document.createElement("li");
+      const b = document.createElement("b"); b.textContent = providerLabel(p.id);
+      const st = document.createElement("span");
+      st.className = "conn-pstatus " + connProviderStatusClass(p);
+      st.textContent = connProviderStatusText(p);
+      li.appendChild(b); li.appendChild(st);
+      if (p.status !== "ready") {
+        const a = document.createElement("a");
+        a.className = "conn-guide"; a.target = "_blank"; a.rel = "noopener";
+        a.href = "https://www.deuce.monster/htmlgenius/agents.html";
+        a.textContent = t("conn.agentsGuide");
+        li.appendChild(a);
+      }
+      connProviders.appendChild(li);
+    }
+    connProviders.hidden = false;
+  }
+  function setConnButton(btn, label, action) {
+    if (!btn) return;
+    if (!label) { btn.hidden = true; btn.dataset.action = ""; return; }
+    btn.hidden = false; btn.textContent = label; btn.dataset.action = action || "";
+  }
+  function connAutoCollapsed(h) {
+    return !!(h && h.bridge && h.bridge.status === "ready"
+      && Array.isArray(h.providers) && h.providers.some((p) => p && p.status === "ready"));
+  }
+  // §5.2 状态矩阵 → 标题/描述/主操作/次操作/折叠
+  function renderConnCenter() {
+    if (!connCenter) return;
+    if (!_contractOpen) { connCenter.hidden = true; return; }
+    connCenter.hidden = false;
+    if (connRepairConfirm) connRepairConfirm.hidden = true;
+    const h = _health;
+    if (!h) {
+      connCenter.className = "conn-center";
+      connTitle.textContent = t("conn.titleChecking");
+      if (connDesc) connDesc.hidden = true;
+      renderConnProviders([]);
+      setConnButton(connPrimary, null); setConnButton(connSecondary, null);
+      connSetPermanent("");
+      return;
+    }
+    const rc = h.reason_code || null;
+    const bs = (h.bridge && h.bridge.status) || "";
+    const providers = Array.isArray(h.providers) ? h.providers : [];
+    const readyCount = providers.filter((p) => p && p.status === "ready").length;
+    let title = "", desc = "", cls = "", primary = null, pAction = null, secondary = null, sAction = null, showProviders = false;
+
+    if (rc === "OS_UNSUPPORTED") {
+      title = t("conn.titleUnsupported"); desc = t("conn.descUnsupported"); cls = "warn";
+    } else if (rc === "BRIDGE_PROTOCOL_TOO_NEW") {
+      title = t("conn.titleExtNeedUpdate"); desc = t("conn.descExtNeedUpdate"); cls = "warn";
+    } else if (bs === "install_required" || rc === "BRIDGE_NOT_INSTALLED") {
+      title = t("conn.titleNotInstalled"); desc = t("conn.descNotInstalled"); cls = "warn";
+      primary = t("conn.agentSetup"); pAction = "setup";
+      secondary = t("conn.copyTerminal"); sAction = "terminal";
+    } else if (bs === "protocol_incompatible" || rc === "BRIDGE_PROTOCOL_TOO_OLD" || rc === "BRIDGE_FILES_CORRUPT") {
+      // host 过旧/损坏:经 Setup Prompt 重走 doctor→setup 修复(不自动覆盖,§6.6)
+      title = t("conn.titleNeedRepair"); desc = t("conn.descNeedRepair"); cls = "warn";
+      primary = t("conn.agentRepair"); pAction = "setup";
+      secondary = t("conn.copyTerminal"); sAction = "terminal";
+    } else if (bs === "repair_required") {
+      // host 可达且判定可自修(如注册文件缺失)→ 安全修复,二次确认明示修改项(§2.3)
+      title = t("conn.titleNeedRepair"); desc = t("conn.descNeedRepairHost"); cls = "warn";
+      primary = t("conn.repair"); pAction = "repair";
+      secondary = t("conn.copyTerminal"); sAction = "terminal";
+    } else if (bs === "ready" && readyCount > 0) {
+      title = t("conn.titleConnected").replace("{n}", String(readyCount));
+      cls = "ok"; showProviders = true;
+    } else if (bs === "ready") {
+      title = t("conn.titleBridgeReady"); desc = t("conn.descBridgeReady");
+      showProviders = true;
+      primary = t("conn.check"); pAction = "check";
+    } else {
+      title = t("conn.titleNeedRepair"); desc = t("conn.descNeedRepair"); cls = "warn";
+      primary = t("conn.agentRepair"); pAction = "setup";
+    }
+
+    const collapsed = (_connCollapsed === null) ? connAutoCollapsed(h) : _connCollapsed;
+    connCenter.className = "conn-center" + (cls ? " " + cls : "") + (collapsed ? " collapsed" : "");
+    if (connHead) connHead.setAttribute("aria-expanded", String(!collapsed));
+    connTitle.textContent = title;
+    if (connDesc) { connDesc.textContent = desc; connDesc.hidden = !desc; }
+    renderConnProviders(showProviders ? providers : []);
+    setConnButton(connPrimary, primary, pAction);
+    setConnButton(connSecondary, secondary, sAction);
+    // 常驻底注:未全部就绪时提示「复制 Prompt 仍可用」+ 开发态标注(§0.2/§5.3)
+    if (bs !== "ready" || readyCount === 0) {
+      connSetPermanent(t("conn.promptStillAvailable") + ((_bootstrap && _bootstrap.dev_only) ? " " + t("conn.devOnly") : ""));
+    } else {
+      connSetPermanent("");
+    }
+  }
+  async function connDo(action) {
+    if (!action) return;
+    if (action === "check") {
+      if (connCheck) connCheck.disabled = true;
+      if (connPrimary && connPrimary.dataset.action === "check") connPrimary.disabled = true;
+      await queryHealth();
+      if (connCheck) connCheck.disabled = false;
+      if (connPrimary) connPrimary.disabled = false;
+      return;
+    }
+    if (action === "setup" || action === "terminal") {
+      const b = await fetchBootstrap();
+      if (!b) return;
+      if (action === "setup") connCopy(b.setup_prompt, "conn.setupCopied");
+      else connCopy(b.terminal_command, "conn.terminalCopied");
+      renderConnCenter(); // dev_only 标注
+      return;
+    }
+    if (action === "repair") {
+      if (connRepairConfirm) connRepairConfirm.hidden = false;
+    }
+  }
+  if (connHead) connHead.addEventListener("click", () => {
+    const cur = (_connCollapsed === null) ? connAutoCollapsed(_health) : _connCollapsed;
+    _connCollapsed = !cur;
+    renderConnCenter();
+  });
+  if (connPrimary) connPrimary.addEventListener("click", () => connDo(connPrimary.dataset.action));
+  if (connSecondary) connSecondary.addEventListener("click", () => connDo(connSecondary.dataset.action));
+  if (connCheck) connCheck.addEventListener("click", () => connDo("check"));
+  if (connDiag) connDiag.addEventListener("click", () => {
+    // §5.4:只复制脱敏 health JSON;host 不存在时用兜底形态
+    const h = _health || { schema_version: 1, overall: "action_required", bridge: { status: "install_required" }, reason_code: "BRIDGE_NOT_INSTALLED", extension_version: (_bootstrap && _bootstrap.extension_version) || "" };
+    connCopy(JSON.stringify(h, null, 2), "conn.diagCopied");
+  });
+  if (connRepairCancel) connRepairCancel.addEventListener("click", () => { if (connRepairConfirm) connRepairConfirm.hidden = true; });
+  if (connRepairOk) connRepairOk.addEventListener("click", async () => {
+    connRepairOk.disabled = true;
+    const resp = await chrome.runtime.sendMessage({ type: "bridge-repair", confirmed_actions: ["repair_native_host"] }).catch(() => null);
+    connRepairOk.disabled = false;
+    if (connRepairConfirm) connRepairConfirm.hidden = true;
+    if (resp && resp.ok && resp.health) {
+      _health = resp.health;
+      renderConnCenter();
+      connSetHint(t("conn.repaired"), "ok");
+      queryProviders(true); // 修复后重探 provider
+    } else {
+      connSetHint(tBridgeFailed((resp && resp.code) || "HOST_REPAIR_ERROR", null), "warn");
+    }
+  });
+
   // === 状态栏:计时器 + 本次进度时间线 + 最近 3 次历史(可点击展开/收起)===
   // 协议层无 token 流;用计时器(每秒跳)+ 阶段事件时间线 + 历史给用户「在动、没卡死」的可感知反馈。
   let _runTimer = null;
@@ -1648,6 +1900,7 @@
       else if (_contractStep === "plan-review") renderPlanReview();  // 计划审阅:文案跟随语言
       else refreshContractUI();                                       // compose:scope/高级/bridge 跟随语言
       renderProviderMenu();                                           // provider 状态文案跟随语言
+      renderConnCenter();                                             // v0.9 Connection Center 文案跟随语言
     }
     refreshLoginState();
     // v0.8: 弹层条目(字号/标题/对齐/色板 title)跟随新语言 —— 清 built 缓存,下次打开时重建

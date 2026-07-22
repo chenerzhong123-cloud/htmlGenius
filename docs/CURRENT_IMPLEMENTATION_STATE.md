@@ -2,76 +2,70 @@
 
 > **用途：** 产品路线与实际仓库之间唯一的短事实层。施工 Agent 开始前必读、验证并完成后整体重写。
 > **更新规则：** 不追加"更新记录"；保留结构，替换过期事实；≤150 行。
-> **最后静态核对：** 2026-07-23（v0.8.2：GitHub Copilot 接入（官方 @github/copilot-sdk 1.0.7，local CLI + bundled 双 runtime）、plan_sha256 闭环修复、installer provider-neutral 化、npm test hang 修复；bridge 测试 206 通过）。
+> **最后静态核对：** 2026-07-23（v0.9：Agent-assisted Local Bridge 与 Connection Center；受控 CLI doctor/setup/repair/uninstall + health 契约 + host health/repair 协议 + 后台 bootstrap；v0.8.2 三 provider 无回归。bridge 测试 268 通过）。
 
 ## 1. 当前产品边界（不可擅自改变）
 
-- Chrome Side Panel MV3 插件，本地优先；无托管 AI、统一 Token 或中心化对话服务。
-- Agent 只用用户本机登录态（Codex=ChatGPT.app 登录 / Claude Code=`~/.claude` / Copilot=本机 Copilot 登录态）；只新建 task（session_mode=new），不列举/读取/恢复/注入用户已有会话；禁 RPC：thread/list、thread/read、thread/fork、turn/steer、thread/inject_items（Codex）；listSessions/resumeSession/getLastSessionId/getForegroundSessionId/getEvents/registerTools/customAgents/mcpServers/cloud session（Copilot SDK）。
+- Chrome Side Panel MV3 插件，本地优先；无托管 AI、统一 Token、云端转发或账号系统。
+- Agent 只用用户本机登录态；只新建 task（session_mode=new），不列举/读取/恢复/注入/续发用户已有会话；禁 RPC 清单沿用 v0.8.2（Codex thread/* 与 Copilot SDK listSessions/resumeSession/getEvents…）。
 - Change Contract 是唯一任务输入；prompt 不是安全边界。
-- source HTML 永不自动覆盖：Agent 只写 workspace 内 candidate，host 校验后以**版本号 sibling**（`原名V1.N.html`）发布到 source 同级；版本关系/hash/用户确认优先于便利。
-- **Copilot 安全边界（v0.8.2）**：SDK `empty` 模式 + 工具 allow-list（只读 view/grep/glob 类 + 写 view/write/edit 类）+ `onPreToolUse` 路径围栏（写只认 candidate.html / output/plan.json，拒 symlink 逃逸）；shell/bash/web_fetch/task/subagent/MCP/memory 全禁；**run 内绝不 runtime fallback**（Plan→Candidate 锁定 `provider_runtime`，不一致 → COPILOT_RUNTIME_CHANGED）；Copilot session ID 永不读取/持久化（bridge_sessions 不写 copilot）；CLI 绝对路径/token/stderr 不出 host。
-- 评论是讨论记录；是否进入任务由用户在选择步骤人工勾选；无 AI 分类、不持久化评论类型。
-- 不向 UI 暴露 runtime 路径 / TeamID / schema 路径 / stderr / 完整命令体 / 思维链正文 / session ID；hash 永不跨侧（host 原始字节 vs extension DOM 序列化）比较。
+- source HTML 永不自动覆盖：Agent 只写 workspace 内 candidate，host 校验后以**版本号 sibling**（`原名V1.N.html`）发布。
+- **v0.9 安装边界**：扩展不能自行安装 host；首次初始化 = 用户明确授权的一次动作（Agent-assisted Setup Prompt 或一条 Terminal 命令）。Setup Prompt 固定模板 + 严格变量（仅扩展 ID/版本），绝不拼页面/评论/契约/路径/凭证；Agent 只运行官方 CLI、不改项目文件。CLI 只写用户级 HTML Genius 目录 + Chrome host manifest；`--scope user` only，拒 root；单 origin 白名单；卸载只删受控标记文件。
+- **v0.9 协议边界**：health/repair 输出绝不含路径/stderr/token/cookie/session/thread；repair 仅 allow-list（`repair_native_host`）且需用户二次确认；不静默升级（host 过旧 → 提示修复，用户执行后才替换）。
+- 未安装/未连接时始终保留「复制 Prompt」降级路径。
+- 不向 UI 暴露 runtime 路径 / TeamID / schema 路径 / stderr / 完整命令体 / 思维链正文 / session ID；hash 永不跨侧比较。
 
 ## 2. 已确认的实现基线
 
 | 能力 | 状态 | 实际入口 / 证据 |
 |---|---|---|
-| Change Contract | 已存在 | `change-contract.js`（buildTask/getRoots/renderPrompt）；regenerate 已放开 brief（评论即输入）。 |
-| artifact 协议 | 已存在 | `artifact-version.js`；`content-script.js` `handleArtifactUpdateReady`(new_artifact→linkArtifactUri+重锚)；basename 比 source_uri（容 realpath）。 |
-| Claude Code handoff | 已存在 | `bridge/claude-cli.mjs`（candidate:Read,Glob,Grep,Write,禁 Bash/Edit/网/MCP，shell:false，safe-mode，max-turns 24）；`host-runner.mjs` executeCandidateRun。 |
-| Codex App Server adapter | 已存在 | `bridge/codex-app-server-client.mjs`（initialize→thread/start→turn/start→turn/completed；仅 com.openai.codex bundle，不搜 PATH）；`bridge/codex-adapter.mjs`。 |
-| **GitHub Copilot adapter** | **已就绪（mock 验证）** | `bridge/copilot-runtime.mjs`（discoverLocalCopilotCli 拒 symlink / attemptRuntimeStart / selectCopilotRuntime / probeCopilot / createPreToolPolicy / runCopilotSession）+ `bridge/copilot-adapter.mjs`（executeCopilotCandidateRun/PlanRun，复用 workspace/task-bundle/validator/manifest）。单一 provider `github_copilot`，Host-only runtime：`local_cli`（SDK forStdio 连本机 CLI）优先 → `bundled_sdk_cli`（SDK 自带 @github/copilot）。SDK 精确锁定 `@github/copilot-sdk: 1.0.7`（lockfile 已入库）。**真实 Copilot smoke 未跑**（见 §4/§5）。 |
-| plan-first bridge | **后端就绪，前端隐去** | `plan-workspace.mjs`+`host-runner/codex-adapter/copilot-adapter` 三家 executePlanRun + `background.js` §5.4 校验/approved_plan 注入；**v0.8.2 已修 plan_sha256 广播缺失**（bridge-plan-ready 现携带 plan_sha256，确认闭环通过）；DB v5 `bridge_plans`（provider_runtime 为可选新字段，无需迁移）；`#contract-plan` 按钮仍 hidden。 |
-| candidate 闭环 + 版本号 | 已存在 | `candidate-workspace.mjs` nextCandidateVersionLabel（`.htmlgenius-bridge/candidate-versions.json`，标签 1.N）→ `原名V1.N.html`；candidate-ready 带 `version_label`。 |
-| provider probe（三家） | 已存在 | `provider-probe.mjs` 默认 `['claude_code_cli','codex_app_server','github_copilot']`，独立失败域；Copilot probe 只 start→getAuthStatus/getStatus→stop，不建 session；`plan-validate.js` sanitize 保留 runtime/runtime_label（≤64）、丢弃路径类键。 |
-| Mint 主题 / 终止 / 通知 / per-tab | 已存在 | sidepanel mint token；bridge-cancel（USER_CANCELLED）；notifyCandidateReady+playDing（offscreen 合成"叮"）；focusOrCreateCandidateTab 去重；_tabStates 快照/恢复 + syncRunStateFromBackground。 |
+| Change Contract / artifact 协议 / 评论体系 | 已存在 | `change-contract.js` / `artifact-version.js` / content-script（v0.8.2 无改动）。 |
+| 三 provider 候选+计划闭环 | 已存在 | Claude（host-runner）/ Codex（codex-adapter + app-server client）/ Copilot（copilot-runtime + copilot-adapter，SDK 1.0.7 精确锁，local_cli→bundled 双 runtime，pre-tool 围栏，Plan runtime 锁定）。 |
+| **受控 CLI `htmlgenius-bridge`** | **已就绪（未 publish）** | `bridge/bin/htmlgenius-bridge.mjs`：doctor/setup/repair/uninstall/version；`--json` stdout 唯一 JSON；退出码 0/1/2/3/64；受管布局 `~/.htmlgenius/bridge/versions/<v>/`（0700，launcher 不指向 npx 缓存）；幂等 setup；V0.8.2 迁移（同 ID 替换/异 ID 拒）；卸载只删受控文件。`bin` 已在 package.json 暴露，**npm 未发布**（发行是后续外部授权事项）。 |
+| **共享安装核心** | **已就绪** | `bridge/bridge-install.mjs` 为安装规则唯一实现源；`install-macos.mjs` 降级为开发兼容薄包装（就地安装，launcher 指向仓库 host.mjs）。 |
+| **health 契约** | **已就绪** | `bridge/bridge-health.mjs`：schema_version=1；overall/bridge.status/browser.status/providers[]/actions + reason_code 机器码 + remediation{kind,label_key}；sanitizeHealth 纵深脱敏。 |
+| **host health/repair 协议** | **已就绪** | `host.mjs`：bridge_health → bridge_health_result（host 在运行即 bridge ready，origin 由 Chrome 路由保证）；bridge_repair allow-list（confirmed_actions 必含 repair_native_host）只重写自身 launcher+manifest；stdout 纪律不变。旧 host 不识 bridge_health → unknown_message。 |
+| **后台协议（v0.9）** | **已就绪** | `background.js`：bridge-query-health（connect 失败/断开 → BRIDGE_NOT_INSTALLED；旧 host → BRIDGE_PROTOCOL_TOO_OLD；host 过新 → BRIDGE_PROTOCOL_TOO_NEW）；bridge-repair（allow-list 透传）；bridge-get-bootstrap（纯本地模板 zh/en/ja + `BOOTSTRAP_DISTRIBUTION="development"` 开发态标注）。版本单一来源：扩展版本取 getManifest().version（0.9.0），TARGET_BRIDGE_VERSION=0.9.0，BRIDGE_PROTOCOL_VERSION=1；0.8.1 漂移已除。 |
+| **Connection Center（sidepanel）** | **已就绪** | `sidepanel.html/.css/.js`：契约发送区上方可折叠卡片；§5.2 状态矩阵（未安装/需修复/OS 不支持/扩展需更新/组件就绪无 Agent/已连接 N 个）；让 Agent 帮我连接（复制 Setup Prompt）/复制 Terminal 命令/检查连接/复制诊断/安全修复（二次确认）；任何状态保留复制 Prompt；mint token 浅/深色自适应；全量文案 i18n 三语（key 完整性自动测试）。 |
+| plan-first bridge | 后端就绪，前端隐去 | 三家 executePlanRun + §5.4 校验（plan_sha256 闭环 v0.8.2 已修）；`#contract-plan` 仍 hidden。 |
 
 ## 3. 关键代码地图
 
 ```text
-extension/sidepanel.js   契约状态机 + dispatchBridgeRun + syncRunStateFromBackground + _tabStates
-                         provider 菜单三项(PROVIDER_LABELS/providerRuntimeNote,ready 才可选) + Copilot 失败码文案
-extension/background.js  bridge-start(HANDOFF_START_TYPES 明确映射,copilot session 只发{mode}) + completeCandidate
-                         (copilot 不存 session) + completePlan(落 provider_runtime;广播带 plan_sha256)
-                         + candidate 携 plan → required_provider_runtime + probe 三 provider
-extension/plan-validate.js  PROVIDER_RE 三家 + PROVIDER_RUNTIME_RE + plan-ready/确认 runtime 一致性 + sanitize
-extension/content-script hg-modal 刷新弹窗(mint) + handleArtifactUpdateReady
-extension/offscreen.*    Web Audio 合成"叮"；manifest permissions 含 notifications+offscreen(minimum_chrome_version 116)
-bridge/copilot-runtime.mjs  CLI 发现(拒 symlink,version 10s 超时 ≤64) + SDK 工厂(empty 模式,cwd/baseDirectory 受控)
-                            + probe/select(runtime 优先级/锁定) + pre-tool 策略(allow-list+realpath 围栏) + session 执行
-bridge/copilot-adapter.mjs  candidate(8min)/plan(3min) 编排;denial>0 且无输出 → COPILOT_PERMISSION_DENIED
-bridge/codex-* / host-runner / candidate-workspace / plan-workspace / task-bundle / provider-probe(同 v0.8.1)
-bridge/install-macos.mjs    provider-neutral:不再强制 Claude CLI;Node ^20.19.0||>=22.12.0(SDK engines)
-bridge/test/             206 pass（新增:copilot-runtime 18 + copilot-adapter 16 + fake-copilot-sdk 注入;
-                         npm test 改为 `node --test test/*.test.mjs` —— 旧 `test/` 目录参数会把 fake 服务器当测试文件跑致 hang）
+bridge/bridge-install.mjs   安装规则唯一源:校验/manifest/launcher(受控标记)/原子写/受管布局/迁移/卸载
+bridge/bin/htmlgenius-bridge.mjs  CLI 五子命令(JSON 唯一输出/稳定退出码/env 测试注入)
+bridge/bridge-health.mjs    health 契约纯逻辑:reason_code 映射/remediation/sanitize/兜底形态
+bridge/host.mjs             + bridge_health / bridge_repair(allow-list)分支
+bridge/copilot-runtime.mjs / copilot-adapter.mjs   Copilot SDK 运行时与编排(v0.8.2)
+bridge/install-macos.mjs    开发兼容薄包装(调用 bridge-install)
+extension/background.js     + queryBridgeHealth/nativeRoundTrip/requestBridgeRepair/makeBootstrap(固定模板)
+extension/sidepanel.*       + Connection Center(状态矩阵/复制动作/修复确认)
+extension/i18n.js           + conn.* 三语(39 key × 3)
+bridge/test/  268 pass（新增:bridge-install 18 / cli 13 / bridge-health 6 / host-health 6 /
+              background-health-wiring 9 / sidepanel-conn-wiring 7 / i18n-keys 3）
 ```
 
 ## 4. 可运行检查（结果 2026-07-23）
 
 ```text
-cd bridge && npm test                     # 206 pass / 0 fail / ~30s
-extension/*.js node --check               # 全绿
-node -e "JSON.parse(manifest)"            # manifest 合法（version 0.8.2）
+cd bridge && npm test                # 268 pass / 0 fail
+node --check extension/{background,sidepanel,plan-validate,i18n}.js   # 全绿
+CLI 冒烟:node bridge/bin/htmlgenius-bridge.mjs version --json        # {"name":"htmlgenius-bridge","version":"0.9.0","protocol_version":1,...}
 ```
 
-`copilot-adapter.test` / `copilot-runtime.test`：candidate-ready 带 `provider=='github_copilot'`+`provider_runtime`+`version_label=='1.1'`；plan-ready 带 `plan_sha256`+`provider_runtime`；plan run 不产 candidate/sibling；越权工具（bash/task/web_fetch/越界写）被 pre-tool deny 且归因 PERMISSION_DENIED；runtime 不一致 → RUNTIME_CHANGED；probe 输出不含 CLI 路径/session/login。全部用 `test/fake-copilot-sdk.mjs` 注入，**不触真实账号/网络**。
-
-**真实 Copilot smoke 状态：未验证。** 本机无授权 Copilot 权益时不得声称已验证；mock 通过 ≠ 真实可用（SDK↔本机 CLI 版本兼容、auth 流程、真实工具名均需真机确认）。
+CLI/host 端到端测试用 env 注入 tmp home/hosts-dir（内部测试接口，非公开接口）；host-health 测试以真实 native 帧往返。
 
 ## 5. 当前工作树与已知限制
 
-- **超时**：Copilot plan 3min / candidate 8min（sendAndWait 超时不中止 in-flight → 先 abort 再 disconnect/stop）；Codex/Claude 各 15min，Claude plan 3min。
-- **Copilot 工具名是按 SDK fixture + copilot-cli changelog 核实的 allow-list**（view/edit/write/grep/glob…）；若未来 runtime 改名，session 会「无工具可用」而明确失败（COPILOT_RUN_FAILED），不会静默越权——真机 smoke 时需确认实际工具名。
-- source 安全边界 = 不暴露路径 + 禁 shell + host 前后 hash + 失败拒绝注册；manifest 记失败 status（本地审计，不泄 UI）。Copilot COPILOT_HOME 放在 run workspace 围栏外（Agent 工具读不到自己的会话态）。
-- run/plan record 存 metadata（candidate_uri/sha256/version_label/manifest_path/provider_runtime），无 prompt/comment/HTML/stdout/session ID；无 promote/overwrite-source/auto-accept。
-- **plan 按钮前端仍隐去**：后端三家 plan-first 全链路就绪（plan_sha256 闭环已修），UI 待细化后放出。
-- **landing/ 已 gitignore**：agents.html 已加 Copilot 段落（本地改好，**待用户重新部署** www.deuce.monster/htmlgenius/）。
-- **CWS**：v0.8.1 已提交；v0.8.2 无新增权限（Copilot 复用 nativeMessaging），再次提交时商品详情补 Copilot 描述即可。
+- **npm 包未发布**：Connection Center 处于开发态（`BOOTSTRAP_DISTRIBUTION="development"`，显著标注「仅开发环境」，给仓库内命令）；正式渠道发布前不得宣称 npx 可用。发布流程（`@htmlgenius/bridge` + provenance）是后续外部授权事项；发布后需把 BOOTSTRAP_DISTRIBUTION 改 production 并核对 TARGET_BRIDGE_VERSION。
+- **平台**：仅 macOS；Windows/Linux 在 UI 准确标为不支持（OS_UNSUPPORTED），不给失效命令。
+- **真实 macOS 端到端**（Setup Prompt 粘给真实 Agent 跑 doctor/setup）尚未人工验收；真实 Copilot smoke 需有权益设备。mock 通过 ≠ 真实可用。
+- plan 按钮前端仍隐去；diff/review/promote 在路线图未实现。
+- landing/ 已 gitignore（独立部署）；agents.html 已含 Copilot 段，待重部署。
 
 ## 6. 下一个获授权施工包
 
-- **真实 Copilot smoke**：有 Copilot 权益的 mac 上验证 §10 手动验收 7 项（local_cli/bundled 切换、未登录态、plan-only、runtime 一致性失败、UI 无回归）。
-- **plan UI 细化**：把隐去的「先给我看修改计划」按新交互放出（三家后端已就绪）。
-- **diff/review/promote（M5）**：source/candidate diff、越界变化告警、显式 promote。
+- **v0.9.1 provider 认证 harness**（spec 已就位：docs/2026-07-23-v0.9.1-provider-certification-harness-spec.md）。
+- 真实端到端人工验收（MANUAL_VERIFICATION.md v0.9 清单）+ Copilot 真机 smoke。
+- npm 发布授权后切 production bootstrap。
+- plan UI 放出；diff/review/promote（M5）。
