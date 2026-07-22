@@ -300,6 +300,24 @@ async function cancelRun(tab_id, runId) {
 
 // v0.8.1 Chrome 系统通知:候选生成成功后提醒用户回来看新 candidate.html;点击通知打开候选页签。
 const _notifyCandidateUri = new Map(); // notificationId → candidate_uri
+// v0.8.1 复用已打开的同 URL 候选页签(避免「自动开 + 点通知开」开出两个一样的 tab):
+// 记住打开过的 candidate 页签 id,若仍存活则 focus,否则新建。
+const _candidateTabByUrl = new Map(); // candidate_uri → tabId
+async function focusOrCreateCandidateTab(url) {
+  if (!url) return;
+  const existing = _candidateTabByUrl.get(url);
+  if (existing != null) {
+    const t = await chrome.tabs.get(existing).catch(() => null);
+    if (t) {
+      await chrome.tabs.update(t.id, { active: true }).catch(() => {});
+      if (t.windowId != null) await chrome.windows.update(t.windowId, { focused: true }).catch(() => {});
+      return;
+    }
+    _candidateTabByUrl.delete(url);
+  }
+  const tab = await chrome.tabs.create({ url }).catch(() => null);
+  if (tab && tab.id != null) _candidateTabByUrl.set(url, tab.id);
+}
 function notifyCandidateReady(versionLabel, candidateUri) {
   if (!chrome.notifications) return;
   const id = "hg-candidate-" + Date.now() + "-" + Math.floor(Math.random() * 1e6);
@@ -315,9 +333,28 @@ function notifyCandidateReady(versionLabel, candidateUri) {
 if (chrome.notifications && chrome.notifications.onClicked) {
   chrome.notifications.onClicked.addListener((nid) => {
     const uri = _notifyCandidateUri.get(nid);
-    if (uri) { chrome.tabs.create({ url: uri }).catch(() => {}); _notifyCandidateUri.delete(nid); }
+    if (uri) { focusOrCreateCandidateTab(uri); _notifyCandidateUri.delete(nid); }
     try { chrome.notifications.clear(nid); } catch (e) {}
   });
+}
+
+// v0.8.1 提示音:候选生成成功时播放一声"叮"。MV3 service worker 无 Web Audio → 用 offscreen 文档承载。
+async function ensureOffscreen() {
+  if (!chrome.offscreen) return false;
+  try {
+    const has = await chrome.offscreen.hasDocument();
+    if (has) return true;
+    await chrome.offscreen.createDocument({
+      url: "offscreen.html",
+      reasons: ["AUDIO_PLAYBACK"],
+      justification: "候选生成成功时播放提示音(MV3 service worker 无 Web Audio API)"
+    });
+    return true;
+  } catch (e) { return false; }
+}
+async function playDing() {
+  if (!(await ensureOffscreen())) return;
+  chrome.runtime.sendMessage({ type: "play-ding", target: "offscreen" }).catch(() => {});
 }
 
 async function completeRun(tab_id, runId, completion, taskSha, logicalId, artifactUrl) {
@@ -413,10 +450,11 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
     if (isCodex) sessionRec.thread_id = sessionId; else sessionRec.session_id = sessionId;
     await Storage.saveBridgeSession(sessionRec).catch(() => {});
   }
-  // 自动新开页签打开候选(原 source 页签保持不动);失败由 sidepanel「打开候选版本」按钮兜底
-  chrome.tabs.create({ url: completion.candidate_uri }).catch(() => {});
-  // v0.8.1 系统通知:提醒用户回来看新候选
+  // 自动打开候选页签(原 source 页签保持不动);同 URL 复用已开页签,避免重复开多个;失败由 sidepanel「打开候选版本」按钮兜底
+  focusOrCreateCandidateTab(completion.candidate_uri);
+  // v0.8.1 系统通知 + 提示音:提醒用户回来看新候选
   try { notifyCandidateReady(versionLabel, completion.candidate_uri); } catch (e) { /* 非关键 */ }
+  try { playDing(); } catch (e) { /* 非关键 */ }
 }
 
 // —— v0.8.1 §5.3:plan-ready → 逐字段校验(host 回送 vs run 记录;绝不跨侧比 hash)→ 建 bridge_plans(draft)→ 广播 bridge-plan-ready ——

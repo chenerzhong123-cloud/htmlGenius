@@ -4,7 +4,7 @@
   "name": "htmlGenius",
   "version": "0.7.2",
   "description": "HTML 划词批注 + 实时编辑 + 一键回灌",
-  "permissions": ["activeTab", "sidePanel", "storage", "identity", "nativeMessaging", "notifications"],
+  "permissions": ["activeTab", "sidePanel", "storage", "identity", "nativeMessaging", "notifications", "offscreen"],
   "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "https://*/*"],
   "side_panel": { "default_path": "sidepanel.html" },
   "background": { "service_worker": "background.js" },

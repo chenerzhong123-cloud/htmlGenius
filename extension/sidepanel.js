@@ -1155,6 +1155,7 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && _contractOpen) { e.preventDefault(); closeContract(); } });
 
   // === v0.8.1 comment-scope / plan-review 事件 ===
+  document.getElementById("contract-compose-back").addEventListener("click", closeContract); // compose --返回页面评论--> 关闭契约,回评论视图
   document.getElementById("contract-range-back").addEventListener("click", () => setContractStep("compose")); // comment-scope --返回--> compose(保留草稿)
   document.getElementById("contract-range-confirm").addEventListener("click", () => setContractStep("compose")); // 确认选择 → 回 compose
   // comment-scope 卡片勾选:事件委托;子树随父勾选(spec §3.C/§4.4)

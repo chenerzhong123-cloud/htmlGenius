@@ -85,7 +85,7 @@
     ok(vOk.ok, "T3 restructure brief≥10 → ok");
 
     var regShort = CC.validateDraft({ mode: "regenerate", rootIds: ["a1"], brief: "重写", preserveText: "", artifact: artifact }, anns);
-    ok(!regShort.ok && regShort.errors.brief === "too_short", "T3 regenerate brief<10 → brief error");
+    ok(regShort.ok, "T3 regenerate 不强制 brief(v0.8.1:评论即输入)→ 即使 brief<10 也 ok");
 
     var regOk = CC.validateDraft({ mode: "regenerate", rootIds: ["a1"], brief: "用更专业的语气重写整份报告,面向技术读者", preserveText: "", artifact: artifact }, anns);
     ok(regOk.ok, "T3 regenerate brief≥10 → ok");

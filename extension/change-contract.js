@@ -60,7 +60,7 @@
       onAmbiguous: "ask_or_stop",
       verification: "列出采用的 brief、保留项、假设和待复核项；报告全文结构变化。",
       forced: "允许重写全文，但必须保留「必须保留」列出的内容，并列出未能确认的假设。",
-      briefRequired: true,
+      briefRequired: false,
       promptName: "重新生成",
       promptDesc: "基于新的完整说明重写整份页面/报告；允许改全文",
       scopeText: "整份文档"
