@@ -131,7 +131,7 @@
       "candidate.backToSource": "返回原文件",
       "candidate.evidence": "{provider} · {time} · 源 {source} → 候选 {candidate} · 源哈希已校验 · 候选 {hashPrefix}",
       // v0.7.2 评论 → 编辑任务选择流(状态 B/C)
-      "taskSelect.start": "整理评论，创建编辑任务",
+      "taskSelect.start": "基于评论修改文档",
       "taskSelect.hint": "先挑选这次要处理的评论；未选评论不会发送给 Agent。",
       "taskSelect.title": "挑选这次要处理的评论",
       "taskSelect.sub": "不是每条评论都要交给 Agent。先不确定的讨论可以不选。",
@@ -432,7 +432,7 @@
       "candidate.backToSource": "Back to original file",
       "candidate.evidence": "{provider} · {time} · source {source} → candidate {candidate} · source hash verified · candidate {hashPrefix}",
       // v0.7.2 comment → edit-task selection flow (steps B/C)
-      "taskSelect.start": "Organize comments into an edit task",
+      "taskSelect.start": "Revise document from comments",
       "taskSelect.hint": "Pick which comments to process first; unselected comments are never sent to the Agent.",
       "taskSelect.title": "Pick the comments to process this time",
       "taskSelect.sub": "Not every comment has to go to the Agent. Leave out anything still uncertain.",
@@ -731,7 +731,7 @@
       "candidate.backToSource": "元のファイルに戻る",
       "candidate.evidence": "{provider} · {time} · ソース {source} → 候補 {candidate} · ソースハッシュ検証済 · 候補 {hashPrefix}",
       // v0.7.2 コメント → 編集タスク選択フロー(ステップ B/C)
-      "taskSelect.start": "コメントを整理して編集タスクを作成",
+      "taskSelect.start": "コメントをもとにドキュメントを修正",
       "taskSelect.hint": "まず今回処理するコメントを選択。未選択のコメントは Agent に送信されません。",
       "taskSelect.title": "今回処理するコメントを選択",
       "taskSelect.sub": "すべてのコメントを Agent に渡す必要はありません。未確定の議論は選ばなくてOK。",
