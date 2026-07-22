@@ -2,7 +2,7 @@
 
 > 在任意网页上划词评论，挑选本次要处理的意见，一键打包成带精确定位的修改契约——复制给 AI，或直接交给本机的 Codex / Claude Code 产出一份可回退的候选版本。让 AI 生成的 HTML 越改越准。
 
-🌐 **官网 / Live site**：<https://www.deuce.monster/htmlgenius/>（中 / English 双语，源码见 [`landing/`](landing/)）
+🌐 **官网 / Live site**：<https://www.deuce.monster/htmlgenius/>（中 / English 双语）
 
 你用 AI 生成了一份 HTML，渲染出来总觉得「这里字号大了」「这段措辞要改」「这个按钮该靠右」。光在对话框里描述，AI 总改不到位。htmlGenius 让你**直接在渲染好的网页上**圈出每一处、写下意见；需要动手时再**挑选**这次要处理的评论，整理成一段带精确定位的修改契约，复制粘贴给 AI，或一键交给本机 Agent。
 

@@ -16,3 +16,6 @@ docs/client_secret_*.json
 samples/.htmlgenius-bridge/
 samples/*candidate*.html
 samples/*--htmlgenius-*.html
+
+# 官网 landing 源码(独立维护/部署,不入本仓库)
+landing/
