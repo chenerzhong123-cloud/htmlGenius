@@ -953,6 +953,7 @@
   }
   function bridgeFailClass(code) {
     if (code === "USER_CANCELLED") return "warn";
+    if (code === "CODEX_TIMED_OUT") return "warn";
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF"
       || code === "SOURCE_MUTATED_DURING_CANDIDATE" || code === "SOURCE_MUTATED_DURING_PLAN"
       || code === "BRIDGE_NOT_INSTALLED" || code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED"
@@ -961,6 +962,7 @@
   }
   function tBridgeFailed(code, host) {
     if (code === "USER_CANCELLED") return t("bridge.cancelled");
+    if (code === "CODEX_TIMED_OUT") return t("bridge.codexTimeout");
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF") return t("bridge.sourceChanged");
     if (code === "SOURCE_MUTATED_DURING_CANDIDATE") return t("bridge.sourceMutated");
     if (code === "SOURCE_MUTATED_DURING_PLAN") return t("bridge.planSourceMutated");

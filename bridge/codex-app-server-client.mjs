@@ -23,7 +23,10 @@ const CODEX_BUNDLE_ID = 'com.openai.codex';
 const REQUIRED_TEAM_ID = '2DC432GLL2';
 const CLIENT_INFO = { name: 'htmlgenius-bridge', version: '0.8.0' };
 const HANDSHAKE_TIMEOUT_MS = 20_000;
-export const DEFAULT_TURN_TIMEOUT_MS = 180_000; // spec §6.3.6(可配置)
+// spec §6.3.6(可配置)。v0.8.1:180s→600s。整页重生成(regenerate/大 local_optimize)实测常 >3 分钟,
+// 180s 会把仍在跑的 turn 误判超时(candidate.html 还没写就被掐)。10 分钟给复杂页留余量;
+// 真挂起时用户可点 sidepanel「终止任务」中止,不必干等。
+export const DEFAULT_TURN_TIMEOUT_MS = 600_000;
 const REQUIRED_METHODS = ['initialize', 'thread/start', 'thread/resume', 'turn/start'];
 
 function fail(code, message, extra) {
@@ -279,10 +282,12 @@ export class CodexAppServerClient {
     let terminal = null;
     const done = new Promise((resolve, reject) => {
       let settled = false;
+      let receivedAny = false; // 诊断:turn 期间是否收到过任意 notification(区分「慢」vs「挂起」)
       const timer = setTimeout(() => {
-        if (!settled) { settled = true; reject(Object.assign(new Error('turn 超过 ' + turnTimeout + 'ms'), { code: CODEX_TIMED_OUT })); }
+        if (!settled) { settled = true; reject(Object.assign(new Error('turn 超过 ' + turnTimeout + 'ms' + (receivedAny ? '(曾有输出,疑似慢)' : '(无任何输出,疑似挂起)')), { code: CODEX_TIMED_OUT })); }
       }, turnTimeout);
       this._onNotification = (msg) => {
+        receivedAny = true;
         if (typeof onStream === 'function') { try { const s = codexNotificationToStream(msg); if (s) onStream(s); } catch (e) { /* 非关键 */ } }
         if (settled) return;
         const m = msg.method || msg.notification;
