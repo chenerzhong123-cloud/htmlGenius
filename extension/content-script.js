@@ -141,29 +141,30 @@
   style.textContent = `
     :root{
       --hg-bg:#171b2a; --hg-fg:#f6f7fb; --hg-line:rgba(255,255,255,.12); --hg-hover:rgba(255,255,255,.07);
-      --hg-brand:#7c8cff; --hg-brand-hover:#91a0ff; --hg-brand-soft:rgba(124,140,255,.16);
-      --hg-cta:linear-gradient(120deg,#8492ff,#a88bff); --hg-cta-hover:linear-gradient(120deg,#91a0ff,#b89cff);
-      --hg-cta-shadow:0 8px 24px rgba(104,121,250,.25); --hg-shadow:0 14px 34px rgba(0,0,0,.34);
-      --hl:rgba(124,140,255,.22); --hl-flash:rgba(124,140,255,.42);
-      --modal-bg:#10131f; --modal-fg:#f6f7fb; --modal-muted:#8d95aa; --mask:rgba(8,10,18,.62);
+      /* v0.8.1:整页 UI 对齐 sidepanel Mint 主色 */
+      --hg-brand:#88e6d1; --hg-brand-hover:#9fefda; --hg-brand-soft:rgba(136,230,209,.16);
+      --hg-cta:#88e6d1; --hg-cta-hover:#9fefda; --on-cta:#10211f;
+      --hg-cta-shadow:0 8px 24px rgba(136,230,209,.28); --hg-shadow:0 14px 34px rgba(0,0,0,.34);
+      --hl:rgba(136,230,209,.22); --hl-flash:rgba(136,230,209,.42);
+      --modal-bg:#10131f; --modal-fg:#f6f7fb; --modal-muted:#8d95aa; --mask:rgba(6,8,14,.82);
     }
     :root[data-hg-theme="light"]{
       --hg-bg:#ffffff; --hg-fg:#181d26; --hg-line:#dddddd; --hg-hover:rgba(24,29,38,.06);
       --hg-brand:#181d26; --hg-brand-hover:#0d1218; --hg-brand-soft:rgba(24,29,38,.07);
-      --hg-cta:#181d26; --hg-cta-hover:#0d1218; --hg-cta-shadow:0 1px 2px rgba(24,29,38,.18); --hg-shadow:0 8px 24px rgba(24,29,38,.14);
+      --hg-cta:#181d26; --hg-cta-hover:#0d1218; --on-cta:#ffffff; --hg-cta-shadow:0 1px 2px rgba(24,29,38,.18); --hg-shadow:0 8px 24px rgba(24,29,38,.14);
       --hl:rgba(24,29,38,.10); --hl-flash:rgba(24,29,38,.18);
-      --modal-bg:#ffffff; --modal-fg:#181d26; --modal-muted:#41454d; --mask:rgba(24,29,38,.4);
+      --modal-bg:#ffffff; --modal-fg:#181d26; --modal-muted:#41454d; --mask:rgba(24,29,38,.55);
     }
     .hg-hl{ position:fixed; background:var(--hl); pointer-events:none; z-index:2147483646; border-radius:2px; }
     .hg-hl.flash{ background:var(--hl-flash); }
     .hg-inspect,.hg-select{ position:fixed; pointer-events:none; z-index:2147483645; border-radius:3px; }
-    .hg-inspect{ background:rgba(124,140,255,.14); border:1px solid rgba(124,140,255,.7); }
-    .hg-select{ background:rgba(121,233,247,.12); border:2px solid var(--hg-brand); }
+    .hg-inspect{ background:rgba(136,230,209,.14); border:1px solid rgba(136,230,209,.7); }
+    .hg-select{ background:rgba(136,230,209,.12); border:2px solid var(--hg-brand); }
     .hg-select.flash{ box-shadow:0 0 0 3px var(--hg-brand); } /* #8: 进入文字编辑时闪烁一圈,提示启动成功 */
     .hg-tip{ position:fixed; pointer-events:none; z-index:2147483647; transform:translateY(-100%); margin-top:-4px;
       background:var(--hg-bg); color:var(--hg-fg); border:1px solid var(--hg-line); border-radius:6px;
       padding:3px 7px; font:11px ui-monospace,SFMono-Regular,Menlo,monospace; box-shadow:var(--hg-shadow); white-space:nowrap; }
-    .hg-drop{ position:fixed; pointer-events:none; z-index:2147483645; height:2px; background:var(--hg-brand); box-shadow:0 0 6px rgba(124,140,255,.8); border-radius:1px; }
+    .hg-drop{ position:fixed; pointer-events:none; z-index:2147483645; height:2px; background:var(--hg-brand); box-shadow:0 0 6px rgba(136,230,209,.8); border-radius:1px; }
     #hg-toolbar{ position:fixed; z-index:2147483647; display:none; background:var(--hg-bg); color:var(--hg-fg);
       border:1px solid var(--hg-line); border-radius:9px; padding:4px; gap:1px; align-items:center;
       box-shadow:var(--hg-shadow); font-size:13px;
@@ -172,7 +173,7 @@
     #hg-toolbar button{ background:transparent; color:var(--hg-fg); border:0; cursor:pointer; padding:4px 7px; border-radius:6px; font-size:13px; line-height:1; }
     #hg-toolbar button:hover{ background:var(--hg-hover); }
     #hg-toolbar button.active{ background:var(--hg-brand-soft); color:var(--hg-brand-hover); }
-    #hg-toolbar button[data-act="comment"]{ background:var(--hg-brand); color:#fff; }
+    #hg-toolbar button[data-act="comment"]{ background:var(--hg-brand); color:var(--on-cta); }
     #hg-toolbar button[data-act="comment"]:hover{ background:var(--hg-brand-hover); }
     #hg-toolbar:not(.editing) .hg-edit-tool{ display:none !important; }
     #hg-toolbar .hg-sep{ width:1px; height:18px; background:var(--hg-line); margin:0 3px; }
@@ -192,18 +193,18 @@
     #hg-toolbar .hg-item.hg-h1{ font-weight:700; font-size:14px; }
     #hg-toolbar .hg-item.hg-h2{ font-weight:600; font-size:13px; }
     #hg-toolbar .hg-item.hg-h3{ font-weight:600; font-size:12px; }
-    /* 编辑确认弹窗(页面级;激活侧边栏时弹一次) */
+    /* 编辑确认弹窗(页面级;激活侧边栏时弹一次)。v0.8.1:放大 ~30% + Mint + 加深蒙版 */
     .hg-modal-mask{ position:fixed; inset:0; background:var(--mask); display:flex; align-items:center; justify-content:center; z-index:2147483647; }
-    .hg-modal{ width:360px; max-width:92vw; background:var(--modal-bg); color:var(--modal-fg); border:1px solid var(--hg-line);
-      border-radius:12px; padding:20px 22px; box-shadow:var(--hg-shadow);
+    .hg-modal{ width:470px; max-width:92vw; background:var(--modal-bg); color:var(--modal-fg); border:1px solid var(--hg-line);
+      border-radius:14px; padding:26px 30px; box-shadow:var(--hg-shadow);
       font-family:"Inter","PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
-    .hg-modal-title{ font-size:15px; font-weight:600; color:var(--modal-fg); line-height:1.45; margin-bottom:10px; }
-    .hg-modal-tip{ font-size:12.5px; color:var(--modal-muted); line-height:1.6; margin-bottom:16px; }
-    .hg-modal-acts{ display:flex; gap:8px; justify-content:flex-end; }
-    .hg-modal-acts button{ height:34px; padding:0 16px; border-radius:9px; font-size:12.5px; font-weight:600; cursor:pointer; border:1px solid transparent; font-family:inherit; }
+    .hg-modal-title{ font-size:17px; font-weight:600; color:var(--modal-fg); line-height:1.45; margin-bottom:12px; }
+    .hg-modal-tip{ font-size:13.5px; color:var(--modal-muted); line-height:1.65; margin-bottom:20px; }
+    .hg-modal-acts{ display:flex; gap:10px; justify-content:flex-end; }
+    .hg-modal-acts button{ height:42px; padding:0 20px; border-radius:10px; font-size:13.5px; font-weight:600; cursor:pointer; border:1px solid transparent; font-family:inherit; }
     .hg-modal-cancel{ background:transparent; color:var(--modal-muted); border-color:var(--hg-line); font-weight:500; }
     .hg-modal-cancel:hover{ background:var(--hg-hover); }
-    .hg-modal-ok{ background:var(--hg-cta); color:#fff; box-shadow:var(--hg-cta-shadow); }
+    .hg-modal-ok{ background:var(--hg-cta); color:var(--on-cta); box-shadow:var(--hg-cta-shadow); }
     .hg-modal-ok:hover{ background:var(--hg-cta-hover); }
   `;
   document.head.appendChild(style);
@@ -222,7 +223,7 @@
   // v0.8: 调色板为工具栏与侧边栏的【同一份来源】,两边 UI 各自渲染但取值必须一致。
   // 16 色 = 侧栏浮层 8 列 × 2 行(整齐无空位);高亮色刻意不含纯白 —— 纯白高亮会让浅色文字
   // 「隐形」(背景与文字同亮,视觉上像被盖住),transparent 表示「清除高亮」。
-  const TEXT_COLORS = ["#0a0a0a","#374151","#6b7280","#9ca3af","#ffffff","#ef4444","#f97316","#f59e0b","#10b981","#06b6d4","#3b82f6","#6366f1","#8b5cf6","#ec4899","#7c8cff","#e11d48"];
+  const TEXT_COLORS = ["#0a0a0a","#374151","#6b7280","#9ca3af","#ffffff","#ef4444","#f97316","#f59e0b","#10b981","#06b6d4","#3b82f6","#6366f1","#8b5cf6","#ec4899","#88e6d1","#e11d48"];
   const HL_COLORS = ["#fff59d","#ffe14d","#ffd54f","#ffcdd2","#f8bbd0","#e1bee7","#c5cae9","#bbdefb","#b2dfdb","#c8e6c9","#dcedc8","#ffccbc","#ffe0b2","#d7ccc8","#e5e7eb","transparent"];
   // SIZES:[labelKey, em];标签随语言变化(toolbarHTML 内取 t())
   const SIZES = [["size.sm","0.85em"],["size.std","1em"],["size.lg","1.3em"],["size.xl","1.7em"]];

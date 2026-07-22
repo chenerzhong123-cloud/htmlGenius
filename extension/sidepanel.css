@@ -711,6 +711,9 @@ button {
 .send-group.send-group { position: relative; display: flex; min-width: 0; }
 .send-main { flex: 1; min-width: 0; border: 0; border-radius: var(--r-md) 0 0 var(--r-md); color: var(--cta-fg, #10211f); background: var(--cta-bg, var(--brand)); font-size: 12px; font-weight: 700; cursor: pointer; }
 .send-main:disabled { opacity: .5; cursor: not-allowed; }
+/* v0.8.1 运行中:发送按钮变「终止任务」—— 危险语义用红色(压过 Mint 主色) */
+.send-main.aborting { background: #ef4f5a; color: #fff; }
+.send-main.aborting:hover { background: #f56570; }
 .send-toggle { width: 33px; flex: 0 0 auto; border: 0; border-left: 1px solid rgba(255,255,255,.2); border-radius: 0 var(--r-md) var(--r-md) 0; color: var(--cta-fg, #10211f); background: var(--brand); font-size: 14px; cursor: pointer; }
 [data-theme="light"] .send-main, [data-theme="light"] .send-toggle { color: #fff; border-left-color: rgba(255,255,255,.2); }
 /* provider 下拉菜单 */
@@ -756,6 +759,13 @@ button {
 .contract-bridge-status .cbs-timer { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--brand-hover); opacity: .92; }
 .contract-bridge-status .cbs-chev { flex: 0 0 auto; color: var(--text-muted); font-size: 10px; transition: transform .15s; }
 .contract-bridge-status.expanded .cbs-chev { transform: rotate(180deg); }
+/* v0.8.1 候选成功态:状态栏主行内的版本号 + 打开按钮(完成后持久可见,即便进度窗已收起) */
+.contract-bridge-status .cbs-candidate { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.contract-bridge-status .cbs-candidate[hidden] { display: none; }
+.contract-bridge-status .cbs-version { color: var(--success); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.contract-bridge-status .cbs-open { flex: 0 0 auto; height: 24px; padding: 0 10px; border: 0; border-radius: var(--r-sm); background: var(--brand); color: var(--on-cta, #10211f); font-size: 11px; font-weight: 700; cursor: pointer; }
+.contract-bridge-status .cbs-open:hover { background: var(--brand-hover); }
+[data-theme="light"] .contract-bridge-status .cbs-open { color: #fff; }
 .contract-bridge-status .cbs-detail { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line-subtle); }
 .contract-bridge-status .cbs-detail[hidden] { display: none; }
 .contract-bridge-status .cbs-section-label { color: var(--text-faint); font-size: 10px; font-weight: 700; margin: 4px 0 3px; text-transform: uppercase; letter-spacing: .04em; }

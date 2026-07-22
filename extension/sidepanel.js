@@ -320,7 +320,6 @@
     // v0.6.1:无未失效顶层批注时,底部「生成修改任务」disabled 且不打开空 Composer
     const _exportBtn = document.getElementById("export-btn");
     if (_exportBtn) _exportBtn.disabled = !((byParent[null] || []).length > 0);
-    fillCandidateAnchorStats(); // Night Pack A §5.2:候选打开重锚后,用最新列表填重锚统计
   }
 
   // #2: 一键删除所有失效评论(原文已不在当前页面)
@@ -508,18 +507,18 @@
   const planConfirmBtn = document.getElementById("plan-confirm");
   const planStaleHint = document.getElementById("plan-stale-hint");
   const planReviewAgent = document.getElementById("plan-review-agent");
-  // Night Pack A §5.2 候选只读成功态元素
-  const candidateResult = document.getElementById("contract-candidate-result");
-  const candidateAnchorStats = document.getElementById("candidate-anchor-stats");
-  const candidateOpen = document.getElementById("candidate-open");
-  const candidateBack = document.getElementById("candidate-back");
+  // v0.8.1 候选成功态:状态栏内的版本号 + 打开按钮(compose 内候选卡 / hash evidence / 返回源文件 已移除)
+  const cbsCandidate = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-candidate");
+  const cbsVersion = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-version");
+  const cbsOpen = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-open");
 
   let _contractStep = "closed"; // closed | compose | comment-scope | plan-running | plan-review | candidate-running
   let _selectedNodeIds = new Set(); // 本轮勾选的节点 id(root+reply;真相源)
   let _contractRunKind = "candidate"; // candidate | plan(sidepanel 本次派发)
   let _contractRunId = null;          // 当前 sidepanel 跟踪的 run id(匹配 bridge-stream/完成事件)
   let _streamText = "";               // Agent 实时输出累积(agentMessage delta)
-  let _candidateResult = null;      // Night Pack A §5.2:最近一次 candidate-ready 结果(只读成功态)
+  let _candidateResult = null;      // 最近一次 candidate-ready 结果(只读成功态)
+  let _candidateVersion = 0;        // 本文档候选版本号(chrome.storage.local hg_cand_ver_<logicalId>)
   // v0.8.1 provider probe + plan-first 状态(spec §3.D/§5)
   let _provider = null;             // 当前选中 provider id(仅 ready 可选)
   let _providerStates = {};         // { providerId: probe 记录 }
@@ -607,11 +606,13 @@
     const providerReady = !!(_provider && _providerStates[_provider] && _providerStates[_provider].status === "ready");
     const canDispatch = bridgeEligible && providerReady && !disable;
     if (contractBridge) {
-      contractBridge.textContent = _provider ? (t("bridge.sendTo").replace("{agent}", providerLabel(_provider))) : t("bridge.run");
-      contractBridge.disabled = !canDispatch || lock;
+      // 运行中:发送按钮 →「终止任务」(始终可点);否则恢复「发送给 {Agent}」
+      if (lock) { contractBridge.textContent = t("bridge.abort"); contractBridge.disabled = false; contractBridge.classList.add("aborting"); }
+      else { contractBridge.textContent = _provider ? t("bridge.sendTo").replace("{agent}", providerLabel(_provider)) : t("bridge.run"); contractBridge.disabled = !canDispatch; contractBridge.classList.remove("aborting"); }
     }
-    if (contractPlanBtn) contractPlanBtn.disabled = !canDispatch || lock;
-    if (contractCopyPrompt) contractCopyPrompt.disabled = lock; // 复制 Prompt 不需要 provider ready
+    // 运行中隐藏「先给我看修改计划」,完成/终止后恢复(spec)
+    if (contractPlanBtn) { if (lock) contractPlanBtn.hidden = true; else { contractPlanBtn.hidden = false; contractPlanBtn.disabled = !canDispatch; } }
+    if (contractCopyPrompt) contractCopyPrompt.disabled = false; // 复制 Prompt 始终可用(用户可随时复制去自己的会话)
     renderRangeLink();
     renderPlanConfirmState();
   }
@@ -632,6 +633,8 @@
       const tx = contractBridgeStatus.querySelector(".cbs-text"); if (tx) tx.textContent = "";
       const tm = contractBridgeStatus.querySelector(".cbs-timer"); if (tm) tm.textContent = "";
     }
+    if (cbsCandidate) cbsCandidate.hidden = true;
+    _candidateResult = null;
     stopRunTimer(); resetRunEvents();
     _plan = null; _planStale = false;
   }
@@ -734,44 +737,34 @@
     _contractTriggerEl = null;
     if (el && el.focus) { try { el.focus(); } catch (e) {} }
   }
-  // Night Pack A §5.2:展示最小只读成功态(非「接受修改」);统计在 renderCards 里随最新列表填充
+  // v0.8.1:候选成功态展示在状态栏(版本号 + 打开按钮)。compose 内候选卡 / hash evidence / 返回源文件 已移除。
   function showCandidateResult(msg) {
     _candidateResult = msg || null;
-    if (candidateResult) candidateResult.hidden = !_candidateResult;
-    fillCandidateEvidence(msg);
-    fillCandidateAnchorStats();
+    if (msg && typeof msg.version === "number") _candidateVersion = msg.version;
+    renderCandidateIndicator();
   }
-  function fillCandidateAnchorStats() {
-    if (!_candidateResult || !candidateAnchorStats) return;
-    const items = _lastItems || [];
-    const stale = items.filter((a) => a._status === "stale").length;
-    const open = items.filter((a) => a._status !== "stale").length;
-    candidateAnchorStats.textContent = t("candidate.anchorStats")
-      .replace("{open}", String(open)).replace("{total}", String(open + stale)).replace("{stale}", String(stale));
-  }
-  // §6 证据行:provider · 时间 · 源→候选文件名 · 源哈希已校验 · 候选 hash 短前缀(只读 run metadata)
-  function filenameOf(uri) { try { return decodeURIComponent(new URL(uri).pathname.split("/").pop()) || uri; } catch (e) { return String(uri || ""); } }
-  function shortHash(h) { const hex = typeof h === "string" ? h.replace(/^sha256:/i, "") : ""; return hex.length > 12 ? hex.slice(0, 12) + "…" : (hex || ""); }
-  function fillCandidateEvidence(run) {
-    const el = document.getElementById("candidate-evidence");
-    if (!el || !run) return;
-    el.textContent = t("candidate.evidence")
-      .replace("{provider}", run.provider || "claude_code_cli")
-      .replace("{time}", String(run.completed_at || new Date().toISOString()).replace("T", " ").slice(0, 16))
-      .replace("{source}", filenameOf(run.source_uri || run.source_artifact_uri))
-      .replace("{candidate}", filenameOf(run.candidate_uri))
-      .replace("{hashPrefix}", shortHash(run.candidate_sha256));
-  }
-  // §6 持久证据:刷新 Side Panel 后,从 storage 读最近一次 completed candidate run 展示(无敏感内容)
-  async function loadCandidateEvidence(tabId) {
-    if (_candidateResult) return; // 本轮 live 结果优先
-    const r = await chrome.runtime.sendMessage({ type: "bridge-query-latest-candidate", tab_id: tabId }).catch(() => null);
-    if (r && r.run) {
-      _candidateResult = r.run;
-      if (candidateResult) candidateResult.hidden = false;
-      fillCandidateEvidence(r.run);
-      fillCandidateAnchorStats();
+  function renderCandidateIndicator() {
+    if (!cbsCandidate) return;
+    const ready = !!_candidateResult;
+    cbsCandidate.hidden = !ready;
+    if (ready && cbsVersion) {
+      cbsVersion.textContent = t("candidate.versionReady").replace("{n}", String(_candidateVersion || 1));
     }
+    if (ready && contractBridgeStatus) contractBridgeStatus.hidden = false;
+  }
+  // v0.8.1 本文档候选版本号(本地计数,让用户知道改到了第几版)
+  async function applyCandidateVersion(logicalId) {
+    if (!logicalId) return;
+    try {
+      const key = "hg_cand_ver_" + logicalId;
+      const v = await new Promise((res) => chrome.storage.local.get([key], (o) => res((o && o[key]) || 0)));
+      _candidateVersion = v || 0;
+    } catch (e) {}
+  }
+  // 刷新 Side Panel 后:预载本文档候选版本号(不强制弹状态栏;仅完成后展示用)
+  async function loadCandidateEvidence(tabId) {
+    const r = await chrome.runtime.sendMessage({ type: "bridge-query-latest-candidate", tab_id: tabId }).catch(() => null);
+    if (r && r.run) await applyCandidateVersion(r.run.logical_document_id);
   }
   function showContractFallback(out) {
     contractFallback.hidden = false;
@@ -886,11 +879,22 @@
   function setBridgeStatus(text, cls) {
     if (!contractBridgeStatus) return;
     const expanded = contractBridgeStatus.classList.contains("expanded");
-    contractBridgeStatus.hidden = !text && !_runEvents.length;
+    contractBridgeStatus.hidden = !text && !_runEvents.length && !_candidateResult;
     const tx = cbsTextEl(); if (tx) tx.textContent = text || "";
     contractBridgeStatus.className = "contract-bridge-status" + (cls ? " " + cls : "") + (expanded ? " expanded" : "");
   }
+  // 发送后默认展开进度窗;完成/终止后收起(spec:用户要点开才看历史,但运行中默认展开给实时反馈)
+  function expandBridgeDetail(open) {
+    if (!contractBridgeStatus) return;
+    const d = contractBridgeStatus.querySelector(".cbs-detail");
+    if (!d) return;
+    d.hidden = !open;
+    contractBridgeStatus.classList.toggle("expanded", !!open);
+    if (open) loadRunHistory();
+  }
   function startRunTimer() { stopRunTimer(); _runStartedAt = Date.now(); updateRunTimer(); _runTimer = setInterval(updateRunTimer, 1000); }
+  // 切 tab 恢复运行态时:沿用原 _runStartedAt 继续计时(不复位)
+  function resumeRunTimer() { stopRunTimer(); if (_runStartedAt) { updateRunTimer(); _runTimer = setInterval(updateRunTimer, 1000); } }
   function stopRunTimer() { if (_runTimer) { clearInterval(_runTimer); _runTimer = null; } }
   function updateRunTimer() {
     const el = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-timer");
@@ -948,6 +952,7 @@
     el.classList.toggle("typing", !!_streamText);
   }
   function bridgeFailClass(code) {
+    if (code === "USER_CANCELLED") return "warn";
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF"
       || code === "SOURCE_MUTATED_DURING_CANDIDATE" || code === "SOURCE_MUTATED_DURING_PLAN"
       || code === "BRIDGE_NOT_INSTALLED" || code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED"
@@ -955,6 +960,7 @@
     return "err";
   }
   function tBridgeFailed(code, host) {
+    if (code === "USER_CANCELLED") return t("bridge.cancelled");
     if (code === "SOURCE_CHANGED_BEFORE_START" || code === "SOURCE_MUTATED" || code === "SOURCE_MUTATED_DURING_HANDOFF") return t("bridge.sourceChanged");
     if (code === "SOURCE_MUTATED_DURING_CANDIDATE") return t("bridge.sourceMutated");
     if (code === "SOURCE_MUTATED_DURING_PLAN") return t("bridge.planSourceMutated");
@@ -996,7 +1002,7 @@
     if (!tab || !tab.id) { setBridgeStatus(t("bridge.failed").replace("{msg}", "no active tab"), "err"); return; }
     currentTabId = tab.id; // 确保 bridge 消息路由匹配当前 run 的 tab(修 candidate-ready 不终结)
     _contractRunKind = runKind;
-    if (candidateResult) candidateResult.hidden = true;
+    _candidateResult = null; renderCandidateIndicator();
     const payload = { type: "bridge-start", provider: _provider, run_kind: runKind, tab_id: tab.id, session_mode: "new", change_contract: task };
     if (runKind === "candidate" && opts && opts.plan) payload.plan = opts.plan;
     chrome.runtime.sendMessage(payload).then((resp) => {
@@ -1011,6 +1017,7 @@
         pushProgress(t("run.started").replace("{agent}", providerLabel(_provider)));
         startRunTimer();
         pushProgress(startMsg);
+        expandBridgeDetail(true); // 发送后默认展开进度窗,用户看到实时进展
       } else {
         const code = resp && resp.code;
         if (code === "BRIDGE_NOT_INSTALLED") setBridgeStatus(t("bridge.notInstalled"), "warn");
@@ -1023,6 +1030,20 @@
   function startBridgeRun() { return dispatchBridgeRun("candidate", _plan && !_planStale ? { plan: planPayload() } : null); }
   // v0.8.1 plan 流:先给我看修改计划 → run_kind=plan → plan-running → bridge-plan-ready → plan-review
   function startPlanRun() { return dispatchBridgeRun("plan"); }
+  // v0.8.1 终止任务:通知 background 断 host port(→ USER_CANCELLED 终态广播);UI 等 bridge-failed 回灌后恢复发送按钮
+  async function cancelBridgeRun() {
+    if (contractBridge) contractBridge.disabled = true; // 防重复点击
+    setBridgeStatus(t("bridge.cancelling"), "warn");
+    const tab = await getActiveTab();
+    if (!tab || !tab.id) return;
+    chrome.runtime.sendMessage({ type: "bridge-cancel", tab_id: tab.id, run_id: _contractRunId }).then((resp) => {
+      // 竞态兜底:后台已无活跃 run(刚完成/失败/SW 被杀)→ 终止广播不会到,这里直接恢复发送态
+      if (resp && resp.ok === false && _contractRunning) {
+        _contractRunning = false; setContractRunning(false); stopRunTimer();
+        setBridgeStatus(t("bridge.cancelled"), "warn");
+      }
+    }).catch(() => {});
+  }
   // plan-ready 到达:存计划,进 plan-review(spec §5.3/§3.E)
   function onPlanReady(msg) {
     setContractRunning(false);
@@ -1092,7 +1113,8 @@
   if (contractBrief) contractBrief.addEventListener("input", () => { refreshContractUI(); checkPlanStale(); });
   if (contractPreserve) contractPreserve.addEventListener("input", () => { refreshContractUI(); checkPlanStale(); });
   if (contractCopyPrompt) contractCopyPrompt.addEventListener("click", () => copyContract());
-  if (contractBridge) contractBridge.addEventListener("click", startBridgeRun);
+  // 发送按钮:运行中 → 终止任务(cancelBridgeRun);否则 → 发送(startBridgeRun)
+  if (contractBridge) contractBridge.addEventListener("click", () => { if (_contractRunning) cancelBridgeRun(); else startBridgeRun(); });
   // 状态栏点击:展开/收起本次进度 + 最近 3 次历史(spec:点击展开,再次点击收起)
   if (contractBridgeStatus) contractBridgeStatus.addEventListener("click", () => {
     const d = contractBridgeStatus.querySelector(".cbs-detail");
@@ -1118,18 +1140,12 @@
     if (ag && !ag.disabled) { selectProvider(ag.dataset.provider); closeSendMenu(); return; }
   });
   document.addEventListener("click", (e) => { if (sendMenu && !e.target.closest(".send-group")) closeSendMenu(); });
-  // 候选只读成功态按钮:打开候选(新标签)/ 返回原文件(当前标签导航回 source)
-  if (candidateOpen) candidateOpen.addEventListener("click", () => {
+  // 状态栏候选「打开候选版本」:新标签打开(background 完成时已自动开;此为手动兜底)。阻止冒泡,避免触发状态栏展开/收起。
+  if (cbsCandidate) cbsCandidate.addEventListener("click", (e) => e.stopPropagation());
+  if (cbsOpen) cbsOpen.addEventListener("click", (e) => {
+    e.stopPropagation();
     if (_candidateResult && _candidateResult.candidate_uri) {
-      try { chrome.tabs.create({ url: _candidateResult.candidate_uri }); } catch (e) {}
-    }
-  });
-  if (candidateBack) candidateBack.addEventListener("click", () => {
-    if (_candidateResult && _candidateResult.source_uri) {
-      const src = _candidateResult.source_uri;
-      _candidateResult = null;
-      if (candidateResult) candidateResult.hidden = true;
-      getActiveTab().then((tab) => { if (tab && tab.id) chrome.tabs.update(tab.id, { url: src }); });
+      try { chrome.tabs.create({ url: _candidateResult.candidate_uri }); } catch (er) {}
     }
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && _contractOpen) { e.preventDefault(); closeContract(); } });
@@ -1457,11 +1473,12 @@
         if (msg.summary) pushProgress(msg.summary);
       } else if (msg.type === "bridge-completed") {
         setContractRunning(false); stopRunTimer();
-        if (msg.candidate) showCandidateResult(msg); // 候选只读成功态
+        if (msg.candidate) showCandidateResult(msg); // 候选成功态(状态栏版本号 + 打开按钮;background 已自动新开候选页签)
         const doneText = msg.candidate ? t("bridge.candidateCompleted") : t("bridge.completed");
         setBridgeStatus(doneText, "ok");
         pushProgress(doneText);
         recordRun({ provider: _provider, run_kind: "candidate", status: "completed", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode() });
+        expandBridgeDetail(false); // 完成后收起进度窗(候选版本号 + 打开按钮仍在主行可见)
       } else if (msg.type === "bridge-failed") {
         setContractRunning(false); stopRunTimer();
         if (_contractStep === "plan-running") setContractStep("compose");
@@ -1469,6 +1486,7 @@
         setBridgeStatus(failText, bridgeFailClass(msg.code));
         pushProgress(failText);
         recordRun({ provider: _provider, run_kind: _contractRunKind, status: "failed", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode(), code: msg.code });
+        expandBridgeDetail(false);
       }
     }
   });
@@ -1582,10 +1600,101 @@
     closeLangSheet();
   }
 
+  // === v0.8.1 per-tab 状态:每个浏览器 tab 一份 contract/运行态快照,切 tab 时存旧取新 ===
+  // Side Panel 是单实例(MV3),「per-tab 独立」= 切 tab 时把当前 tab 的草稿/运行/计时/候选快照存起来,
+  // 恢复目标 tab 的快照。多 run 并行由 background(_runsByTab)保证,这里只负责 UI 跟随活动 tab。
+  const _tabStates = new Map(); // tabId -> snapshot
+  function snapshotTabState(tabId) {
+    if (!tabId) return;
+    _tabStates.set(tabId, {
+      open: _contractOpen,
+      step: _contractStep,
+      selectedNodeIds: Array.from(_selectedNodeIds),
+      running: _contractRunning,
+      runKind: _contractRunKind,
+      runId: _contractRunId,
+      provider: _provider,
+      providerStates: Object.assign({}, _providerStates),
+      providerCacheAt: _providerCacheAt,
+      plan: _plan ? Object.assign({}, _plan) : null,
+      planStale: _planStale,
+      candidateResult: _candidateResult,
+      candidateVersion: _candidateVersion,
+      runEvents: _runEvents.slice(),
+      streamText: _streamText,
+      runStartedAt: _runStartedAt,
+      brief: contractBrief ? contractBrief.value : "",
+      preserve: contractPreserve ? contractPreserve.value : "",
+      scope: getContractMode()
+    });
+    // 上限保护:超过 16 个快照时丢最旧的(非当前)
+    if (_tabStates.size > 16) { const k = _tabStates.keys().next().value; if (k !== tabId) _tabStates.delete(k); }
+  }
+  function restoreTabState(tabId) {
+    const s = _tabStates.get(tabId);
+    if (!s) {
+      // 该 tab 无快照(新 tab / 从未打开契约):若当前契约开着,关掉(新 tab 不继承草稿)
+      if (_contractOpen) { _contractOpen = false; _contractStep = "closed"; contractSheet.classList.remove("show"); contractSheet.hidden = true; }
+      stopRunTimer();
+      return;
+    }
+    _contractOpen = s.open;
+    _contractRunning = s.running;
+    _contractRunKind = s.runKind;
+    _contractRunId = s.runId;
+    _provider = s.provider;
+    _providerStates = s.providerStates || {};
+    _providerCacheAt = s.providerCacheAt;
+    _plan = s.plan;
+    _planStale = s.planStale;
+    _candidateResult = s.candidateResult;
+    _candidateVersion = s.candidateVersion || 0;
+    _runEvents = (s.runEvents || []).slice();
+    _streamText = s.streamText || "";
+    _runStartedAt = s.runStartedAt || 0;
+    _selectedNodeIds = new Set(s.selectedNodeIds || []);
+    if (contractBrief) contractBrief.value = s.brief || "";
+    if (contractPreserve) contractPreserve.value = s.preserve || "";
+    const scopeRadio = document.querySelector('input[name="contract-scope"][value="' + (s.scope || "precise_patch") + '"]');
+    if (scopeRadio) scopeRadio.checked = true;
+    if (s.open) {
+      showContractSheet();
+      setContractStep(s.step || "compose");
+      renderProgress(); renderStreamText(); renderCandidateIndicator();
+      renderProviderMenu();
+      if (s.running) resumeRunTimer(); else stopRunTimer();
+      setContractRunning(s.running); // 禁用/启用输入 + 刷新发送(终止)按钮态
+    } else {
+      contractSheet.classList.remove("show"); contractSheet.hidden = true;
+      stopRunTimer();
+    }
+  }
+  // 切回某 tab 时,若 UI 还显示 running,但后台 run 已终结(完成/失败/取消),reconcile 到终态,避免永远转圈
+  async function reconcileTabRun(tabId) {
+    if (!_contractRunning) return;
+    const resp = await chrome.runtime.sendMessage({ type: "bridge-query-active-run", tab_id: tabId }).catch(() => null);
+    if (!resp || !resp.active) {
+      _contractRunning = false; setContractRunning(false); stopRunTimer();
+      await loadCandidateEvidence(tabId);
+      renderCandidateIndicator();
+    }
+  }
+
   // 切换标签 / 当前页刷新完成:静默重新激活(确认窗只在侧边栏打开时弹,刷新后不再弹)
-  // 切换标签:激活新 tab + 重拉该 tab 评论(sidepanel 按 tab 独立显示评论,不再共享上一 tab 数据)
-  chrome.tabs.onActivated.addListener(() => { activateActiveTab(false); refreshAnnotations(); });
+  // 切 tab:先快照离开的 tab → 激活新 tab → 恢复新 tab 的契约/运行态 → 重拉评论 → reconcile 后台 run
+  chrome.tabs.onActivated.addListener((activeInfo) => {
+    const incoming = (activeInfo && activeInfo.tabId) || null;
+    const outgoing = currentTabId;
+    if (outgoing && incoming && outgoing !== incoming) snapshotTabState(outgoing);
+    (async () => {
+      await activateActiveTab(false);
+      if (incoming) restoreTabState(incoming);
+      await refreshAnnotations();
+      if (incoming) reconcileTabRun(incoming);
+    })();
+  });
   chrome.tabs.onUpdated.addListener((_id, info) => { if (info && info.status === "complete") activateActiveTab(false); });
+  chrome.tabs.onRemoved.addListener((tabId) => { _tabStates.delete(tabId); });
   // #1: 心跳 —— 只要侧边栏开着就持续 ping 活动标签(收起后停止 → content-script 看门狗失活)
   setInterval(pingActiveTab, 4000);
 

@@ -101,10 +101,9 @@
        之后可在该容器内继续加按钮。 -->
   <div id="annotations"></div>
   <div class="comment-actions">
-    <!-- v0.7.2 状态 A 唯一任务入口:次级 outline CTA + ? 说明(spec §3.A) -->
+    <!-- v0.7.2 状态 A 唯一任务入口:次级 outline CTA(spec §3.A) -->
     <div class="cta-row">
       <button id="export-btn" data-i18n="taskSelect.start">整理评论,创建编辑任务</button>
-      <button class="tip above" type="button" aria-label="?"><span>?</span><span class="bubble" role="tooltip" data-i18n="taskSelect.hint">先挑选这次要处理的评论;未选评论不会发送给 Agent。</span></button>
     </div>
   </div>
 </div>
@@ -187,20 +186,6 @@
         <div class="contract-fallback-label" data-i18n="contract.fallbackLabel"></div>
         <textarea id="contract-fallback-text" readonly rows="6"></textarea>
       </div>
-
-      <!-- 候选版本只读成功态(发送成功后展示) -->
-      <div id="contract-candidate-result" class="candidate-result" hidden>
-        <div class="candidate-result-title" data-i18n="candidate.resultTitle">候选版本已生成</div>
-        <ul class="candidate-result-facts">
-          <li data-i18n="candidate.sourceUntouched">原文件未被修改</li>
-          <li id="candidate-anchor-stats"></li>
-          <li id="candidate-evidence"></li>
-        </ul>
-        <div class="candidate-result-actions">
-          <button id="candidate-open" class="contract-secondary" type="button" data-i18n="candidate.openCandidate">打开候选版本</button>
-          <button id="candidate-back" class="contract-secondary" type="button" data-i18n="candidate.backToSource">返回原文件</button>
-        </div>
-      </div>
     </div>
 
     <!-- 固定底栏 action-grid:复制 Prompt / 发送给 {Agent} ⌄ / 先给我看修改计划 -->
@@ -220,7 +205,7 @@
         <button id="contract-plan" class="plan-button" type="button" data-i18n="compose.plan">先给我看修改计划</button>
       </div>
       <div id="contract-bridge-status" class="contract-bridge-status" hidden>
-        <div class="cbs-main"><span class="cbs-text"></span><span class="cbs-timer"></span><span class="cbs-chev" aria-hidden="true">▾</span></div>
+        <div class="cbs-main"><span class="cbs-text"></span><span class="cbs-timer"></span><span class="cbs-candidate" hidden><span class="cbs-version"></span><button class="cbs-open" type="button" data-i18n="candidate.openCandidate">打开候选版本</button></span><span class="cbs-chev" aria-hidden="true">▾</span></div>
         <div class="cbs-detail" hidden>
           <div class="cbs-section-label" data-i18n="run.agentStream">Agent 实时输出</div>
           <div class="cbs-stream"></div>

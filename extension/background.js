@@ -73,6 +73,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true;
   }
+  if (msg.type === "bridge-cancel") {
+    // v0.8.1 用户终止任务:断 native host port(进程随之退出)→ 标 USER_CANCELLED 终态 → 广播 bridge-failed
+    (async () => { sendResponse({ ok: await cancelRun(msg.tab_id, msg.run_id) }); })();
+    return true;
+  }
 });
 
 // sidepanel 探测当前 tab 是否有可「继续」的 bridge-owned Claude session(供会话选择显示)
@@ -279,6 +284,32 @@ async function failRun(tab_id, runId, code, message) {
   await Storage.updateBridgeRun(runId, { status: "failed", error_code: code, completed_at: nowIso() }).catch(() => {});
 }
 
+// v0.8.1 用户主动终止:断 host port(子进程退出)→ 终态广播 USER_CANCELLED;不触 onHostDisconnect 二次广播
+async function cancelRun(tab_id, runId) {
+  const entry = _runsByTab.get(tab_id);
+  if (!entry || (runId && entry.run_id !== runId)) return false;
+  entry.terminal = true;
+  try { if (entry.port) entry.port.disconnect(); } catch (e) {}
+  const rid = entry.run_id;
+  _runsByTab.delete(tab_id);
+  console.log("[hg] run CANCELLED run=", rid, "tab=", tab_id);
+  await Storage.updateBridgeRun(rid, { status: "failed", error_code: "USER_CANCELLED", completed_at: nowIso() }).catch(() => {});
+  broadcast({ type: "bridge-failed", tab_id, run_id: rid, code: "USER_CANCELLED", message: "user cancelled" });
+  return true;
+}
+
+// v0.8.1 本文档候选版本号:每生成一个候选 +1(chrome.storage.local;让用户知道改到了第几版)
+function bumpCandidateVersion(logicalId) {
+  if (!logicalId) return Promise.resolve(0);
+  const key = "hg_cand_ver_" + logicalId;
+  return new Promise((resolve) => {
+    chrome.storage.local.get([key], (res) => {
+      const n = (res && typeof res[key] === "number") ? res[key] + 1 : 1;
+      chrome.storage.local.set({ [key]: n }, () => resolve(n));
+    });
+  });
+}
+
 async function completeRun(tab_id, runId, completion, taskSha, logicalId, artifactUrl) {
   const entry = _runsByTab.get(tab_id);
   if (entry) entry.terminal = true;
@@ -346,18 +377,18 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
     return failRun(tab_id, runId, "CONSUMER_REJECTED", "artifact-update-ready consumer rejected: " + (consumerResp && consumerResp.code));
   }
 
-  // 先广播(用户可见:侧边栏立即显示成功);再导航 + 持久化(SW 可能在 await 期间被杀,broadcast 已发则用户不受影响)
+  // 先广播(用户可见:侧边栏立即显示成功);再开页签 + 持久化(SW 可能在 await 期间被杀,broadcast 已发则用户不受影响)
   const provider = run.provider || completion.provider || PROVIDER;
   const isCodex = provider === CODEX_PROVIDER;
   const sessionId = isCodex ? (completion.thread_id || null) : (run.session_id || null);
+  const candVersion = await bumpCandidateVersion(logicalId); // 本文档版本号 +1
   broadcast({
-    type: "bridge-completed", tab_id, run_id: runId, candidate: true,
+    type: "bridge-completed", tab_id, run_id: runId, candidate: true, version: candVersion,
     candidate_uri: completion.candidate_uri, source_uri: completion.source_uri,
     candidate_sha256: completion.candidate_sha256, source_sha256_before: completion.source_sha256_before
   });
-  if (consumerResp.action === "navigate_required") {
-    chrome.tabs.update(tab_id, { url: completion.candidate_uri }).catch(() => {});
-  }
+  // 自动新开页签打开候选(原 source 页签保持不动,不替用户刷新);tabs.create 失败时由 sidepanel「打开候选版本」按钮兜底
+  chrome.tabs.create({ url: completion.candidate_uri }).catch(() => {});
   const runPatch = { status: "completed", completed_at: nowIso(),
     candidate_uri: completion.candidate_uri, candidate_sha256: completion.candidate_sha256,
     manifest_path: completion.manifest_path };
