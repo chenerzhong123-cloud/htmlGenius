@@ -189,6 +189,31 @@
 
     <!-- 固定底栏 action-grid:复制 Prompt / 发送给 {Agent} ⌄ / 先给我看修改计划 -->
     <div class="contract-bottom">
+      <!-- v0.9 Connection Center:连接状态与用户级初始化入口(可折叠;不替换发送菜单/评论 UI) -->
+      <div id="conn-center" class="conn-center" hidden>
+        <button class="conn-head" id="conn-head" type="button" aria-expanded="true">
+          <span class="conn-title" id="conn-title"></span>
+          <span class="conn-chev" aria-hidden="true">▾</span>
+        </button>
+        <div class="conn-body" id="conn-body">
+          <p class="conn-desc" id="conn-desc" hidden></p>
+          <ul class="conn-providers" id="conn-providers" hidden></ul>
+          <div class="conn-actions" id="conn-actions">
+            <button id="conn-primary" class="conn-primary" type="button" hidden></button>
+            <button id="conn-secondary" class="conn-secondary" type="button" hidden></button>
+            <button id="conn-check" class="conn-secondary" type="button" data-i18n="conn.check">检查连接</button>
+            <button id="conn-diag" class="conn-secondary" type="button" data-i18n="conn.copyDiag">复制诊断</button>
+          </div>
+          <div class="conn-repair-confirm" id="conn-repair-confirm" hidden>
+            <p data-i18n="conn.repairConfirmText">安全修复会重写 HTML Genius 的 Chrome Host 注册文件；不会安装 Agent，也不会修改你的项目文件。</p>
+            <div class="conn-actions">
+              <button id="conn-repair-ok" class="conn-primary" type="button" data-i18n="conn.repairConfirmOk">确认修复</button>
+              <button id="conn-repair-cancel" class="conn-secondary" type="button" data-i18n="conn.cancel">取消</button>
+            </div>
+          </div>
+          <p class="conn-hint" id="conn-hint" hidden></p>
+        </div>
+      </div>
       <div class="action-grid">
         <button id="contract-copy-prompt" class="contract-copy" type="button"></button>
         <div class="send-group" id="contract-send-group">

@@ -17,7 +17,14 @@ const HANDOFF_START_TYPES = {
   [CODEX_PROVIDER]: "codex_handoff_start",
   [COPILOT_PROVIDER]: "copilot_handoff_start"
 };
-const BRIDGE_VERSION = "0.8.1";
+// v0.9 §4.3:版本单一来源 —— 扩展版本一律取 manifest(getManifest().version),杜绝四处漂移。
+// BRIDGE_PROTOCOL_VERSION:与 bridge-health/host 共用;TARGET_BRIDGE_VERSION:bootstrap 指向的受控 CLI 版本(不得 latest)。
+const BRIDGE_PROTOCOL_VERSION = 1;
+const TARGET_BRIDGE_VERSION = "0.9.0";
+// bootstrap 发行态:"development" = 仓库内开发命令(显著标注仅开发环境);"production" = 已发布的固定版本 npx 命令。
+// npm 包未发布前保持 development;正式发布后改 production 并核对 TARGET_BRIDGE_VERSION。
+const BOOTSTRAP_DISTRIBUTION = "development";
+function extensionVersion() { try { return chrome.runtime.getManifest().version; } catch (_) { return "0.0.0"; } }
 // v0.8.1 §5.2/§6.7:candidate + plan 是新主流程;handoff 旧路径保留兼容(V0.8.1 UI 不再创建)。
 const ALLOWED_RUN_KINDS = new Set(["candidate", "plan", "handoff"]);
 // v0.8.1 §5.1:provider probe 30s 缓存(成功与失败都缓存)。纯函数模块在 plan-validate.js,此处只持引用。
@@ -85,6 +92,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // v0.8.1 用户终止任务:断 native host port(进程随之退出)→ 标 USER_CANCELLED 终态 → 广播 bridge-failed
     (async () => { sendResponse({ ok: await cancelRun(msg.tab_id, msg.run_id) }); })();
     return true;
+  }
+  if (msg.type === "bridge-query-health") {
+    // v0.9 §4.2:Connection Center 只读 health。Native Messaging 仅 background 发起;host 不存在 → BRIDGE_NOT_INSTALLED。
+    queryBridgeHealth().then(sendResponse, (e) => sendResponse({ ok: true, health: notInstalledHealth("BG_ERROR") }));
+    return true;
+  }
+  if (msg.type === "bridge-repair") {
+    // v0.9 §4.1:仅用户明确确认后调用;confirmed_actions 必须含 repair_native_host(透传 allow-list,不扩)。
+    requestBridgeRepair(Array.isArray(msg.confirmed_actions) ? msg.confirmed_actions : []).then(
+      sendResponse, (e) => sendResponse({ ok: false, code: "BG_ERROR", message: String(e && e.message || e) }));
+    return true;
+  }
+  if (msg.type === "bridge-get-bootstrap") {
+    // v0.9 §5.3:纯本地生成 Setup Prompt / Terminal 命令。固定模板 + 严格变量(仅 extension id/版本/平台),
+    // 绝不拼入页面 HTML、评论、Change Contract、路径、登录态。
+    sendResponse({ ok: true, bootstrap: makeBootstrap() });
+    return;
   }
 });
 
@@ -553,6 +577,116 @@ async function handleQueryProviders() {
   const result = { ok: true, providers: PlanValidate.sanitizeProbeResult(raw).providers, checked_at: nowIso() };
   _providerProbe.set(result);
   return result;
+}
+
+// —— v0.9 §4.2/§5.3:Connection Center 支撑(health / repair / bootstrap)——
+
+// host 不存在(或连接失败)时的兜底 health(§4.2/§5.4):不展示 Chrome 原始错误,只给机器码。
+function notInstalledHealth(reasonCode) {
+  return {
+    schema_version: 1, overall: "action_required",
+    bridge: { status: "install_required", version: null, protocol_version: BRIDGE_PROTOCOL_VERSION, managed_install: false },
+    browser: { status: "manifest_missing" },
+    providers: [],
+    actions: ["copy_setup_prompt", "copy_terminal_command", "copy_diagnostics"],
+    reason_code: reasonCode || "BRIDGE_NOT_INSTALLED",
+    extension_version: extensionVersion()
+  };
+}
+
+// 一次 native 往返:发 request,等 match(msg) 返回非 undefined;connect 失败 / disconnect / 超时 → fallback()。
+function nativeRoundTrip(request, match, fallback, timeoutMs = 60000) {
+  return new Promise((resolve) => {
+    let port;
+    try { port = chrome.runtime.connectNative(NATIVE_HOST); } catch (e) { return resolve(fallback()); }
+    if (chrome.runtime.lastError || !port) return resolve(fallback());
+    let settled = false;
+    const finish = (v) => { if (!settled) { settled = true; clearTimeout(timer); try { port.disconnect(); } catch (_) {} resolve(v); } };
+    const timer = setTimeout(() => finish(fallback()), timeoutMs);
+    port.onMessage.addListener((m) => { const r = match(m); if (r !== undefined) finish(r); });
+    port.onDisconnect.addListener(() => finish(fallback()));
+    try { port.postMessage(request); } catch (e) { finish(fallback()); }
+  });
+}
+
+async function queryBridgeHealth() {
+  const request = { type: "bridge_health", protocol_version: BRIDGE_PROTOCOL_VERSION, extension: { id: chrome.runtime.id, version: extensionVersion() } };
+  return await nativeRoundTrip(request, (m) => {
+    if (!m) return undefined;
+    if (m.type === "bridge_health_result" && m.health) {
+      let h = m.health;
+      const pv = h.bridge && h.bridge.protocol_version;
+      if (typeof pv === "number" && pv > BRIDGE_PROTOCOL_VERSION) {
+        // host 协议比扩展新 → 「扩展需要更新」;不派发编辑任务(§4.3)
+        h = Object.assign({}, h, { overall: "action_required", reason_code: "BRIDGE_PROTOCOL_TOO_NEW",
+          bridge: Object.assign({}, h.bridge, { status: "protocol_incompatible" }) });
+      }
+      return { ok: true, health: h };
+    }
+    // v0.8.2 及更早 host 不认识 bridge_health → unknown_message → 「本地连接组件需要更新」(§4.3)
+    if (m.type === "bridge_failed" || m.type === "unknown_message") {
+      return { ok: true, health: Object.assign(notInstalledHealth("BRIDGE_PROTOCOL_TOO_OLD"), {
+        bridge: { status: "protocol_incompatible", version: null, protocol_version: BRIDGE_PROTOCOL_VERSION, managed_install: false } }) };
+    }
+    return undefined;
+  }, () => ({ ok: true, health: notInstalledHealth("BRIDGE_NOT_INSTALLED") }));
+}
+
+async function requestBridgeRepair(confirmedActions) {
+  // allow-list 透传:只接受 repair_native_host,其它一律不发(§4.1)
+  if (!Array.isArray(confirmedActions) || !confirmedActions.includes("repair_native_host")) {
+    return { ok: false, code: "REPAIR_NOT_CONFIRMED" };
+  }
+  const request = { type: "bridge_repair", protocol_version: BRIDGE_PROTOCOL_VERSION, extension: { id: chrome.runtime.id }, confirmed_actions: ["repair_native_host"] };
+  return await nativeRoundTrip(request, (m) => {
+    if (!m) return undefined;
+    if (m.type === "bridge_health_result" && m.health) return { ok: true, health: m.health };
+    if (m.type === "bridge_failed") return { ok: false, code: m.code || "HOST_REPAIR_ERROR" };
+    if (m.type === "unknown_message") return { ok: false, code: "BRIDGE_PROTOCOL_TOO_OLD" };
+    return undefined;
+  }, () => ({ ok: false, code: "BRIDGE_NOT_INSTALLED" }));
+}
+
+// v0.9 §5.3:Setup Prompt 固定模板。变量只有 extension id / bridge version;绝不拼入页面 HTML、评论、
+// Change Contract、文件路径、用户名、provider 登录态(§6.1)。production = 已发布固定版本 npx 命令;
+// development = 仓库内开发命令(显著标注「仅开发环境」)。
+const SETUP_PROMPT_TEMPLATES = {
+  zh: (id, bv) => "请只帮我初始化 HTML Genius 的本地连接，不要修改任何项目文件、HTML 文件或 Agent 配置。\n\n用户已明确授权你在“当前用户目录”安装/修复 HTML Genius Local Bridge；不要请求管理员权限，不要安装或登录任何 Agent，不要读取历史会话、密钥、Cookie 或项目文件。\n\nChrome Extension ID：" + id + "\n需要的 Bridge 版本：" + bv + "\n\n请按顺序执行：\n1. 先运行只读检查：\n   npx --yes @htmlgenius/bridge@" + bv + " doctor --json --extension-id " + id + "\n2. 若检查显示 Bridge 未安装、损坏或需要修复，运行：\n   npx --yes @htmlgenius/bridge@" + bv + " setup --json --scope user --extension-id " + id + "\n3. 再运行一次 doctor。\n\n最后只用简短中文汇报：Bridge 是否已就绪；哪些已支持 Agent 可用；哪些仍需要我自行登录或更新。不要输出绝对路径、token、会话信息或原始日志。",
+  en: (id, bv) => "Only initialize the local connection for HTML Genius; do not modify any project files, HTML files, or Agent configuration.\n\nThe user has explicitly authorized you to install/repair the HTML Genius Local Bridge in the current user's home directory. Do not request admin privileges, do not install or sign in to any Agent, and do not read past sessions, keys, cookies, or project files.\n\nChrome Extension ID: " + id + "\nRequired Bridge version: " + bv + "\n\nRun in order:\n1. Read-only check first:\n   npx --yes @htmlgenius/bridge@" + bv + " doctor --json --extension-id " + id + "\n2. If Bridge is not installed, corrupt, or needs repair, run:\n   npx --yes @htmlgenius/bridge@" + bv + " setup --json --scope user --extension-id " + id + "\n3. Run doctor once more.\n\nFinally, briefly report whether Bridge is ready, which supported Agents are available, and which still need me to sign in or update. Do not output absolute paths, tokens, session info, or raw logs.",
+  ja: (id, bv) => "HTML Genius のローカル接続の初期化のみを行ってください。プロジェクトファイル、HTML ファイル、Agent 設定は一切変更しないでください。\n\nユーザーは現在のユーザーディレクトリへの HTML Genius Local Bridge のインストール/修復を明示的に許可しています。管理者権限の要求、Agent のインストール/ログイン、過去のセッション・鍵・Cookie・プロジェクトファイルの読み取りは禁止です。\n\nChrome Extension ID: " + id + "\n必要な Bridge バージョン: " + bv + "\n\n以下の順に実行:\n1. まず読み取り専用チェック:\n   npx --yes @htmlgenius/bridge@" + bv + " doctor --json --extension-id " + id + "\n2. 未インストール/破損/修復が必要と出たら:\n   npx --yes @htmlgenius/bridge@" + bv + " setup --json --scope user --extension-id " + id + "\n3. もう一度 doctor を実行。\n\n最後に、Bridge が準備できたか、どの Agent が利用可能か、ログイン/更新が必要なのはどれかを簡潔に報告してください。絶対パス・トークン・セッション情報・生のログは出力しないでください。"
+};
+// 开发态模板:仓库内命令(未发布 npm 包时不得给出必然失败的 npx 命令;§5.3)。
+const SETUP_PROMPT_TEMPLATES_DEV = {
+  zh: (id) => "【仅开发环境】请只帮我初始化 HTML Genius 的本地连接，不要修改任何项目文件、HTML 文件或 Agent 配置。\n\n用户已明确授权你在“当前用户目录”安装/修复 HTML Genius Local Bridge；不要请求管理员权限，不要安装或登录任何 Agent，不要读取历史会话、密钥、Cookie 或项目文件。\n\nChrome Extension ID：" + id + "\n\n请按顺序执行（htmlGenius 源码仓库的 bridge/ 目录下）：\n1. npm install\n2. node install-macos.mjs --extension-id " + id + "\n\n最后只用简短中文汇报：Bridge 是否已就绪；哪些已支持 Agent 可用；哪些仍需要我自行登录或更新。不要输出绝对路径、token、会话信息或原始日志。",
+  en: (id) => "[DEV ONLY] Only initialize the local connection for HTML Genius; do not modify any project files, HTML files, or Agent configuration.\n\nThe user has authorized installing/repairing the HTML Genius Local Bridge in the current user's home directory. No admin privileges, no installing/signing in to Agents, no reading sessions/keys/cookies/project files.\n\nChrome Extension ID: " + id + "\n\nRun in order (inside the htmlGenius repo's bridge/ directory):\n1. npm install\n2. node install-macos.mjs --extension-id " + id + "\n\nFinally, briefly report readiness and which Agents still need sign-in/update. No absolute paths, tokens, session info, or raw logs.",
+  ja: (id) => "【開発環境専用】HTML Genius のローカル接続のみ初期化してください。プロジェクトファイル・HTML・Agent 設定は変更禁止。\n\nChrome Extension ID: " + id + "\n\nhtmlGenius リポジトリの bridge/ ディレクトリで順に実行:\n1. npm install\n2. node install-macos.mjs --extension-id " + id + "\n\n最後に準備状況とログイン/更新が必要な Agent を簡潔に報告。絶対パス・トークン・セッション情報・生のログは出力禁止。"
+};
+
+function makeBootstrap() {
+  const id = chrome.runtime.id;
+  const extVer = extensionVersion();
+  // 变量严格校验后才填入模板(§6.1)
+  const safeId = (/^[a-p]{32}$/.test(id || "")) ? id : "";
+  let lang = "zh";
+  try { lang = String(chrome.i18n.getUILanguage() || "zh").slice(0, 2); } catch (_) {}
+  const isProd = BOOTSTRAP_DISTRIBUTION === "production";
+  const tpl = (isProd ? SETUP_PROMPT_TEMPLATES : SETUP_PROMPT_TEMPLATES_DEV)[lang]
+    || (isProd ? SETUP_PROMPT_TEMPLATES.zh : SETUP_PROMPT_TEMPLATES_DEV.zh);
+  const out = {
+    distribution: BOOTSTRAP_DISTRIBUTION,
+    dev_only: !isProd,
+    bridge_version: TARGET_BRIDGE_VERSION,
+    extension_version: extVer,
+    platform: "macOS",
+    setup_prompt: safeId ? (isProd ? tpl(safeId, TARGET_BRIDGE_VERSION) : tpl(safeId)) : "",
+    terminal_command: ""
+  };
+  if (safeId) {
+    out.terminal_command = isProd
+      ? "npx --yes @htmlgenius/bridge@" + TARGET_BRIDGE_VERSION + " setup --json --scope user --extension-id " + safeId
+      : "cd <htmlGenius repo>/bridge && npm install && node install-macos.mjs --extension-id " + safeId;
+  }
+  return out;
 }
 
 // 连 native host 发 provider_probe;host 回 provider_probe_result。单次往返,~10s 超时。

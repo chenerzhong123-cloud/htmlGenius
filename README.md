@@ -36,7 +36,16 @@
 
 ## 最近更新
 
-### v0.8.2（2026-07-23 · 当前版本）
+### v0.9（2026-07-23 · 当前版本）
+
+- **本地连接组件，面向普通用户**：不必再进源码仓库跑脚本。未连接时契约页出现 **Connection Center**：点「**让 Agent 帮我连接**」复制一段严格限定的 Setup Prompt（只含扩展 ID 与固定版本，不含任何页面/评论/凭证内容），粘贴给你正在用的 Claude Code / Codex / Copilot，它只运行官方 CLI（只读 doctor → 用户级 setup → 复查）；或「复制 Terminal 命令」自己执行。
+- **Connection Center 状态矩阵**：区分「未安装 / 组件需修复 / 组件就绪但 Agent 未登录 / 已连接 N 个 Agent / 系统不支持 / 扩展需更新」，逐项给出真实状态与官方登录指引；「检查连接」只读重探，「复制诊断」只给脱敏 health JSON。
+- **安全修复（allow-list + 二次确认）**：仅当 host 可达且判定可自修时出现；明确告知只重写 Chrome Host 注册文件，不安装 Agent、不改项目文件。
+- **受控 CLI `htmlgenius-bridge`**：`doctor / setup / repair / uninstall / version`，`--json` 输出唯一 JSON 与稳定退出码；安装布局版本化受管目录（`~/.htmlgenius/bridge/versions/<v>/`，launcher 不指向 npx 缓存）；幂等 setup；V0.8.2 安装可迁移（extension ID 不匹配拒绝覆盖）；只删自家文件。
+- **任何状态保留「复制 Prompt」**：没连上 Bridge 也随时可以复制契约手动交给任意 AI。
+- **发行状态**：npm 包 `@htmlgenius/bridge` 尚未发布——当前 Connection Center 为**开发态**（显著标注「仅开发环境」，给仓库内命令）；开发者仍可用 `node bridge/install-macos.mjs --extension-id <ID>`。详见 [`docs/LOCAL_BRIDGE.md`](docs/LOCAL_BRIDGE.md)。
+
+### v0.8.2（2026-07-23）
 
 - **GitHub Copilot 接入**：Agent 菜单新增第三项 GitHub Copilot（单一入口，不暴露两个重复产品）。Host 通过官方 `@github/copilot-sdk`（精确锁定 1.0.7）连接：优先以 SDK stdio 模式连你本机的 `copilot` CLI（`local_cli`），CLI 缺失或不兼容时自动改用 SDK 自带 runtime（`bundled_sdk_cli`），菜单实时显示所用 runtime。
 - **受控安全边界**：Copilot session 跑在 SDK empty 模式——只开放文件读写类工具并逐个 `onPreToolUse` 校验（candidate 只允许写 `candidate.html`、plan 只允许写 `output/plan.json`，路径围栏 + symlink 逃逸检查）；shell / 网络 / subagent / MCP 全禁；每个 run 一个新 session，永不读取或续发你在 Copilot CLI / VS Code 里的已有会话。
@@ -90,5 +99,6 @@
 - **回灌需手动粘贴**：复制指令后要自己粘进 AI 对话框（除非用本机 Agent 闭环）。
 - **远程网页的编辑是临时的**：刷新或关闭页面即丢失，无法存回原网站。
 - **协同需登录**：多人实时评论需用飞书账号登录自托管后端；本地单人用法不受影响。
-- **本机 Agent 闭环需准备**：Codex 需安装 Codex Mac App 并登录；Claude Code 需 `claude auth login`；GitHub Copilot 需本机已登录 Copilot（CLI 可选，缺失时走 SDK 自带 runtime）；三者都需安装 host（仅 macOS + Node 20.19+/22.12+）。候选闭环的真实运行消耗你本机额度，自动化测试用假 CLI / 假 app-server / 假 Copilot SDK 覆盖（**真实 Copilot 端到端 smoke 尚未执行**，mock 通过不等于真机验证）。
+- **本机 Agent 闭环需准备**：Codex 需安装 Codex Mac App 并登录；Claude Code 需 `claude auth login`；GitHub Copilot 需本机已登录 Copilot（CLI 可选，缺失时走 SDK 自带 runtime）；三者都需安装本地连接组件（仅 macOS + Node 20.19+/22.12+）——v0.9 起可通过 Connection Center「让 Agent 帮我连接」或一条 Terminal 命令完成，无需进源码仓库。候选闭环的真实运行消耗你本机额度，自动化测试用假 CLI / 假 app-server / 假 Copilot SDK 覆盖（**真实 Copilot 端到端 smoke 与 v0.9 真实 Agent-assisted 安装的人工验收尚未执行**，mock 通过不等于真机验证）。
+- **npm 包未发布**：`@htmlgenius/bridge` 尚未 publish，Connection Center 处于开发态（给仓库内命令并显著标注）；正式发布是后续外部授权事项。
 - **候选 ≠ 接受修改**：候选版本不会自动覆盖原文件；diff / 审查 / 显式提升（promote）尚在路线图，未实现。
