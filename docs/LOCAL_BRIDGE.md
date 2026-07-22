@@ -83,12 +83,25 @@ node install-macos.mjs --uninstall              # 卸载
 - **health/repair 协议**：`bridge_health` 只读；`bridge_repair` 仅执行 allow-list（`repair_native_host`，需用户二次确认），只重写自身注册文件；输出绝不含路径/stderr/token/session。
 - **Agent 沙箱（沿用 v0.8.2，不允许回归）**：Claude 只读+Write 白名单；Codex workspaceWrite+禁网+codesign 校验；Copilot SDK empty 模式 + 工具白名单 + onPreToolUse 路径围栏；均只写候选，永不覆盖 source；不触碰用户已有会话。
 
-## 7. 测试
+## 7. 测试与验证体系（v0.9.1）
 
 ```bash
-cd bridge && npm test    # node --test test/*.test.mjs → 268 pass / 0 fail
+cd bridge
+npm test                 # L0/L1:283 pass / 0 fail(无账号/无网络)
+npm run verify:bootstrap # L1:install→幂等→origin 拒绝→损坏→repair→Native 帧→uninstall(13 项)
+npm run verify:providers # L2:三家 provider fake 认证(37 项)
+npm run verify           # 三门总入口(施工完成的最低自动化门)
 ```
 
-覆盖：安装核心（幂等/迁移/origin 拒绝/卸载选择/受管布局/原子写）、CLI（JSON 唯一性/退出码/doctor 无副作用/错误脱敏）、health 契约（reason_code/remediation/脱敏）、host health/repair（native 帧端到端/allow-list/未确认拒绝）、后台协议（BRIDGE_NOT_INSTALLED 映射/协议兼容/bootstrap 模板安全）、Connection Center（状态矩阵/修复二次确认/i18n 三语 key 完整）及 v0.8.2 全部 provider 回归。
+真实 smoke（L3，**默认拒绝运行**）：
 
-真实 macOS 端到端（Setup Prompt 粘贴给真实 Agent 执行）需人工验收，见 [MANUAL_VERIFICATION.md](MANUAL_VERIFICATION.md)；真实 Copilot 需有权益的设备单独 smoke。
+```bash
+HTMLGENIUS_ALLOW_REAL_SMOKE=1 HTMLGENIUS_SMOKE_WORKSPACE=<新建空目录> npm run smoke:local
+HTMLGENIUS_ALLOW_REAL_SMOKE=1 HTMLGENIUS_SMOKE_WORKSPACE=<新建空目录> npm run smoke:provider -- --provider github_copilot
+```
+
+workspace 必须是新建空目录，拒绝项目根/HOME/Desktop/Documents 内路径；真实 smoke 通过**不自动提升** provider 为正式支持。
+
+覆盖：安装核心（幂等/迁移/origin 拒绝/卸载选择/受管布局/原子写）、CLI（JSON 唯一性/退出码/doctor 无副作用/错误脱敏）、health 契约（reason_code/remediation/脱敏）、host health/repair（native 帧端到端/allow-list/未确认拒绝）、后台协议、Connection Center 纯函数状态矩阵、provider registry 一致性、fixture contract 硬门、report 脱敏泄露回归，及 v0.8.2 全部 provider 回归。
+
+真实 macOS 端到端（Setup Prompt 粘贴给真实 Agent 执行）需人工验收，见 [MANUAL_VERIFICATION.md](MANUAL_VERIFICATION.md)；新增 Agent 的认证契约与交付物清单见 [providers/README.md](providers/README.md)。

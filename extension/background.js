@@ -4,19 +4,20 @@
 // completion 逐字段 double-check(run_id / task_sha256 自算对照 / session UUID)→ 持久化 run+session。
 // 本版是「任务交接验收」:不产 candidate、不写回、不 reload、不重锚定批注(§1 明确不做)。
 // host 名 provider-neutral(com.htmlgenius.local_bridge):后续 Codex adapter 复用同一 host。
-importScripts("storage.js", "bridge-validate.js", "plan-validate.js");
+importScripts("storage.js", "bridge-validate.js", "plan-validate.js", "provider-metadata.js");
 
 const NATIVE_HOST = "com.htmlgenius.local_bridge";
 const PROVIDER = "claude_code_cli";
 const CODEX_PROVIDER = "codex_app_server";
 const COPILOT_PROVIDER = "github_copilot"; // v0.8.2:GitHub Copilot(Copilot SDK;Host-only runtime:local_cli / bundled_sdk_cli)
-const SUPPORTED_PROVIDERS = new Set([PROVIDER, CODEX_PROVIDER, COPILOT_PROVIDER]);
-// v0.8.2 §6.3.2:每个 provider 有明确的 handoff message type;禁止「非 Codex 即 Claude」的默认 ternary。
-const HANDOFF_START_TYPES = {
-  [PROVIDER]: "claude_handoff_start",
-  [CODEX_PROVIDER]: "codex_handoff_start",
-  [COPILOT_PROVIDER]: "copilot_handoff_start"
-};
+// v0.9.1 §3.1:provider allow-list 与 dispatch 映射由同源只读元数据派生(extension/provider-metadata.js),
+// 与 bridge/provider-registry.mjs 的一致性由 provider-registry.test 强制,杜绝四处硬编码漂移。
+const SUPPORTED_PROVIDERS = new Set(ProviderMetadata.listProviderIds());
+const HANDOFF_START_TYPES = (() => {
+  const m = {};
+  for (const id of ProviderMetadata.listProviderIds()) m[id] = ProviderMetadata.getProviderDescriptor(id).dispatch_type;
+  return m;
+})();
 // v0.9 §4.3:版本单一来源 —— 扩展版本一律取 manifest(getManifest().version),杜绝四处漂移。
 // BRIDGE_PROTOCOL_VERSION:与 bridge-health/host 共用;TARGET_BRIDGE_VERSION:bootstrap 指向的受控 CLI 版本(不得 latest)。
 const BRIDGE_PROTOCOL_VERSION = 1;

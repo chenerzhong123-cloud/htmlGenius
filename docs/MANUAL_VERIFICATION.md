@@ -63,3 +63,14 @@
 ---
 
 **未验证项记录处：**（真实 Copilot smoke、Windows/Linux 表现、npm 发布后 production bootstrap 均待后续。）
+
+## 9. 验证分层（v0.9.1 —— 人工验收前先跑自动化门）
+
+| 层 | 命令 | 证明 | 状态 |
+|---|---|---|---|
+| L0/L1 | `cd bridge && npm test && npm run verify:bootstrap` | 纯函数/安装/Native framing/artifact 闭环 | 自动化全绿 |
+| L2 | `npm run verify:providers` | 三 provider fake 认证（probe/candidate/plan/安全） | 自动化全绿 |
+| L3a | `HTMLGENIUS_ALLOW_REAL_SMOKE=1 HTMLGENIUS_SMOKE_WORKSPACE=<新目录> npm run smoke:provider -- --provider <id>` | 真实 Agent 闭环（本清单 §2/§5 的可自动部分） | **未执行（需账号）** |
+| L3b | 本清单 §1–§8 | 真实 Chrome + Side Panel 交互 | **人工** |
+
+> fake 认证通过 ≠ 真实可用：L3 未做时，实现状态必须标「mock 认证已过，真实 smoke 未验证」，不得写成「全部自动验证」。

@@ -84,14 +84,14 @@ test("background provider probe 缓存 30s(makeProviderProbeCache)", () => {
 });
 
 // —— v0.8.2 §6.3:GitHub Copilot provider 接线(源码级)——
-test("background v0.8.2:COPILOT_PROVIDER 与 SUPPORTED_PROVIDERS 含 github_copilot", () => {
+test("background v0.9.1:SUPPORTED_PROVIDERS / HANDOFF_START_TYPES 由 ProviderMetadata 派生(不再硬编码列表)", () => {
   assert.match(bg, /COPILOT_PROVIDER = "github_copilot"/);
-  assert.match(bg, /SUPPORTED_PROVIDERS = new Set\(\[PROVIDER, CODEX_PROVIDER, COPILOT_PROVIDER\]\)/);
+  assert.match(bg, /SUPPORTED_PROVIDERS = new Set\(ProviderMetadata\.listProviderIds\(\)\)/);
+  assert.match(bg, /ProviderMetadata\.getProviderDescriptor\(id\)\.dispatch_type/);
+  assert.match(bg, /importScripts\([^)]*provider-metadata\.js/);
 });
 
-test("background v0.8.2:每 provider 明确 handoff type(禁 ternary 默认),copilot → copilot_handoff_start", () => {
-  assert.match(bg, /HANDOFF_START_TYPES = \{/);
-  assert.match(bg, /\[COPILOT_PROVIDER\]: "copilot_handoff_start"/);
+test("background v0.8.2:dispatch 仍按 HANDOFF_START_TYPES 明确映射(禁 ternary 默认)", () => {
   assert.match(bg, /type: HANDOFF_START_TYPES\[provider\]/);
   assert.doesNotMatch(bg, /provider === CODEX_PROVIDER \? "codex_handoff_start" : "claude_handoff_start"/);
 });

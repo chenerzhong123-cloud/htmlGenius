@@ -631,7 +631,12 @@
     renderPlanConfirmState();
   }
   const PROVIDER_LABELS = { claude_code_cli: "Claude Code", codex_app_server: "Codex", github_copilot: "GitHub Copilot" };
-  function providerLabel(id) { return PROVIDER_LABELS[id] || "Claude Code"; }
+  // v0.9.1:label 取自同源 provider 元数据的 label_key(随三语言切换);PROVIDER_LABELS 仅作降级兜底
+  function providerLabel(id) {
+    const d = (typeof ProviderMetadata !== "undefined") ? ProviderMetadata.getProviderDescriptor(id) : null;
+    if (d) { const v = t(d.label_key); if (v && v !== d.label_key) return v; }
+    return PROVIDER_LABELS[id] || "Claude Code";
+  }
   // 重置契约表单(新一轮开始 / 关闭清空时)
   function resetContractForm() {
     const precise = document.querySelector('input[name="contract-scope"][value="precise_patch"]');
@@ -1034,72 +1039,28 @@
     return !!(h && h.bridge && h.bridge.status === "ready"
       && Array.isArray(h.providers) && h.providers.some((p) => p && p.status === "ready"));
   }
-  // §5.2 状态矩阵 → 标题/描述/主操作/次操作/折叠
+  // §5.2 状态矩阵 → 由纯函数 ConnectionCenterState.connStateFor 驱动(v0.9.1 §9.1,可 node:test 验证)
   function renderConnCenter() {
     if (!connCenter) return;
     if (!_contractOpen) { connCenter.hidden = true; return; }
     connCenter.hidden = false;
     if (connRepairConfirm) connRepairConfirm.hidden = true;
-    const h = _health;
-    if (!h) {
-      connCenter.className = "conn-center";
-      connTitle.textContent = t("conn.titleChecking");
-      if (connDesc) connDesc.hidden = true;
-      renderConnProviders([]);
-      setConnButton(connPrimary, null); setConnButton(connSecondary, null);
-      connSetPermanent("");
-      return;
-    }
-    const rc = h.reason_code || null;
-    const bs = (h.bridge && h.bridge.status) || "";
-    const providers = Array.isArray(h.providers) ? h.providers : [];
-    const readyCount = providers.filter((p) => p && p.status === "ready").length;
-    let title = "", desc = "", cls = "", primary = null, pAction = null, secondary = null, sAction = null, showProviders = false;
-
-    if (rc === "OS_UNSUPPORTED") {
-      title = t("conn.titleUnsupported"); desc = t("conn.descUnsupported"); cls = "warn";
-    } else if (rc === "BRIDGE_PROTOCOL_TOO_NEW") {
-      title = t("conn.titleExtNeedUpdate"); desc = t("conn.descExtNeedUpdate"); cls = "warn";
-    } else if (bs === "install_required" || rc === "BRIDGE_NOT_INSTALLED") {
-      title = t("conn.titleNotInstalled"); desc = t("conn.descNotInstalled"); cls = "warn";
-      primary = t("conn.agentSetup"); pAction = "setup";
-      secondary = t("conn.copyTerminal"); sAction = "terminal";
-    } else if (bs === "protocol_incompatible" || rc === "BRIDGE_PROTOCOL_TOO_OLD" || rc === "BRIDGE_FILES_CORRUPT") {
-      // host 过旧/损坏:经 Setup Prompt 重走 doctor→setup 修复(不自动覆盖,§6.6)
-      title = t("conn.titleNeedRepair"); desc = t("conn.descNeedRepair"); cls = "warn";
-      primary = t("conn.agentRepair"); pAction = "setup";
-      secondary = t("conn.copyTerminal"); sAction = "terminal";
-    } else if (bs === "repair_required") {
-      // host 可达且判定可自修(如注册文件缺失)→ 安全修复,二次确认明示修改项(§2.3)
-      title = t("conn.titleNeedRepair"); desc = t("conn.descNeedRepairHost"); cls = "warn";
-      primary = t("conn.repair"); pAction = "repair";
-      secondary = t("conn.copyTerminal"); sAction = "terminal";
-    } else if (bs === "ready" && readyCount > 0) {
-      title = t("conn.titleConnected").replace("{n}", String(readyCount));
-      cls = "ok"; showProviders = true;
-    } else if (bs === "ready") {
-      title = t("conn.titleBridgeReady"); desc = t("conn.descBridgeReady");
-      showProviders = true;
-      primary = t("conn.check"); pAction = "check";
-    } else {
-      title = t("conn.titleNeedRepair"); desc = t("conn.descNeedRepair"); cls = "warn";
-      primary = t("conn.agentRepair"); pAction = "setup";
-    }
-
-    const collapsed = (_connCollapsed === null) ? connAutoCollapsed(h) : _connCollapsed;
-    connCenter.className = "conn-center" + (cls ? " " + cls : "") + (collapsed ? " collapsed" : "");
-    if (connHead) connHead.setAttribute("aria-expanded", String(!collapsed));
-    connTitle.textContent = title;
-    if (connDesc) { connDesc.textContent = desc; connDesc.hidden = !desc; }
-    renderConnProviders(showProviders ? providers : []);
-    setConnButton(connPrimary, primary, pAction);
-    setConnButton(connSecondary, secondary, sAction);
-    // 常驻底注:未全部就绪时提示「复制 Prompt 仍可用」+ 开发态标注(§0.2/§5.3)
-    if (bs !== "ready" || readyCount === 0) {
-      connSetPermanent(t("conn.promptStillAvailable") + ((_bootstrap && _bootstrap.dev_only) ? " " + t("conn.devOnly") : ""));
-    } else {
-      connSetPermanent("");
-    }
+    const st = ConnectionCenterState.connStateFor(_health, {
+      userCollapsed: _connCollapsed,
+      devOnly: !!(_bootstrap && _bootstrap.dev_only)
+    });
+    connCenter.className = "conn-center" + (st.cls ? " " + st.cls : "") + (st.collapsed ? " collapsed" : "");
+    if (connHead) connHead.setAttribute("aria-expanded", String(!st.collapsed));
+    connTitle.textContent = (st.titleKey === "conn.titleConnected")
+      ? t(st.titleKey).replace("{n}", String(st.readyCount || 0))
+      : t(st.titleKey);
+    if (connDesc) { connDesc.textContent = st.descKey ? t(st.descKey) : ""; connDesc.hidden = !st.descKey; }
+    renderConnProviders(st.showProviders && _health ? (_health.providers || []) : []);
+    setConnButton(connPrimary, st.primary ? t(st.primary.labelKey) : null, st.primary ? st.primary.action : null);
+    setConnButton(connSecondary, st.secondary ? t(st.secondary.labelKey) : null, st.secondary ? st.secondary.action : null);
+    let hint = st.permanentHintKey ? t(st.permanentHintKey) : "";
+    if (hint && st.devOnly) hint += " " + t("conn.devOnly");
+    connSetPermanent(hint);
   }
   async function connDo(action) {
     if (!action) return;
