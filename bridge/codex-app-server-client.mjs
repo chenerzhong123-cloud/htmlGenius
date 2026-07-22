@@ -23,10 +23,9 @@ const CODEX_BUNDLE_ID = 'com.openai.codex';
 const REQUIRED_TEAM_ID = '2DC432GLL2';
 const CLIENT_INFO = { name: 'htmlgenius-bridge', version: '0.8.0' };
 const HANDSHAKE_TIMEOUT_MS = 20_000;
-// spec §6.3.6(可配置)。v0.8.1:180s→600s。整页重生成(regenerate/大 local_optimize)实测常 >3 分钟,
-// 180s 会把仍在跑的 turn 误判超时(candidate.html 还没写就被掐)。10 分钟给复杂页留余量;
-// 真挂起时用户可点 sidepanel「终止任务」中止,不必干等。
-export const DEFAULT_TURN_TIMEOUT_MS = 600_000;
+// spec §6.3.6(可配置)。v0.8.1:15 分钟。整页重生成(regenerate/大 local_optimize)实测常很慢,
+// 给复杂页留足余量;真挂起时用户可点 sidepanel「终止任务」中止,不必干等。
+export const DEFAULT_TURN_TIMEOUT_MS = 900_000;
 const REQUIRED_METHODS = ['initialize', 'thread/start', 'thread/resume', 'turn/start'];
 
 function fail(code, message, extra) {

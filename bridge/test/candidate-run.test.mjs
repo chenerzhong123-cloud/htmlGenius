@@ -42,8 +42,9 @@ test("candidate 成功:fake 写 candidate.html → sibling + ready manifest + ca
   assert.equal(ready.logical_document_id, "hgd_c");
   assert.match(ready.candidate_sha256, /^sha256:[0-9a-f]{64}$/);
   assert.equal(ready.source_sha256_before, fix.hash);
-  // sibling 存在且内容正确
-  const sib = path.join(fix.dir, "report--htmlgenius-hgr_crun0123456789.candidate.html");
+  assert.equal(ready.version_label, "1.1", "candidate-ready 带文档级版本号 V1.1");
+  // sibling 存在且内容正确(v0.8.1:文件名带版本号 reportV1.1.html)
+  const sib = path.join(fix.dir, "reportV1.1.html");
   assert.ok(fs.existsSync(sib), "sibling candidate 创建");
   assert.equal(fs.readFileSync(sib, "utf8"), "<!doctype html><html><body>EDITED</body></html>");
   // manifest ready

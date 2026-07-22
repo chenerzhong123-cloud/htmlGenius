@@ -11,7 +11,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   resolveSourcePath, prepareCandidateRun, writeManifest, validateCandidate,
-  publishSiblingCandidate, quarantineCandidate, writeApprovedPlan
+  publishSiblingCandidate, quarantineCandidate, writeApprovedPlan, nextCandidateVersionLabel
 } from './candidate-workspace.mjs';
 import { createWorkspace, writeTaskBundle, buildCodexPrompt, buildPlanPrompt, approvedPlanPreamble, isSha256Tagged, sha256File } from './task-bundle.mjs';
 import {
@@ -198,9 +198,12 @@ export async function executeCodexCandidateRun(msg, { emit, runtime, client, sch
   try { cand = validateCandidate(prep.candidatePath, prep.sourceByteLength); }
   catch (e) { failed(e.code || 'CANDIDATE_MISSING', e.message, prep.runsDir, { ...ctxBase, sourceSha256After, threadId }); return; }
 
-  // 9. 原子 sibling(同名不覆盖)
-  let resultPath;
-  try { resultPath = publishSiblingCandidate({ candidatePath: prep.candidatePath, sourcePath, runId }); }
+  // 9. 原子 sibling(同名不覆盖)。v0.8.1:文档级版本号 V1.1/V1.2 → 写进文件名 + candidate-ready
+  let resultPath; let versionLabel;
+  try {
+    versionLabel = nextCandidateVersionLabel({ sourcePath, logicalDocumentId: source.logical_document_id });
+    resultPath = publishSiblingCandidate({ candidatePath: prep.candidatePath, sourcePath, runId, versionLabel });
+  }
   catch (e) { failed(e.code || 'CANDIDATE_PUBLISH_FAILED', e.message, prep.runsDir, { ...ctxBase, sourceSha256After, threadId }); return; }
 
   // 10. ready manifest(provider=codex_app_server,session=thread_id)
@@ -215,7 +218,7 @@ export async function executeCodexCandidateRun(msg, { emit, runtime, client, sch
     });
   } catch (e) { failed('MANIFEST_FAILED', e.message, prep.runsDir, { ...ctxBase, sourceSha256After, threadId }); return; }
 
-  // 11. candidate-ready(最小 completion;含 thread_id 供续发;不含 agent message/stdout)
+  // 11. candidate-ready(最小 completion;含 thread_id 供续发;不含 agent message/stdout;带版本号 V1.N)
   emit({
     type: 'candidate-ready',
     provider: 'codex_app_server',
@@ -227,6 +230,7 @@ export async function executeCodexCandidateRun(msg, { emit, runtime, client, sch
     source_sha256_before: prep.sourceSha256Before,
     candidate_uri: pathToFileURL(resultPath).href,
     candidate_sha256: cand.sha256,
+    version_label: versionLabel,
     manifest_path: manifestPath
   });
 }

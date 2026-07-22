@@ -68,7 +68,8 @@ test('§10.2: codex new 成功 → candidate-ready(provider+thread_id)+ sibling 
   assert.equal(ready.provider, 'codex_app_server');
   assert.equal(ready.thread_id, 'thr_fake_1');
   assert.equal(ready.source_sha256_before, fix.hash);
-  const sib = path.join(fix.dir, 'report--htmlgenius-hgr_cx0123456789.candidate.html');
+  assert.equal(ready.version_label, '1.1', 'candidate-ready 带文档级版本号 V1.1');
+  const sib = path.join(fix.dir, 'reportV1.1.html');
   assert.ok(fs.existsSync(sib), 'sibling candidate 创建');
   const mp = path.join(fix.root, 'runs', 'hgr_cx0123456789', 'candidate-manifest.json');
   const manifest = JSON.parse(fs.readFileSync(mp, 'utf8'));

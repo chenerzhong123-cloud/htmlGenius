@@ -68,7 +68,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         run_id: run.run_id, provider: run.provider, completed_at: run.completed_at,
         source_uri: run.source_artifact_uri, candidate_uri: run.candidate_uri,
         candidate_sha256: run.candidate_sha256, base_artifact_hash: run.base_artifact_hash,
-        manifest_path: run.manifest_path
+        version_label: run.version_label || null, manifest_path: run.manifest_path
       } : null });
     })();
     return true;
@@ -298,15 +298,25 @@ async function cancelRun(tab_id, runId) {
   return true;
 }
 
-// v0.8.1 本文档候选版本号:每生成一个候选 +1(chrome.storage.local;让用户知道改到了第几版)
-function bumpCandidateVersion(logicalId) {
-  if (!logicalId) return Promise.resolve(0);
-  const key = "hg_cand_ver_" + logicalId;
-  return new Promise((resolve) => {
-    chrome.storage.local.get([key], (res) => {
-      const n = (res && typeof res[key] === "number") ? res[key] + 1 : 1;
-      chrome.storage.local.set({ [key]: n }, () => resolve(n));
-    });
+// v0.8.1 Chrome 系统通知:候选生成成功后提醒用户回来看新 candidate.html;点击通知打开候选页签。
+const _notifyCandidateUri = new Map(); // notificationId → candidate_uri
+function notifyCandidateReady(versionLabel, candidateUri) {
+  if (!chrome.notifications) return;
+  const id = "hg-candidate-" + Date.now() + "-" + Math.floor(Math.random() * 1e6);
+  if (candidateUri) _notifyCandidateUri.set(id, candidateUri);
+  chrome.notifications.create(id, {
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+    title: "htmlGenius",
+    message: (versionLabel ? ("新候选版本 V" + versionLabel + " 已生成") : "新候选版本已生成") + "，点击查看",
+    priority: 2
+  }, () => {});
+}
+if (chrome.notifications && chrome.notifications.onClicked) {
+  chrome.notifications.onClicked.addListener((nid) => {
+    const uri = _notifyCandidateUri.get(nid);
+    if (uri) { chrome.tabs.create({ url: uri }).catch(() => {}); _notifyCandidateUri.delete(nid); }
+    try { chrome.notifications.clear(nid); } catch (e) {}
   });
 }
 
@@ -377,21 +387,21 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
     return failRun(tab_id, runId, "CONSUMER_REJECTED", "artifact-update-ready consumer rejected: " + (consumerResp && consumerResp.code));
   }
 
-  // 先广播(用户可见:侧边栏立即显示成功);再开页签 + 持久化(SW 可能在 await 期间被杀,broadcast 已发则用户不受影响)
+  // 先广播(用户可见:侧边栏立即显示成功);version_label 来自 host(文档级版本号 V1.N,已写进文件名)。
   const provider = run.provider || completion.provider || PROVIDER;
   const isCodex = provider === CODEX_PROVIDER;
   const sessionId = isCodex ? (completion.thread_id || null) : (run.session_id || null);
-  const candVersion = await bumpCandidateVersion(logicalId); // 本文档版本号 +1
+  const versionLabel = completion.version_label || null;
   broadcast({
-    type: "bridge-completed", tab_id, run_id: runId, candidate: true, version: candVersion,
+    type: "bridge-completed", tab_id, run_id: runId, candidate: true, version_label: versionLabel,
     candidate_uri: completion.candidate_uri, source_uri: completion.source_uri,
     candidate_sha256: completion.candidate_sha256, source_sha256_before: completion.source_sha256_before
   });
-  // 自动新开页签打开候选(原 source 页签保持不动,不替用户刷新);tabs.create 失败时由 sidepanel「打开候选版本」按钮兜底
-  chrome.tabs.create({ url: completion.candidate_uri }).catch(() => {});
+  // 先持久化 status=completed(+version_label),再开页签:确保用户切回源 tab 时 reconcile 能读到终态,
+  // 发送按钮可靠恢复(否则 tabs.create 触发的切 tab 竞态会让源 tab 卡在 running)。
   const runPatch = { status: "completed", completed_at: nowIso(),
     candidate_uri: completion.candidate_uri, candidate_sha256: completion.candidate_sha256,
-    manifest_path: completion.manifest_path };
+    version_label: versionLabel, manifest_path: completion.manifest_path };
   if (isCodex && sessionId) runPatch.thread_id = sessionId;
   await Storage.updateBridgeRun(runId, runPatch).catch(() => {});
   if (sessionId) {
@@ -403,6 +413,10 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
     if (isCodex) sessionRec.thread_id = sessionId; else sessionRec.session_id = sessionId;
     await Storage.saveBridgeSession(sessionRec).catch(() => {});
   }
+  // 自动新开页签打开候选(原 source 页签保持不动);失败由 sidepanel「打开候选版本」按钮兜底
+  chrome.tabs.create({ url: completion.candidate_uri }).catch(() => {});
+  // v0.8.1 系统通知:提醒用户回来看新候选
+  try { notifyCandidateReady(versionLabel, completion.candidate_uri); } catch (e) { /* 非关键 */ }
 }
 
 // —— v0.8.1 §5.3:plan-ready → 逐字段校验(host 回送 vs run 记录;绝不跨侧比 hash)→ 建 bridge_plans(draft)→ 广播 bridge-plan-ready ——

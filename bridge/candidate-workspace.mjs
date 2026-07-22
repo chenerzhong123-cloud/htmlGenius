@@ -54,11 +54,37 @@ export function resolveSourcePath(sourceUriOrPath) {
   return real;
 }
 
-// sibling candidate 名(spec §3.2):<sourceStem>--htmlgenius-<runId>.candidate.html
-export function siblingCandidateName(sourcePath, runId) {
+// sibling candidate 名(spec §3.2)。v0.8.1:传 versionLabel(如 "1.1")→ <sourceStem>V1.1.html(用户可读版本号);
+// 不传则回退旧契约名 <sourceStem>--htmlgenius-<runId>.candidate.html(测试/内部用)。
+export function siblingCandidateName(sourcePath, runId, versionLabel) {
   assertSafeRunId(runId);
   const stem = path.basename(sourcePath).replace(/\.html?$/i, "");
+  if (versionLabel && /^\d+(\.\d+){0,2}$/.test(String(versionLabel))) {
+    return stem + "V" + versionLabel + ".html";
+  }
   return stem + "--htmlgenius-" + runId + ".candidate.html";
+}
+
+// v0.8.1 文档级候选版本号(持久计数,跨 provider 连续):<sourceDir>/.htmlgenius-bridge/candidate-versions.json。
+// 每成功生成一个 candidate +1,标签 "1.N"(V1.1、V1.2…),用于 sibling 文件名与 UI 展示。
+export function candidateVersionsFilePath(sourcePath) {
+  const dir = path.dirname(resolveSourcePath(sourcePath));
+  return path.join(dir, ".htmlgenius-bridge", "candidate-versions.json");
+}
+export function nextCandidateVersionLabel({ sourcePath, logicalDocumentId }) {
+  const vp = candidateVersionsFilePath(sourcePath);
+  try { fs.mkdirSync(path.dirname(vp), { recursive: true }); } catch (_) {}
+  let map = {};
+  try { map = JSON.parse(fs.readFileSync(vp, "utf8")) || {}; } catch (_) {}
+  if (!map || typeof map !== "object" || Array.isArray(map)) map = {};
+  const key = String(logicalDocumentId || "_");
+  const n = (typeof map[key] === "number" && map[key] >= 0 ? map[key] : 0) + 1;
+  map[key] = n;
+  try {
+    fs.writeFileSync(vp, JSON.stringify(map, null, 2), { mode: 0o600 });
+    try { fs.chmodSync(vp, 0o600); } catch (_) {}
+  } catch (_) {}
+  return "1." + n;
 }
 
 // 建立 runs/<runId>/(0700)+ 写 source snapshot(0400)+ copy 后 hash 校验(spec §3.4.2)
@@ -136,10 +162,10 @@ export function validateCandidate(candidatePath, sourceByteLength) {
   return { bytes: buf, sha256: sha256Bytes(buf), byteLength: lst.size };
 }
 
-// 成功后原子复制 sibling(spec §3.2/3.4.7):同名已存在不覆盖
-export function publishSiblingCandidate({ candidatePath, sourcePath, runId }) {
+// 成功后原子复制 sibling(spec §3.2/3.4.7):同名已存在不覆盖。v0.8.1:versionLabel → 版本号命名
+export function publishSiblingCandidate({ candidatePath, sourcePath, runId, versionLabel }) {
   const realSource = resolveSourcePath(sourcePath);
-  const resultPath = path.join(path.dirname(realSource), siblingCandidateName(realSource, runId));
+  const resultPath = path.join(path.dirname(realSource), siblingCandidateName(realSource, runId, versionLabel));
   if (fs.existsSync(resultPath)) fail("CANDIDATE_NAME_CONFLICT", "sibling candidate already exists (won't overwrite): " + resultPath);
   const tmp = resultPath + ".tmp." + process.pid + "." + Date.now();
   fs.copyFileSync(candidatePath, tmp);

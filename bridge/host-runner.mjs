@@ -14,7 +14,7 @@ import {
 import { isSessionUuid, checkAuth, runHandoff, resumeHandoff, HANDOFF_TIMEOUT_MS } from "./claude-cli.mjs";
 import {
   resolveSourcePath, prepareCandidateRun, writeManifest, validateCandidate,
-  publishSiblingCandidate, quarantineCandidate, writeApprovedPlan
+  publishSiblingCandidate, quarantineCandidate, writeApprovedPlan, nextCandidateVersionLabel
 } from "./candidate-workspace.mjs";
 import {
   preparePlanRun, verifyTaskBundleUnchanged, validatePlanJson, writePlanManifest, quarantinePlan
@@ -24,9 +24,9 @@ import { pathToFileURL } from "node:url";
 const realClaude = { checkAuth, runHandoff, resumeHandoff };
 
 // candidate run 需要读写完整 HTML 文件,比 ack 回执慢得多。实测:1 条评论约 3 分钟;
-// 3 条评论 local_optimize >5 分钟(2026-07-21 8:36 run timed_out 铁证 + CPU 监控显示 98% 时间在等 API)。
-// 故 8 分钟。再不够说明任务过大或模型卡顿,应减小任务范围,而非无限加时。
-const CANDIDATE_TIMEOUT_MS = 8 * 60 * 1000; // 8 分钟
+// v0.8.1:Claude 候选超时 15 分钟(与 Codex 两侧统一)。整页重生成常很慢(等 API 占 98% 时间),
+// 15 分钟给复杂页留足余量;真挂起时用户可点「终止任务」中止,不必干等。
+const CANDIDATE_TIMEOUT_MS = 15 * 60 * 1000; // 15 分钟
 // v0.8.1 plan run(spec §6.5):Agent 只写一个 plan.json,不重写整页 HTML → 比 candidate 快得多。3 分钟,不无限等待。
 const CLAUDE_PLAN_TIMEOUT_MS = 3 * 60 * 1000; // 3 分钟
 
@@ -237,10 +237,12 @@ export async function executeCandidateRun(msg, { emit, claude } = {}) {
   try { cand = validateCandidate(prep.candidatePath, prep.sourceByteLength); }
   catch (e) { failed(e.code || "CANDIDATE_MISSING", e.message, prep.runsDir, { ...ctxBase, sourceSha256After, sessionId }); return; }
 
-  // 8. 原子 sibling 复制(同名不覆盖)
-  let resultPath;
-  try { resultPath = publishSiblingCandidate({ candidatePath: prep.candidatePath, sourcePath, runId }); }
-  catch (e) { failed(e.code || "CANDIDATE_PUBLISH_FAILED", e.message, prep.runsDir, { ...ctxBase, sourceSha256After, sessionId }); return; }
+  // 8. 原子 sibling 复制(同名不覆盖)。v0.8.1:文档级版本号 V1.1/V1.2 → 写进文件名 + candidate-ready
+  let resultPath; let versionLabel;
+  try {
+    versionLabel = nextCandidateVersionLabel({ sourcePath, logicalDocumentId: source.logical_document_id });
+    resultPath = publishSiblingCandidate({ candidatePath: prep.candidatePath, sourcePath, runId, versionLabel });
+  } catch (e) { failed(e.code || "CANDIDATE_PUBLISH_FAILED", e.message, prep.runsDir, { ...ctxBase, sourceSha256After, sessionId }); return; }
 
   // 9. ready manifest
   let manifestPath;
@@ -254,7 +256,7 @@ export async function executeCandidateRun(msg, { emit, claude } = {}) {
     });
   } catch (e) { failed("MANIFEST_FAILED", e.message, prep.runsDir, { ...ctxBase, sourceSha256After, sessionId }); return; }
 
-  // 10. candidate-ready(最小 completion;不含 Claude stdout/思维链)
+  // 10. candidate-ready(最小 completion;不含 Claude stdout/思维链;带版本号 V1.N)
   emit({
     type: "candidate-ready",
     run_id: runId,
@@ -264,6 +266,7 @@ export async function executeCandidateRun(msg, { emit, claude } = {}) {
     source_sha256_before: prep.sourceSha256Before,
     candidate_uri: pathToFileURL(resultPath).href,
     candidate_sha256: cand.sha256,
+    version_label: versionLabel,
     manifest_path: manifestPath
   });
 }

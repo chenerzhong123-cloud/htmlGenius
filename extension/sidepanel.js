@@ -518,7 +518,7 @@
   let _contractRunId = null;          // 当前 sidepanel 跟踪的 run id(匹配 bridge-stream/完成事件)
   let _streamText = "";               // Agent 实时输出累积(agentMessage delta)
   let _candidateResult = null;      // 最近一次 candidate-ready 结果(只读成功态)
-  let _candidateVersion = 0;        // 本文档候选版本号(chrome.storage.local hg_cand_ver_<logicalId>)
+  let _candidateVersionLabel = null;  // 本文档候选版本号标签(来自 host "1.N" 字符串,如 "1.3")
   // v0.8.1 provider probe + plan-first 状态(spec §3.D/§5)
   let _provider = null;             // 当前选中 provider id(仅 ready 可选)
   let _providerStates = {};         // { providerId: probe 记录 }
@@ -610,8 +610,8 @@
       if (lock) { contractBridge.textContent = t("bridge.abort"); contractBridge.disabled = false; contractBridge.classList.add("aborting"); }
       else { contractBridge.textContent = _provider ? t("bridge.sendTo").replace("{agent}", providerLabel(_provider)) : t("bridge.run"); contractBridge.disabled = !canDispatch; contractBridge.classList.remove("aborting"); }
     }
-    // 运行中隐藏「先给我看修改计划」,完成/终止后恢复(spec)
-    if (contractPlanBtn) { if (lock) contractPlanBtn.hidden = true; else { contractPlanBtn.hidden = false; contractPlanBtn.disabled = !canDispatch; } }
+    // v0.8.1:「先给我看修改计划」前端先隐去(后端 plan 逻辑保留,待合适时机再细化);保持常 hidden
+    if (contractPlanBtn) contractPlanBtn.hidden = true;
     if (contractCopyPrompt) contractCopyPrompt.disabled = false; // 复制 Prompt 始终可用(用户可随时复制去自己的会话)
     renderRangeLink();
     renderPlanConfirmState();
@@ -740,7 +740,7 @@
   // v0.8.1:候选成功态展示在状态栏(版本号 + 打开按钮)。compose 内候选卡 / hash evidence / 返回源文件 已移除。
   function showCandidateResult(msg) {
     _candidateResult = msg || null;
-    if (msg && typeof msg.version === "number") _candidateVersion = msg.version;
+    if (msg && msg.version_label) _candidateVersionLabel = String(msg.version_label);
     renderCandidateIndicator();
   }
   function renderCandidateIndicator() {
@@ -748,23 +748,14 @@
     const ready = !!_candidateResult;
     cbsCandidate.hidden = !ready;
     if (ready && cbsVersion) {
-      cbsVersion.textContent = t("candidate.versionReady").replace("{n}", String(_candidateVersion || 1));
+      cbsVersion.textContent = t("candidate.versionReady").replace("{n}", _candidateVersionLabel || "1.1");
     }
     if (ready && contractBridgeStatus) contractBridgeStatus.hidden = false;
   }
-  // v0.8.1 本文档候选版本号(本地计数,让用户知道改到了第几版)
-  async function applyCandidateVersion(logicalId) {
-    if (!logicalId) return;
-    try {
-      const key = "hg_cand_ver_" + logicalId;
-      const v = await new Promise((res) => chrome.storage.local.get([key], (o) => res((o && o[key]) || 0)));
-      _candidateVersion = v || 0;
-    } catch (e) {}
-  }
-  // 刷新 Side Panel 后:预载本文档候选版本号(不强制弹状态栏;仅完成后展示用)
+  // 刷新 Side Panel 后:预载本文档最近候选的版本号标签(不强制弹状态栏;仅完成后展示用)
   async function loadCandidateEvidence(tabId) {
     const r = await chrome.runtime.sendMessage({ type: "bridge-query-latest-candidate", tab_id: tabId }).catch(() => null);
-    if (r && r.run) await applyCandidateVersion(r.run.logical_document_id);
+    if (r && r.run && r.run.version_label) _candidateVersionLabel = String(r.run.version_label);
   }
   function showContractFallback(out) {
     contractFallback.hidden = false;
@@ -879,18 +870,27 @@
   function setBridgeStatus(text, cls) {
     if (!contractBridgeStatus) return;
     const expanded = contractBridgeStatus.classList.contains("expanded");
+    const full = contractBridgeStatus.classList.contains("expanded-full");
     contractBridgeStatus.hidden = !text && !_runEvents.length && !_candidateResult;
     const tx = cbsTextEl(); if (tx) tx.textContent = text || "";
-    contractBridgeStatus.className = "contract-bridge-status" + (cls ? " " + cls : "") + (expanded ? " expanded" : "");
+    contractBridgeStatus.className = "contract-bridge-status" + (cls ? " " + cls : "") + (expanded ? " expanded" : "") + (full ? " expanded-full" : "");
   }
-  // 发送后默认展开进度窗;完成/终止后收起(spec:用户要点开才看历史,但运行中默认展开给实时反馈)
-  function expandBridgeDetail(open) {
+  // 发送后默认展开进度窗(capped 限高);完成/终止后收起;点击在 收起→capped→全展→收起 间循环。
+  // open=false 收起;open=true 打开,full=true 进一步全展开(看全部历史)。
+  function expandBridgeDetail(open, full) {
     if (!contractBridgeStatus) return;
     const d = contractBridgeStatus.querySelector(".cbs-detail");
     if (!d) return;
-    d.hidden = !open;
-    contractBridgeStatus.classList.toggle("expanded", !!open);
-    if (open) loadRunHistory();
+    if (!open) {
+      d.hidden = true;
+      contractBridgeStatus.classList.remove("expanded");
+      contractBridgeStatus.classList.remove("expanded-full");
+      return;
+    }
+    d.hidden = false;
+    contractBridgeStatus.classList.add("expanded");
+    contractBridgeStatus.classList.toggle("expanded-full", !!full);
+    loadRunHistory();
   }
   function startRunTimer() { stopRunTimer(); _runStartedAt = Date.now(); updateRunTimer(); _runTimer = setInterval(updateRunTimer, 1000); }
   // 切 tab 恢复运行态时:沿用原 _runStartedAt 继续计时(不复位)
@@ -1117,13 +1117,15 @@
   if (contractCopyPrompt) contractCopyPrompt.addEventListener("click", () => copyContract());
   // 发送按钮:运行中 → 终止任务(cancelBridgeRun);否则 → 发送(startBridgeRun)
   if (contractBridge) contractBridge.addEventListener("click", () => { if (_contractRunning) cancelBridgeRun(); else startBridgeRun(); });
-  // 状态栏点击:展开/收起本次进度 + 最近 3 次历史(spec:点击展开,再次点击收起)
+  // 状态栏点击:三态循环 收起 → capped(限高)→ 全展 → 收起
   if (contractBridgeStatus) contractBridgeStatus.addEventListener("click", () => {
     const d = contractBridgeStatus.querySelector(".cbs-detail");
     if (!d) return;
-    d.hidden = !d.hidden;
-    contractBridgeStatus.classList.toggle("expanded", !d.hidden);
-    if (!d.hidden) loadRunHistory();
+    const isHidden = d.hidden;
+    const isFull = contractBridgeStatus.classList.contains("expanded-full");
+    if (isHidden) expandBridgeDetail(true, false);
+    else if (!isFull) expandBridgeDetail(true, true);
+    else expandBridgeDetail(false);
   });
   if (contractPlanBtn) contractPlanBtn.addEventListener("click", startPlanRun);
   if (contractGotoRange) contractGotoRange.addEventListener("click", () => setContractStep("comment-scope"));
@@ -1621,7 +1623,7 @@
       plan: _plan ? Object.assign({}, _plan) : null,
       planStale: _planStale,
       candidateResult: _candidateResult,
-      candidateVersion: _candidateVersion,
+      candidateVersionLabel: _candidateVersionLabel,
       runEvents: _runEvents.slice(),
       streamText: _streamText,
       runStartedAt: _runStartedAt,
@@ -1650,7 +1652,7 @@
     _plan = s.plan;
     _planStale = s.planStale;
     _candidateResult = s.candidateResult;
-    _candidateVersion = s.candidateVersion || 0;
+    _candidateVersionLabel = s.candidateVersionLabel || null;
     _runEvents = (s.runEvents || []).slice();
     _streamText = s.streamText || "";
     _runStartedAt = s.runStartedAt || 0;
