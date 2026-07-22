@@ -660,7 +660,8 @@
     _contractArtifact = artifact || { title: "", url: "", isLocal: false };
     _contractMeta = meta || { isLocal: !!(artifact && artifact.isLocal), logicalDocumentId: null, loadedArtifactHash: null };
     _selectedNodeIds = new Set(allNonStaleNodeIds(items)); // 默认全选(含回复)
-    _contractRunning = false;
+    // 注意:不在此处置 _contractRunning=false。若后台仍有活动 run(用户关掉契约页又重进),
+    // 由 syncRunStateFromBackground 据实同步 —— 在跑就保持「终止任务」态,避免误显示可发送。
     _provider = null; _providerStates = {}; _providerCacheAt = 0;
     _plan = null; _planStale = false;
     _contractOpen = true;
@@ -669,8 +670,32 @@
     setContractStep("compose");
     showContractSheet();
     queryProviders(true); // 打开即 probe(spec §3.D);30s 内不重探
-    getActiveTab().then((tab) => { if (tab && tab.id) loadCandidateEvidence(tab.id); }); // §6 持久证据
+    getActiveTab().then((tab) => {
+      if (!tab || !tab.id) return;
+      loadCandidateEvidence(tab.id); // §6 持久证据
+      syncRunStateFromBackground(tab.id); // 同 tab 重进:据后台活动 run 还原运行态(终止按钮/计时器/进度窗)
+    });
     loadRunHistory(); // 预载最近 3 次任务历史(展开状态栏时立即可见)
+  }
+  // 据后台活动 run 同步 _contractRunning:在跑 → 终止态 + 计时器 + 进度窗;不在跑 → 可发送态。
+  // 修「同 tab 关掉契约页又重进,按钮误显示可发送(但 run 仍在跑)」。
+  async function syncRunStateFromBackground(tabId) {
+    if (!tabId) return;
+    const resp = await chrome.runtime.sendMessage({ type: "bridge-query-active-run", tab_id: tabId }).catch(() => null);
+    if (resp && resp.active) {
+      _contractRunning = true;
+      if (resp.run_id) _contractRunId = resp.run_id;
+      if (resp.run_kind) _contractRunKind = resp.run_kind;
+      setContractRunning(true); // 显示「终止任务」+ 禁用输入
+      const agent = providerLabel(resp.provider || _provider);
+      const isPlan = _contractRunKind === "plan";
+      setBridgeStatus((isPlan ? t("bridge.planRunning") : t("bridge.candidateRunning")).replace("{agent}", agent), "running");
+      startRunTimer();
+      expandBridgeDetail(true);
+    } else {
+      _contractRunning = false;
+      setContractRunning(false);
+    }
   }
   // 步骤切换:show/hide 三个 step 面板 + data-step
   function setContractStep(step) {

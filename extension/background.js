@@ -50,10 +50,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg.type === "bridge-query-active-run") {
-    // sidepanel 卡死恢复:查后台是否真有在跑的 run(若 SW 曾被杀、失败事件丢失,sidepanel 的 _contractRunning 会卡在 true)
+    // sidepanel 卡死恢复 / 同 tab 重进还原运行态:查后台是否真有在跑的 run
     (async () => {
       const active = await Storage.getActiveBridgeRunForTab(msg.tab_id);
-      sendResponse({ active: !!active, run_id: active && active.run_id });
+      sendResponse({ active: !!active, run_id: active && active.run_id,
+        provider: active && active.provider, run_kind: active && active.run_kind });
     })();
     return true;
   }
