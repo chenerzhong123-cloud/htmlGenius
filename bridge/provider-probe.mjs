@@ -10,6 +10,7 @@ import {
 } from './codex-app-server-client.mjs';
 import { spawnGenerateSchema } from './codex-adapter.mjs';
 import { probeCopilot } from './copilot-runtime.mjs';
+import { listProviderIds } from './provider-registry.mjs';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,7 +19,8 @@ const PROBE_TIMEOUT_MS = 10_000; // §7:单 provider 超时 10s
 
 // Claude CLI 探测(§7):--version(在不在)+ auth status(登没登)。绝不启动 -p task。
 // opts 注入点:claudeVersion() / claudeAuthCheck()(测试用 fake)。
-async function probeClaude({ claudeVersion, claudeAuthCheck } = {}) {
+// v0.9.1:导出单 provider probe(带注入点),供 certification harness / fixture 复用;probeProviders 仍是主入口。
+export async function probeClaude({ claudeVersion, claudeAuthCheck } = {}) {
   const version = typeof claudeVersion === 'function'
     ? claudeVersion()
     : (() => {
@@ -42,7 +44,7 @@ async function probeClaude({ claudeVersion, claudeAuthCheck } = {}) {
 
 // Codex App Server 探测(§7):discovery + 签名 + --version + schema gen/validation + 短初始化 handshake。绝不创建 thread/turn。
 // opts 注入点:codexDiscover() / generateSchema / codexHandshake(runtimePath)(测试用 fake)。
-async function probeCodex({ codexDiscover, generateSchema, codexHandshake, schemaDir } = {}) {
+export async function probeCodex({ codexDiscover, generateSchema, codexHandshake, schemaDir } = {}) {
   let rt;
   try {
     rt = typeof codexDiscover === 'function' ? codexDiscover() : discoverAppRuntime();
@@ -86,7 +88,7 @@ async function probeCodex({ codexDiscover, generateSchema, codexHandshake, schem
 
 // 主入口:并发探测请求的 providers(默认三个都探),每 provider 独立失败。返回 { providers: [...] }。
 // opts 透传给各 probe 的注入点(测试用);copilot 的注入点在 opts.copilot。
-export async function probeProviders(providers = ['claude_code_cli', 'codex_app_server', 'github_copilot'], opts = {}) {
+export async function probeProviders(providers = listProviderIds(), opts = {}) {
   const wanted = new Set(Array.isArray(providers) ? providers : []);
   const tasks = [];
   if (wanted.has('claude_code_cli')) tasks.push(probeClaude(opts).catch((e) => ({ id: 'claude_code_cli', status: 'error', capabilities: [] })));

@@ -395,6 +395,7 @@ export async function executePlanRun(msg, { emit, claude } = {}) {
   const p = planResult.plan;
   emit({
     type: "plan-ready",
+    provider: "claude_code_cli", // v0.9.1 §5.3:plan-ready 与 codex/copilot 同型携带 provider
     run_id: runId,
     task_sha256: bundle.taskSha256,
     logical_document_id: source.logical_document_id,

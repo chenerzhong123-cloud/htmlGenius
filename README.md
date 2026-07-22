@@ -36,7 +36,16 @@
 
 ## 最近更新
 
-### v0.9（2026-07-23 · 当前版本）
+### v0.9.1（2026-07-23 · 当前版本）
+
+- **Provider 认证体系**：新增 provider 不再是"在 if/else 里补分支"——必须交付 descriptor、fake runtime fixture、能力矩阵并通过统一认证（见 [`docs/providers/README.md`](docs/providers/README.md)）。
+- **provider registry**：`bridge/provider-registry.mjs` + `extension/provider-metadata.js` 单一 allow-list，background/host/probe/菜单的 provider ID 与能力全部由 registry 派生，一致性测试兜底漂移。
+- **自动化验证门**（无账号、无网络、无真实 Chrome）：`npm run verify` = `npm test`（283 项）+ `verify:bootstrap`（13 项：install→幂等→origin 拒绝→损坏→repair→Native 帧→uninstall）+ `verify:providers`（37 项：三 provider 的 probe/candidate/plan/安全不变量认证，含 shell 注入安全）。
+- **真实 smoke（opt-in）**：`npm run smoke:local` / `smoke:provider` 默认拒绝运行，需双环境门（`HTMLGENIUS_ALLOW_REAL_SMOKE=1` + 隔离 workspace）；真实 smoke 通过不自动提升 provider 为正式支持。
+- **脱敏报告**：所有 verify 命令产出 `verification-report`（schema v1），递归剥离路径/token/session/stderr/prompt 等敏感键。
+- **Connection Center 纯函数化**：状态矩阵抽为 `connection-center-state.js`，node:test 直接验证五状态、修复按钮出现条件、bootstrap 安全与三语 key 完整。
+
+### v0.9（2026-07-23）
 
 - **本地连接组件，面向普通用户**：不必再进源码仓库跑脚本。未连接时契约页出现 **Connection Center**：点「**让 Agent 帮我连接**」复制一段严格限定的 Setup Prompt（只含扩展 ID 与固定版本，不含任何页面/评论/凭证内容），粘贴给你正在用的 Claude Code / Codex / Copilot，它只运行官方 CLI（只读 doctor → 用户级 setup → 复查）；或「复制 Terminal 命令」自己执行。
 - **Connection Center 状态矩阵**：区分「未安装 / 组件需修复 / 组件就绪但 Agent 未登录 / 已连接 N 个 Agent / 系统不支持 / 扩展需更新」，逐项给出真实状态与官方登录指引；「检查连接」只读重探，「复制诊断」只给脱敏 health JSON。

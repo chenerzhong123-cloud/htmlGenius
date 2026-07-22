@@ -19,3 +19,7 @@ samples/*--htmlgenius-*.html
 
 # 官网 landing 源码(独立维护/部署,不入本仓库)
 landing/
+
+# v0.9.1 verification 产物(脱敏 report,不入库)
+bridge/artifacts/
+verification-report*.json

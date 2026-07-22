@@ -11,6 +11,7 @@ import { executeHandoff, executeCandidateRun, executePlanRun } from "./host-runn
 import { executeCodexCandidateRun, executeCodexPlanRun } from "./codex-adapter.mjs";
 import { executeCopilotCandidateRun, executeCopilotPlanRun } from "./copilot-adapter.mjs";
 import { probeProviders } from "./provider-probe.mjs";
+import { listProviderIds } from "./provider-registry.mjs";
 import {
   PROTOCOL_VERSION, defaultHostsDir, validateExtensionId, inspectExistingManifest,
   ensureHostRegistration, buildLauncherSource
@@ -75,8 +76,8 @@ function dispatch(msg) {
   if (msg.type === "ping") return Promise.resolve({ type: "pong" });
   if (msg.type === "provider_probe") {
     // v0.8.1 §5.1/§7:只读 provider 探测。立即回 provider_probe_result(单次往返;background 侧 30s 缓存)。
-    // v0.8.2:默认三 provider(claude / codex / github_copilot)。
-    const providers = Array.isArray(msg.providers) ? msg.providers : ["claude_code_cli", "codex_app_server", "github_copilot"];
+    // v0.9.1:默认探测 registry 全量 provider。
+    const providers = Array.isArray(msg.providers) ? msg.providers : listProviderIds();
     return probeProviders(providers).then(
       (r) => ({ type: "provider_probe_result", providers: r.providers }),
       (e) => ({ type: "provider_probe_result", providers: [], error: (e && e.message) || "probe failed" })

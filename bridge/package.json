@@ -1,6 +1,6 @@
 {
   "name": "htmlgenius-local-bridge",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "HTML Genius Local Bridge — Chrome Native Messaging host that hands a Change Contract to the user's locally signed-in AI agent (Claude Code CLI / Codex App Server / GitHub Copilot via @github/copilot-sdk). One provider-neutral host; writes only candidate/plan files, never the source HTML.",
   "type": "module",
   "engines": { "node": "^20.19.0 || >=22.12.0" },
@@ -11,6 +11,11 @@
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
+    "verify:bootstrap": "node verify/bootstrap-verify.mjs",
+    "verify:providers": "node verify/provider-certify.mjs --all",
+    "verify": "npm test && npm run verify:bootstrap && npm run verify:providers",
+    "smoke:local": "node verify/real-smoke.mjs",
+    "smoke:provider": "node verify/real-smoke.mjs --provider",
     "install:macos": "node install-macos.mjs"
   },
   "dependencies": {
