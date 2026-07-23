@@ -1535,9 +1535,9 @@
   });
   // v0.8 #4/#1: 面板内 swatch 浮层(替代原生 color input,杜绝系统选色器右溢出;浮层挂整个
   //   .edit-colors 行,8 列 × 2 行 = 16 色整齐无空位)。
-  // v0.9.1:高亮调色板取自单一来源 palette.js(与 content-script 工具栏同一份取值,杜绝漂移);含白色 + transparent(清除)。
-  //   文字色仍为本文件常量(本轮未要求统一)。
-  const SP_TEXT_COLORS = ["#0a0a0a", "#374151", "#6b7280", "#9ca3af", "#ffffff", "#ef4444", "#f97316", "#f59e0b", "#10b981", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#ec4899", "#7c8cff", "#e11d48"];
+  // v0.9.1:文字色与高亮色均取自单一来源 palette.js(与 content-script 工具栏同一份取值,杜绝漂移)。
+  //   顺带把文字色第 15 格统一为品牌 mint #88e6d1(替换旧蓝 #7c8cff)。
+  const SP_TEXT_COLORS = (typeof HG_PALETTE !== "undefined" && HG_PALETTE.TEXT_COLORS) || ["#0a0a0a", "#374151", "#6b7280", "#9ca3af", "#ffffff", "#ef4444", "#f97316", "#f59e0b", "#10b981", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#ec4899", "#88e6d1", "#e11d48"];
   const SP_HL_COLORS = (typeof HG_PALETTE !== "undefined" && HG_PALETTE.HL_COLORS) || ["#fff59d", "#ffd54f", "#ffcdd2", "#f8bbd0", "#e1bee7", "#c5cae9", "#bbdefb", "#b2dfdb", "#c8e6c9", "#dcedc8", "#ffccbc", "#ffe0b2", "#d7ccc8", "#e5e7eb", "#ffffff", "transparent"];
   function buildSpSwatches() {
     const map = [["sp-color-text-pop", SP_TEXT_COLORS], ["sp-color-hl-pop", SP_HL_COLORS]];
