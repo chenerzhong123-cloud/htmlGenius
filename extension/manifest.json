@@ -13,7 +13,7 @@
   "action": { "default_title": "htmlGenius", "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png" } },
   "content_scripts": [{
     "matches": ["<all_urls>"],
-    "js": ["vendor/purify.min.js", "text-quote.js", "remote-store.js", "sync.js", "storage.js", "artifact-version.js", "buildprompt.js", "i18n.js", "undo.js", "content-script.js"],
+    "js": ["vendor/purify.min.js", "text-quote.js", "remote-store.js", "sync.js", "storage.js", "artifact-version.js", "buildprompt.js", "i18n.js", "undo.js", "palette.js", "content-script.js"],
     "run_at": "document_idle"
   }]
 }
