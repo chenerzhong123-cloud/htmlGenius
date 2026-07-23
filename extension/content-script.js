@@ -222,10 +222,10 @@
   } catch (e) { /* 非关键 */ }
 
   // === 浮工具栏(本地 + 远程均可编辑;远程为临时修改,刷新丢失)===
-  // v0.9.1:高亮调色板取自单一来源 palette.js(工具栏与 Side Panel 同一份取值,杜绝漂移)。
-  //   16 格 = 14 色相 + 白色 + transparent(清除);白色用于深色背景/弱化高亮,transparent 清除高亮底色。
-  //   文字色仍为本文件常量(本轮未要求统一);palette.js 缺失时用兜底值,不影响工具栏可用。
-  const TEXT_COLORS = ["#0a0a0a","#374151","#6b7280","#9ca3af","#ffffff","#ef4444","#f97316","#f59e0b","#10b981","#06b6d4","#3b82f6","#6366f1","#8b5cf6","#ec4899","#88e6d1","#e11d48"];
+  // v0.9.1:文字色与高亮色均取自单一来源 palette.js(工具栏与 Side Panel 同一份取值,杜绝漂移)。
+  //   高亮 16 格 = 14 色相 + 白色 + transparent(清除);文字 16 格(含白色,品牌 mint #88e6d1)。
+  //   palette.js 缺失时用兜底值,不影响工具栏可用。
+  const TEXT_COLORS = (typeof HG_PALETTE !== "undefined" && HG_PALETTE.TEXT_COLORS) || ["#0a0a0a","#374151","#6b7280","#9ca3af","#ffffff","#ef4444","#f97316","#f59e0b","#10b981","#06b6d4","#3b82f6","#6366f1","#8b5cf6","#ec4899","#88e6d1","#e11d48"];
   const HL_COLORS = (typeof HG_PALETTE !== "undefined" && HG_PALETTE.HL_COLORS) || ["#fff59d","#ffd54f","#ffcdd2","#f8bbd0","#e1bee7","#c5cae9","#bbdefb","#b2dfdb","#c8e6c9","#dcedc8","#ffccbc","#ffe0b2","#d7ccc8","#e5e7eb","#ffffff","transparent"];
   // SIZES:[labelKey, em];标签随语言变化(toolbarHTML 内取 t())
   const SIZES = [["size.sm","0.85em"],["size.std","1em"],["size.lg","1.3em"],["size.xl","1.7em"]];
