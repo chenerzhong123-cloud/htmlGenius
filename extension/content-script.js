@@ -186,6 +186,8 @@
     #hg-toolbar .hg-popover.show{ display:flex; flex-wrap:wrap; max-width:220px; }
     #hg-toolbar .hg-popover.hg-popcol{ flex-direction:column; min-width:108px; }
     #hg-toolbar .hg-c{ width:16px; height:16px; border-radius:4px; cursor:pointer; border:1px solid var(--hg-line); }
+    /* v0.9.1:「清除高亮」格红斜杠(与 Side Panel 一致;!important 覆盖 inline background:transparent) */
+    #hg-toolbar .hg-c[data-val="transparent"]{ background:linear-gradient(to top right, transparent 45%, #ef4444 45%, #ef4444 55%, transparent 55%) !important; }
     #hg-toolbar .hg-item{ background:transparent; color:var(--hg-fg); border:0; text-align:left; padding:5px 8px; border-radius:6px; cursor:pointer; font-size:12px; line-height:1.3; }
     #hg-toolbar .hg-item:hover{ background:var(--hg-hover); }
     #hg-toolbar .hg-emoji{ font-size:16px; background:transparent; color:var(--hg-fg); border:0; cursor:pointer; padding:4px 5px; border-radius:6px; line-height:1; }
@@ -220,11 +222,11 @@
   } catch (e) { /* 非关键 */ }
 
   // === 浮工具栏(本地 + 远程均可编辑;远程为临时修改,刷新丢失)===
-  // v0.8: 调色板为工具栏与侧边栏的【同一份来源】,两边 UI 各自渲染但取值必须一致。
-  // 16 色 = 侧栏浮层 8 列 × 2 行(整齐无空位);高亮色刻意不含纯白 —— 纯白高亮会让浅色文字
-  // 「隐形」(背景与文字同亮,视觉上像被盖住),transparent 表示「清除高亮」。
+  // v0.9.1:高亮调色板取自单一来源 palette.js(工具栏与 Side Panel 同一份取值,杜绝漂移)。
+  //   16 格 = 14 色相 + 白色 + transparent(清除);白色用于深色背景/弱化高亮,transparent 清除高亮底色。
+  //   文字色仍为本文件常量(本轮未要求统一);palette.js 缺失时用兜底值,不影响工具栏可用。
   const TEXT_COLORS = ["#0a0a0a","#374151","#6b7280","#9ca3af","#ffffff","#ef4444","#f97316","#f59e0b","#10b981","#06b6d4","#3b82f6","#6366f1","#8b5cf6","#ec4899","#88e6d1","#e11d48"];
-  const HL_COLORS = ["#fff59d","#ffe14d","#ffd54f","#ffcdd2","#f8bbd0","#e1bee7","#c5cae9","#bbdefb","#b2dfdb","#c8e6c9","#dcedc8","#ffccbc","#ffe0b2","#d7ccc8","#e5e7eb","transparent"];
+  const HL_COLORS = (typeof HG_PALETTE !== "undefined" && HG_PALETTE.HL_COLORS) || ["#fff59d","#ffd54f","#ffcdd2","#f8bbd0","#e1bee7","#c5cae9","#bbdefb","#b2dfdb","#c8e6c9","#dcedc8","#ffccbc","#ffe0b2","#d7ccc8","#e5e7eb","#ffffff","transparent"];
   // SIZES:[labelKey, em];标签随语言变化(toolbarHTML 内取 t())
   const SIZES = [["size.sm","0.85em"],["size.std","1em"],["size.lg","1.3em"],["size.xl","1.7em"]];
   const t = (k) => (window.HG_I18N ? window.HG_I18N.t(k) : k);
