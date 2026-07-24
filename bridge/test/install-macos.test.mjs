@@ -103,13 +103,25 @@ test("install: claude 不存在 -> 只告警不失败(v0.8.2 §4.2:安装前提�
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {} }
 });
 
-test("nodeEngineOk: ^20.19.0 || >=22.12.0(@github/copilot-sdk engines)", async () => {
+test("nodeEngineOk: 安装门槛放宽为 20.x || 22+(21.x 不支持)", async () => {
   const { nodeEngineOk } = await import("../install-macos.mjs");
+  assert.equal(nodeEngineOk("20.0.0"), true);
+  assert.equal(nodeEngineOk("20.18.1"), true, "放宽:20.18 现可安装");
   assert.equal(nodeEngineOk("20.19.0"), true);
-  assert.equal(nodeEngineOk("20.20.2"), true);
-  assert.equal(nodeEngineOk("20.18.1"), false);
-  assert.equal(nodeEngineOk("21.7.3"), false);
-  assert.equal(nodeEngineOk("22.11.0"), false);
-  assert.equal(nodeEngineOk("22.12.0"), true);
+  assert.equal(nodeEngineOk("21.7.3"), false, "21.x 仍不支持");
+  assert.equal(nodeEngineOk("22.0.0"), true);
+  assert.equal(nodeEngineOk("22.11.0"), true, "放宽:22.11 现可安装");
   assert.equal(nodeEngineOk("24.1.0"), true);
+  assert.equal(nodeEngineOk("18.20.0"), false, "<20 已 EOL,不支持");
+});
+
+test("nodeEngineOkForCopilot: Copilot SDK 仍要求 ^20.19.0 || >=22.12.0", async () => {
+  const { nodeEngineOkForCopilot } = await import("../bridge-install.mjs");
+  assert.equal(nodeEngineOkForCopilot("20.18.1"), false, "Copilot 仍需 20.19+");
+  assert.equal(nodeEngineOkForCopilot("20.19.0"), true);
+  assert.equal(nodeEngineOkForCopilot("21.7.3"), false);
+  assert.equal(nodeEngineOkForCopilot("22.11.0"), false, "Copilot 仍需 22.12+");
+  assert.equal(nodeEngineOkForCopilot("22.12.0"), true);
+  assert.equal(nodeEngineOkForCopilot("24.1.0"), true);
+  assert.equal(nodeEngineOkForCopilot("18.20.0"), false);
 });

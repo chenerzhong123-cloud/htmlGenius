@@ -195,7 +195,7 @@ function requireScopeAndId(flags) {
 function preflight(flags) {
   const platform = platformInfo();
   if (!platform.supported) { logErr(REASON.OS_UNSUPPORTED, "HTML Genius Local Bridge currently supports macOS only"); return { code: EXIT.UNSUPPORTED }; }
-  if (!nodeEngineOk(nodeVersion())) { logErr(REASON.NODE_UNSUPPORTED, "Node ^20.19.0 || >=22.12.0 is required, got " + nodeVersion()); return { code: EXIT.UNSUPPORTED }; }
+  if (!nodeEngineOk(nodeVersion())) { logErr(REASON.NODE_UNSUPPORTED, "Node 20.x or 22+ is required (21.x not supported), got " + nodeVersion()); return { code: EXIT.UNSUPPORTED }; }
   return {};
 }
 

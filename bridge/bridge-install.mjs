@@ -43,13 +43,24 @@ export function validateExtensionId(id) {
   return id;
 }
 
-// Node ^20.19.0 || >=22.12.0(@github/copilot-sdk engines;不能简化为 Node 20+)。
+// 安装/运行门槛:bridge 本体只需 Node 20.x 或 22+(21.x 是 EOL 奇数版不支持,<20 已 EOL)。
+// 放宽至此让更多设备能装;Copilot 的更高要求见 nodeEngineOkForCopilot(只影响 Copilot,不影响 Codex / Claude Code)。
 export function nodeEngineOk(version = process.versions.node) {
+  const [maj] = String(version).split(".").map((n) => Number(n));
+  if (!Number.isInteger(maj)) return false;
+  if (maj === 21) return false;
+  return maj === 20 || maj >= 22;
+}
+
+// @github/copilot-sdk 的 engines 要求(^20.19.0 || >=22.12.0),仅 Copilot 需要。
+// 不满足时 Copilot 单独标记不兼容,Codex / Claude Code 照常可用。
+export function nodeEngineOkForCopilot(version = process.versions.node) {
   const [maj, min] = String(version).split(".").map((n) => Number(n));
   if (!Number.isInteger(maj)) return false;
   if (maj === 20) return min >= 19;
   if (maj === 21) return false;
-  return maj > 22 || min >= 12;
+  if (maj === 22) return min >= 12;
+  return maj >= 23;
 }
 
 // §3.2:setup/repair 只接受 --scope user;拒绝 root(不做 system-wide 安装)。

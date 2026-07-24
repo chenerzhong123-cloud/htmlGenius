@@ -11,6 +11,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { nodeEngineOkForCopilot } from "./bridge-install.mjs";
 
 export const COPILOT_PROVIDER = "github_copilot";
 export const COPILOT_RUNTIMES = { LOCAL_CLI: "local_cli", BUNDLED_SDK_CLI: "bundled_sdk_cli" };
@@ -200,6 +201,8 @@ export async function attemptRuntimeStart({ sdk, runtime, cliPath }) {
 // 注意:probe 阶段的 fallback 是允许的;已启动的 run 内绝不 fallback。
 export async function probeCopilot({ sdkLoader, execFileImpl, env, fsImpl } = {}) {
   try {
+    // Copilot SDK 要求 Node ^20.19.0 || >=22.12.0;不满足则 Copilot 单独标记不兼容(不影响 Codex / Claude Code)。
+    if (!nodeEngineOkForCopilot()) return probeResult({ status: "incompatible" });
     let sdk;
     try { sdk = await loadCopilotSdk({ sdkLoader }); }
     catch (e) {

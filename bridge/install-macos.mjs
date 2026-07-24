@@ -39,7 +39,7 @@ function parseArgs(argv) {
 
 function assertNodeEngine() {
   if (!nodeEngineOk()) {
-    const e = new Error("Node ^20.19.0 || >=22.12.0 required (@github/copilot-sdk), got " + process.versions.node);
+    const e = new Error("Node 20.x or 22+ required (21.x not supported; GitHub Copilot needs 20.19+/22.12+), got " + process.versions.node);
     e.code = "NODE_TOO_OLD"; throw e;
   }
 }

@@ -30,13 +30,16 @@ test("validateExtensionId:合法/非法", () => {
   }
 });
 
-test("nodeEngineOk:^20.19.0 || >=22.12.0", () => {
+test("nodeEngineOk:安装门槛放宽为 20.x || 22+(21.x / <20 不支持)", () => {
+  assert.equal(nodeEngineOk("20.0.0"), true);
+  assert.equal(nodeEngineOk("20.18.9"), true, "放宽:20.18 现可安装");
   assert.equal(nodeEngineOk("20.19.0"), true);
-  assert.equal(nodeEngineOk("20.18.9"), false);
   assert.equal(nodeEngineOk("21.0.0"), false);
+  assert.equal(nodeEngineOk("22.0.0"), true);
+  assert.equal(nodeEngineOk("22.11.9"), true, "放宽:22.11 现可安装");
   assert.equal(nodeEngineOk("22.12.0"), true);
-  assert.equal(nodeEngineOk("22.11.9"), false);
   assert.equal(nodeEngineOk("24.0.0"), true);
+  assert.equal(nodeEngineOk("18.20.0"), false);
 });
 
 test("buildManifest:单 origin、stdio、绝对 launcher", () => {

@@ -106,8 +106,8 @@ test("doctor:OS 不支持 → unsupported + OS_UNSUPPORTED(退出码 2)", async 
   assert.equal(h.platform.supported, false);
 });
 
-test("doctor:Node 版本不足 → NODE_UNSUPPORTED(退出码 2)", async () => {
-  const r = await run(["doctor", "--json"], { HTMLGENIUS_TEST_NODE_VERSION: "20.10.0" });
+test("doctor:Node 版本不足(<20 已 EOL)→ NODE_UNSUPPORTED(退出码 2)", async () => {
+  const r = await run(["doctor", "--json"], { HTMLGENIUS_TEST_NODE_VERSION: "18.20.0" });
   assert.equal(r.code, 2);
   const h = parseOneJson(r.stdout);
   assert.equal(h.reason_code, "NODE_UNSUPPORTED");
