@@ -12,7 +12,7 @@ test("v0.9:版本单一来源 — 无 0.8.1 漂移,扩展版本取 getManifest",
   assert.ok(!bg.includes('"0.8.1"'), "不得残留硬编码 0.8.1");
   assert.match(bg, /chrome\.runtime\.getManifest\(\)\.version/);
   assert.match(bg, /BRIDGE_PROTOCOL_VERSION = 1/);
-  assert.match(bg, /TARGET_BRIDGE_VERSION = "0\.9\.1"/);
+  assert.match(bg, /TARGET_BRIDGE_VERSION = "0\.9\.2"/);
 });
 
 test("v0.9:三条新消息入口(仅 background 发起 native 通信)", () => {

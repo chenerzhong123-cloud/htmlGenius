@@ -18,13 +18,13 @@ HTML Genius 的**本地连接组件**——一个 Chrome 原生消息宿主（Na
 
 ```bash
 # 只读体检（不写任何文件）
-npx --yes @htmlgenius/bridge@0.9.1 doctor --json --extension-id <你的扩展ID>
+npx --yes @htmlgenius/bridge@0.9.2 doctor --json --extension-id <你的扩展ID>
 
 # 安装（幂等；写入用户级受管目录 + Chrome 原生宿主注册）
-npx --yes @htmlgenius/bridge@0.9.1 setup --json --scope user --extension-id <你的扩展ID>
+npx --yes @htmlgenius/bridge@0.9.2 setup --json --scope user --extension-id <你的扩展ID>
 
 # 卸载（只删本组件自己的文件，不动任何 Agent）
-npx --yes @htmlgenius/bridge@0.9.1 uninstall --json --scope user
+npx --yes @htmlgenius/bridge@0.9.2 uninstall --json --scope user
 ```
 
 扩展 ID 在 `chrome://extensions` → HTML Genius 卡片上（一串 32 位字母）。

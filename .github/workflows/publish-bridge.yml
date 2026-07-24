@@ -1,0 +1,46 @@
+# 发布 @htmlgenius/bridge 到 npm,并带 provenance(来源证明)——消除新包安装时的供应链风险提示。
+#
+# 用法:
+#   1. 在 npmjs.com 生成一个 Automation 类型的 access token,加到本仓库
+#      Settings → Secrets and variables → Actions,命名 NPM_TOKEN。
+#   2. 发布时打 tag 并推送:
+#        git tag bridge-v0.9.2 && git push origin bridge-v0.9.2
+#      本 workflow 即在 CI 里 npm ci → 跑测试 → npm publish --provenance --access public。
+#
+# provenance 原理:permissions 里的 id-token: write 让 npm 通过 GitHub OIDC  attest
+# “这个包是从这个公开仓库的这个 commit 构建的”,npm 页面会显示来源徽章,
+# 支持校验的工具/Agent 因此放行。仍需 NPM_TOKEN 做发布鉴权(OIDC 只负责来源证明)。
+name: publish-bridge
+
+on:
+  push:
+    tags:
+      - "bridge-v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance 必需(OIDC)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        working-directory: bridge
+        run: npm ci
+
+      - name: Run tests
+        working-directory: bridge
+        run: npm test
+
+      - name: Publish with provenance
+        working-directory: bridge
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
