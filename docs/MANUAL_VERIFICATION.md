@@ -1,7 +1,7 @@
 # 人工验收清单（v0.9 Agent-assisted Local Bridge & Connection Center）
 
-> 用途：自动化测试（`cd bridge && npm test` → 268 例）覆盖协议与纯逻辑；本清单覆盖**自动化测不到**的真实交互：真实 Native Messaging、真实 Agent 执行 Setup Prompt、真实 Chrome 扩展 UI。
-> 勾选即通过；失败按「现象 / 复现 / 期望」记录。环境：macOS + Chrome（加载未打包 `extension/`，v0.9.0）+ Node `^20.19.0 || >=22.12.0`。
+> 用途：自动化测试（`cd bridge && npm test` → 309 例）覆盖协议与纯逻辑；本清单覆盖**自动化测不到**的真实交互：真实 Native Messaging、真实 Agent 执行 Setup Prompt、真实 Chrome 扩展 UI。
+> 勾选即通过；失败按「现象 / 复现 / 期望」记录。环境：macOS + Chrome（加载未打包 `extension/`，v0.9.2）+ Node 20.x / 22+（GitHub Copilot 需 20.19+/22.12+）。
 
 ## 0. 环境准备
 

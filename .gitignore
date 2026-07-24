@@ -47,3 +47,6 @@ docs/ui-mockups-v0.8/
 docs/style-experiments-2026-07/
 docs/store-assets/
 extension/fonts/cormorant-*.woff2
+
+# agents 说明页源稿(仅供另一个 Agent 本地生成页面用,不上传)
+docs/agents-page-source.md

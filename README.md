@@ -45,7 +45,7 @@
   - **GitHub Copilot**：本机已登录 Copilot（CLI 可选，缺失时走 SDK 自带 runtime）。
 - 组件只在你机器上运行各 Agent 的官方程序、只用你的登录态，**不存任何凭证、不读取你的历史会话**。没连上也随时可以「复制 Prompt」手动交给任意 AI。
 
-> 仅支持 macOS + Chrome + Node 20.19+ / 22.12+。详见 [Agent 说明](https://www.deuce.monster/htmlgenius/agents.html) 与 [`docs/LOCAL_BRIDGE.md`](docs/LOCAL_BRIDGE.md)。
+> 仅支持 macOS + Chrome + Node 20.x / 22+（GitHub Copilot 另需 20.19+ / 22.12+）。详见 [Agent 说明](https://www.deuce.monster/htmlgenius/agents.html) 与 [`docs/LOCAL_BRIDGE.md`](docs/LOCAL_BRIDGE.md)。
 
 ## 已知限制
 
