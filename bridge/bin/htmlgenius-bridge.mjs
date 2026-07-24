@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// bridge/bin/htmlgenius-bridge.mjs — v0.9 §3.2 受控 CLI(未来以 @htmlgenius/bridge 发行;本版本不 publish)。
+// bridge/bin/htmlgenius-bridge.mjs — v0.9 §3.2 受控 CLI(以 @htmlgenius/bridge 发行;`npx --yes @htmlgenius/bridge@<ver>` 即可在干净机器安装)。
 // 子命令:doctor / setup / repair / uninstall / version。
 // 纪律:--json 时 stdout 有且仅有一个 JSON object(进度/日志一律 stderr);退出码稳定:
 //   0=ready,1=action_required,2=unsupported,3=error,64=用法错误。
@@ -11,6 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import {
   HOST_NAME, PROTOCOL_VERSION, validateExtensionId, nodeEngineOk, assertUserScope,
   buildLauncherSource, ensureHostRegistration, inspectExistingManifest, removeHostFiles,
@@ -198,6 +199,26 @@ function preflight(flags) {
   return {};
 }
 
+// 受管目录自装运行时依赖(npx 发行态专用):只装 dependencies(@github/copilot-sdk,精确锁版),不装 dev、不跑审计。
+// 需要本机有 npm 与网络(装 bridge 本身就需要联网取包)。失败返回通用文案——npm 原始 stderr 可能含绝对路径,
+// 仅原样写到用户自己的 Terminal(stderr),绝不进入 --json 输出(§3.2 成功/错误 JSON 均不含绝对路径)。
+function installManagedDeps(targetDir) {
+  try {
+    const res = spawnSync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund", "--loglevel=error"], {
+      cwd: targetDir, encoding: "utf8", timeout: 300000
+    });
+    if (res.error) return { ok: false, message: "failed to start npm to install bridge dependencies" };
+    if (res.status !== 0) {
+      const detail = String(res.stderr || res.stdout || "").trim();
+      if (detail) { try { process.stderr.write("[htmlgenius-bridge] npm install detail:\n" + detail.slice(0, 2000) + "\n"); } catch (_) {} }
+      return { ok: false, message: "npm install of bridge dependencies failed (network or npm required)" };
+    }
+    return { ok: true };
+  } catch (_) {
+    return { ok: false, message: "failed to install bridge dependencies" };
+  }
+}
+
 async function cmdSetup(flags) {
   const req = requireScopeAndId(flags);
   if (req.code != null) return req.code;
@@ -226,12 +247,20 @@ async function cmdSetup(flags) {
       return EXIT.READY;
     }
   } else {
-    // 物化当前 CLI 所在 bridge 到受管目录(先 staging 校验再切换)
+    // 物化当前 CLI 所在 bridge 到受管目录(先 staging 校验再切换)。
+    // npx 发行态:包根本身无 node_modules(依赖被 npm 提升到包外层)→ 允许物化后在受管目录自装。
+    const haveDeps = fs.existsSync(path.join(BRIDGE_DIR, "node_modules"));
+    let materialized = null;
     try {
-      materializeBridge({ sourceBridgeDir: BRIDGE_DIR, targetDir: target, version });
+      materialized = materializeBridge({ sourceBridgeDir: BRIDGE_DIR, targetDir: target, version, allowMissingDeps: !haveDeps });
     } catch (e) {
       logErr(e.code || "SETUP_PREPARE_FAILED", e.message);
       return EXIT.ERROR;
+    }
+    if (materialized && materialized.depsMissing) {
+      verbose(flags, "deps not bundled with package; installing bridge runtime dependency in managed dir");
+      const inst = installManagedDeps(target);
+      if (!inst.ok) { logErr("SETUP_DEPS_INSTALL_FAILED", inst.message); return EXIT.ERROR; }
     }
   }
   const launcherSource = buildLauncherSource({ nodePath: process.execPath, hostPath: path.join(target, "host.mjs"), version });

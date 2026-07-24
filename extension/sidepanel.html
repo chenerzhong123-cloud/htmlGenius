@@ -221,6 +221,12 @@
           <button id="contract-send-toggle" class="send-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="menu">⌄</button>
           <div class="send-menu" id="contract-send-menu" hidden>
             <div class="menu-head" data-i18n="bridge.agentHead">已支持的 Agent</div>
+            <div class="menu-setup" id="contract-send-setup" hidden>
+              <div class="menu-setup-title" data-i18n="bridge.setupTitle">未连接?两步连上你的 Agent</div>
+              <div class="menu-setup-step"><b>1</b><span data-i18n="bridge.setupStep1">在「终端」运行这条命令,安装本地连接组件:</span></div>
+              <div class="menu-setup-cmd"><code id="contract-send-setup-cmd"></code><button class="menu-setup-copy" id="contract-send-setup-copy" type="button" data-i18n="bridge.copyCmd">复制</button></div>
+              <div class="menu-setup-step"><b>2</b><span data-i18n="bridge.setupStep2">安装并登录你要用的 Agent(Claude Code / Codex / Copilot),回来点「检查连接」。</span></div>
+            </div>
             <button class="agent" data-provider="claude_code_cli" type="button"><i class="agent-dot"></i><span><b>Claude Code</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span></button>
             <button class="agent" data-provider="codex_app_server" type="button"><i class="agent-dot"></i><span><b>Codex</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span></button>
             <button class="agent" data-provider="github_copilot" type="button"><i class="agent-dot"></i><span><b>GitHub Copilot</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span></button>

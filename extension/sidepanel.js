@@ -917,6 +917,26 @@
       const note = btn.querySelector(".agent-note");
       if (note) note.textContent = providerStatusText(p);
     });
+    renderSendSetup();
+  }
+  // v0.9.1:下箭头弹窗内嵌「未连接」教程。没有任何 ready provider 时显示一条 npx 安装命令(取自 bootstrap,
+  // 已带真实扩展 ID);有任一 ready 即隐藏。命令缺失时按需拉 bootstrap。复制走 connCopy + 按钮就地反馈。
+  function renderSendSetup() {
+    const box = document.getElementById("contract-send-setup");
+    if (!box) return;
+    let readyCount = 0;
+    for (const id in _providerStates) { if (_providerStates[id] && _providerStates[id].status === "ready") readyCount++; }
+    if (readyCount > 0) { box.hidden = true; return; }
+    box.hidden = false;
+    const cmdEl = document.getElementById("contract-send-setup-cmd");
+    if (!cmdEl) return;
+    const cmd = (_bootstrap && _bootstrap.terminal_command) || "";
+    if (cmd) { cmdEl.textContent = cmd; return; }
+    if (!cmdEl.textContent) {
+      fetchBootstrap().then(() => {
+        if (_bootstrap && _bootstrap.terminal_command) cmdEl.textContent = _bootstrap.terminal_command;
+      });
+    }
   }
   function selectProvider(id) {
     const p = _providerStates[id];
@@ -1406,6 +1426,18 @@
   if (sendMenu) sendMenu.addEventListener("click", (e) => {
     const ag = e.target.closest(".agent");
     if (ag && !ag.disabled) { selectProvider(ag.dataset.provider); closeSendMenu(); return; }
+  });
+  // v0.9.1:下拉教程里的「复制」安装命令按钮(就地反馈,不关菜单)
+  const sendSetupCopy = document.getElementById("contract-send-setup-copy");
+  if (sendSetupCopy) sendSetupCopy.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const cmdEl = document.getElementById("contract-send-setup-cmd");
+    const cmd = (cmdEl && cmdEl.textContent) || (_bootstrap && _bootstrap.terminal_command) || "";
+    if (!cmd) return;
+    connCopy(cmd, "conn.terminalCopied");
+    const orig = sendSetupCopy.textContent;
+    sendSetupCopy.textContent = t("bridge.copied");
+    setTimeout(() => { sendSetupCopy.textContent = orig; }, 1500);
   });
   document.addEventListener("click", (e) => { if (sendMenu && !e.target.closest(".send-group")) closeSendMenu(); });
   // 状态栏候选「打开候选版本」:新标签打开(background 完成时已自动开;此为手动兜底)。阻止冒泡,避免触发状态栏展开/收起。

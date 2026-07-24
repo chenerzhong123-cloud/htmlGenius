@@ -193,6 +193,21 @@ test("materializeBridge:有依赖但缺 node_modules → SETUP_DEPS_MISSING,不�
   } finally { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(src, { recursive: true, force: true }); }
 });
 
+test("materializeBridge:allowMissingDeps(npx 发行态)缺 node_modules 不抛错,标记 depsMissing 由 setup 自装", () => {
+  const home = tmp();
+  const src = tmp();
+  try {
+    fs.writeFileSync(path.join(src, "host.mjs"), "// host\n");
+    fs.writeFileSync(path.join(src, "package.json"), JSON.stringify({ name: "b", version: "0.9.1", dependencies: { "@github/copilot-sdk": "1.0.7" } }));
+    const target = versionDirFor({ home, version: "0.9.1" });
+    const res = materializeBridge({ sourceBridgeDir: src, targetDir: target, version: "0.9.1", allowMissingDeps: true });
+    assert.equal(res.depsMissing, true, "标记依赖待 setup 自装");
+    assert.ok(fs.existsSync(path.join(target, "host.mjs")), "源码已物化");
+    assert.ok(fs.existsSync(path.join(target, "managed-install.json")), "受管标记已写");
+    assert.ok(!fs.existsSync(path.join(target, "node_modules")), "node_modules 确实缺(待自装)");
+  } finally { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(src, { recursive: true, force: true }); }
+});
+
 test("materializeBridge:升级时替换旧版本目录(切换后旧目录删除)", () => {
   const home = tmp();
   const src = fakeBridgeSrc();
