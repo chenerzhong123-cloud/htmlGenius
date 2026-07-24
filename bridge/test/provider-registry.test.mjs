@@ -57,12 +57,18 @@ test("一致性:host.mjs 对每个 registry dispatch_type 有分发分支,probe 
 });
 
 test("一致性:i18n 三语言含每个 provider 的 label_key(无 fallback 空串)", () => {
+  // navigator 在 Node 21+ 是只读全局 getter,须用 defineProperty 覆盖以兼容 Node 20 与 22+。
   const sandboxWindow = {};
-  const prev = { window: globalThis.window, navigator: globalThis.navigator };
+  const navDesc = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const prevWindow = globalThis.window;
   globalThis.window = sandboxWindow;
-  globalThis.navigator = { languages: ["en"], language: "en" };
+  Object.defineProperty(globalThis, "navigator", { value: { languages: ["en"], language: "en" }, configurable: true, writable: true });
   try { (0, eval)(fs.readFileSync(path.join(extDir, "i18n.js"), "utf8")); } // eslint-disable-line no-eval
-  finally { globalThis.window = prev.window; globalThis.navigator = prev.navigator; }
+  finally {
+    globalThis.window = prevWindow;
+    if (navDesc) Object.defineProperty(globalThis, "navigator", navDesc);
+    else delete globalThis.navigator;
+  }
   const DICT = sandboxWindow.HG_I18N.DICT;
   for (const id of listProviderIds()) {
     const key = getProviderDescriptor(id).label_key;

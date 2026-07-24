@@ -9,17 +9,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const extDir = path.resolve(__dirname, "..", "..", "extension");
 
 function loadDict() {
-  // i18n.js 是 window IIFE:桩 window/navigator 后加载,取 DICT
+  // i18n.js 是 window IIFE:桩 window/navigator 后加载,取 DICT。
+  // navigator 在 Node 21+ 是只读全局 getter,直接赋值会 TypeError;用 defineProperty 覆盖以兼容 Node 20 与 22+。
   const sandboxWindow = {};
-  const prev = { window: globalThis.window, navigator: globalThis.navigator };
+  const navDesc = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const prevWindow = globalThis.window;
   globalThis.window = sandboxWindow;
-  globalThis.navigator = { languages: ["en"], language: "en" };
+  Object.defineProperty(globalThis, "navigator", { value: { languages: ["en"], language: "en" }, configurable: true, writable: true });
   try {
     const code = fs.readFileSync(path.join(extDir, "i18n.js"), "utf8");
     (0, eval)(code); // eslint-disable-line no-eval
   } finally {
-    globalThis.window = prev.window;
-    globalThis.navigator = prev.navigator;
+    globalThis.window = prevWindow;
+    if (navDesc) Object.defineProperty(globalThis, "navigator", navDesc);
+    else delete globalThis.navigator;
   }
   assert.ok(sandboxWindow.HG_I18N && sandboxWindow.HG_I18N.DICT, "HG_I18N.DICT 应可用");
   return sandboxWindow.HG_I18N.DICT;
