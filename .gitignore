@@ -23,3 +23,27 @@ landing/
 # v0.9.1 verification 产物(脱敏 report,不入库)
 bridge/artifacts/
 verification-report*.json
+
+# SQLite 侧车(主库 *.db 已忽略,补上 -shm/-wal,避免误入库)
+annotations.db-shm
+annotations.db-wal
+
+# v0.9.1 仓库瘦身:停止跟踪的过时文档与素材(本地保留,不再上传 GitHub)
+docs/2026-06-25-*.md
+docs/2026-06-25-*.html
+docs/2026-06-27-*.md
+docs/2026-06-30-*.md
+docs/2026-07-05-v0.4-plugin-collab-*.md
+docs/2026-07-06-*.md
+docs/2026-07-08-*.md
+docs/2026-07-17-landing-visual-directions-spec.md
+docs/CWS_SUBMISSION_TODO.md
+docs/logo-exploration-*.html
+docs/screenshots-v0.7.2/
+docs/ui-mockups-v0.5/
+docs/ui-mockups-v0.6/
+docs/ui-mockups-v0.7.1/
+docs/ui-mockups-v0.8/
+docs/style-experiments-2026-07/
+docs/store-assets/
+extension/fonts/cormorant-*.woff2

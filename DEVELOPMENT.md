@@ -107,13 +107,13 @@ uv run uvicorn server.app:app --port 8000 --reload
 
 | 版本 | 设计 | 计划 |
 |---|---|---|
-| v0.1（阶段 0） | [`docs/2026-06-25-html-annotation-feedback-loop-design.md`](docs/2026-06-25-html-annotation-feedback-loop-design.md) | [`docs/2026-06-25-stage0-plan.md`](docs/2026-06-25-stage0-plan.md) |
-| v0.2 | [`docs/2026-06-27-v0.2-html-editing-design.md`](docs/2026-06-27-v0.2-html-editing-design.md) | [`docs/2026-06-27-v0.2-html-editing-plan.md`](docs/2026-06-27-v0.2-html-editing-plan.md) |
-| v0.3 | [`docs/2026-06-30-v0.3-chrome-extension-design.md`](docs/2026-06-30-v0.3-chrome-extension-design.md) | [`docs/2026-06-30-v0.3-chrome-extension-plan.md`](docs/2026-06-30-v0.3-chrome-extension-plan.md) |
-| v0.4 | [`docs/2026-07-05-v0.4-plugin-collab-design.md`](docs/2026-07-05-v0.4-plugin-collab-design.md) | [`docs/2026-07-05-v0.4-plugin-collab-plan.md`](docs/2026-07-05-v0.4-plugin-collab-plan.md) |
-| v0.4.1 | [`docs/2026-07-06-v0.4.1-ui-redesign-design.md`](docs/2026-07-06-v0.4.1-ui-redesign-design.md) | — |
-| v0.5 | [`docs/2026-07-06-v0.5-lark-oauth-design.md`](docs/2026-07-06-v0.5-lark-oauth-design.md) | [`docs/2026-07-06-v0.5-lark-oauth-plan.md`](docs/2026-07-06-v0.5-lark-oauth-plan.md) |
-| v0.5 验收 | — | [`docs/2026-07-08-v0.5-acceptance-tests.md`](docs/2026-07-08-v0.5-acceptance-tests.md) |
+| v0.1（阶段 0） | 已归档（v0.9.1 起不随仓库分发） | 已归档 |
+| v0.2 | 已归档 | 已归档 |
+| v0.3 | 已归档 | 已归档 |
+| v0.4 | 已归档 | 已归档 |
+| v0.4.1 | 已归档 | — |
+| v0.5 | 已归档 | 已归档 |
+| v0.5 验收 | — | 已归档 |
 | v0.5.1 / v0.5.2 | — | — |
 | v0.6 | [`docs/2026-07-15-v0.6-element-editing-design.md`](docs/2026-07-15-v0.6-element-editing-design.md) | — |
 | v0.6.1 | [`docs/2026-07-18-v0.6.1-change-contract-spec.md`](docs/2026-07-18-v0.6.1-change-contract-spec.md) | — |
