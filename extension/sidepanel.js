@@ -160,20 +160,12 @@
     const epanel = document.getElementById("element-panel");
     if (epanel) epanel.hidden = !_elementMode; // v0.6: 元素面板(M3 填内容)
     const adv = document.getElementById("adv-mode-btn");
-    if (adv) adv.hidden = !_editing; // v0.6: 仅编辑态显示「切换高级模式」
+    if (adv) adv.hidden = true; // v0.9.1:暂时隐藏「切换高级模式」入口(对用户较难懂);元素级编辑能力保留,恢复时改回 !_editing
     renderArtifactControls();
   }
   function renderArtifactControls() {
-    const reload = document.getElementById("artifact-reload-btn");
-    const status = document.getElementById("artifact-status");
-    if (reload) reload.hidden = !isLocal;
-    if (!status) return;
-    if (!isLocal || !_artifactState) { status.hidden = true; return; }
-    const hash = _artifactState.loaded_artifact_hash;
-    const logical = _artifactState.logical_document_id;
-    if (!hash && !logical) { status.hidden = true; return; }
-    status.textContent = t("artifact.status").replace("{id}", logical || "—").replace("{hash}", hash ? hash.slice(0, 19) + "…" : t("artifact.hashPending"));
-    status.hidden = false;
+    // v0.9.1:artifact 信息行(本地 artifact · 文档 · 基线)与「重新读取文件」按钮已按需求移除。
+    // content-script 自动重载流程(artifact-reload-requested → 刷新 → reload 结果提示)保留,不受影响。
   }
   function maybeShowReloadResult(items) {
     if (!_pendingArtifactReload) return;
@@ -1060,8 +1052,8 @@
     btn.hidden = false; btn.textContent = label; btn.dataset.action = action || "";
   }
   function connAutoCollapsed(h) {
-    return !!(h && h.bridge && h.bridge.status === "ready"
-      && Array.isArray(h.providers) && h.providers.some((p) => p && p.status === "ready"));
+    // v0.9.1:Connection Center 默认收起(无论是否已连接),用户点标题手动展开;与 connStateFor 的默认折叠基准一致。
+    return true;
   }
   // §5.2 状态矩阵 → 由纯函数 ConnectionCenterState.connStateFor 驱动(v0.9.1 §9.1,可 node:test 验证)
   function renderConnCenter() {

@@ -26,7 +26,7 @@
 
     var v = {
       phase: "known", titleKey: "", descKey: null,
-      primary: null, secondary: null, showProviders: false, collapsed: false,
+      primary: null, secondary: null, showProviders: false, collapsed: true,
       cls: "", permanentHintKey: null, repairAvailable: false, devOnly: devOnly,
       readyCount: readyCount
     };

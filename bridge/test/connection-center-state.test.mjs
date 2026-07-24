@@ -55,12 +55,12 @@ test("矩阵:OS 不支持 / 扩展需更新", () => {
   assert.equal(ext.titleKey, "conn.titleExtNeedUpdate");
 });
 
-test("矩阵:Bridge ready 无 provider → 逐项状态 + 检查连接;有 ready provider → 已连接 N 个 + 默认折叠", () => {
+test("矩阵:Bridge ready 无 provider → 逐项状态 + 检查连接;有 ready provider → 已连接 N 个;默认折叠(所有状态)", () => {
   const noProv = CCS.connStateFor(H({ overall: "action_required", reason_code: null, bridge: { status: "ready", protocol_version: 1 }, browser: { status: "origin_ok" }, providers: [{ id: "claude_code_cli", status: "auth_required" }] }), {});
   assert.equal(noProv.titleKey, "conn.titleBridgeReady");
   assert.equal(noProv.primary.labelKey, "conn.check");
   assert.equal(noProv.showProviders, true);
-  assert.equal(noProv.collapsed, false);
+  assert.equal(noProv.collapsed, true, "v0.9.1:默认折叠(无论是否已连接),用户可手动展开");
 
   const ready = CCS.connStateFor(H({ overall: "ready", reason_code: null, bridge: { status: "ready", protocol_version: 1 }, browser: { status: "origin_ok" }, providers: [{ id: "codex_app_server", status: "ready" }, { id: "claude_code_cli", status: "auth_required" }] }), {});
   assert.equal(ready.titleKey, "conn.titleConnected");
