@@ -193,7 +193,7 @@
       "compose.preserveHint": "即使允许大改，也必须原样保留的内容。",
       "compose.preservePh": "每行一条，必须原样保留的内容",
       "compose.selectRange": "选择评论范围",
-      "compose.selectRangeHint": "那些不是指导修改文章的评论，扔掉会效果更好。",
+      "compose.selectRangeHint": "不指导修改文章的评论，扔掉效果更好。",
       "compose.selectRangeCount": "选择评论范围（已选 {selected} / 共 {total} 条）",
       "compose.plan": "先给我看修改计划",
       "compose.backToCompose": "← 上一步",
