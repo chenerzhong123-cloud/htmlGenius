@@ -19,7 +19,9 @@ on:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    # 产品仅支持 macOS,测试套件大量依赖 macOS 平台(宿主目录/平台预检/Copilot CLI 目录),
+    # 在 Linux runner 上会有十余项失败 → 用 macos-latest 与本地一致。
+    runs-on: macos-latest
     permissions:
       contents: read
       id-token: write # npm provenance 必需(OIDC)
