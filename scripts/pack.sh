@@ -45,19 +45,24 @@ OUT="$DIST/htmlGenius-$VERSION.zip"
 rm -f "$OUT"
 ( cd "$STAGE" && COPYFILE_DISABLE=1 zip -r -X "$OUT" . -x '*.DS_Store' -x '__MACOSX*' -x '*/.DS_Store' >/dev/null )
 
+# 统一取一份清单/manifest 内容到变量再 grep:
+# 避免 `unzip -l | grep -q` 在 set -o pipefail 下因 grep -q 提前退出触发 unzip SIGPIPE,把整条管道误判为失败。
+LISTING="$(unzip -l "$OUT")"
+MANIFEST_CONTENT="$(unzip -p "$OUT" manifest.json)"
+
 # 6) 安全自检:产物绝不能含敏感文件
-if unzip -l "$OUT" 2>/dev/null | grep -qiE "client_secret|\.pem$|\.db(-wal|-shm)?$"; then
-  echo "❌ 安全自检失败:产物含敏感文件(密钥/pem/db)!"; unzip -l "$OUT" | grep -iE "client_secret|\.pem|\.db"; exit 1
+if grep -qiE "client_secret|\.pem$|\.db(-wal|-shm)?$" <<< "$LISTING"; then
+  echo "❌ 安全自检失败:产物含敏感文件(密钥/pem/db)!"; grep -iE "client_secret|\.pem|\.db" <<< "$LISTING"; exit 1
 fi
 
 # 7) manifest 合规自检:上传包绝不能含 key / update_url(商店硬性拒绝)
-if unzip -p "$OUT" manifest.json | grep -qE '"(key|update_url)"\s*:'; then
+if grep -qE '"(key|update_url)"\s*:' <<< "$MANIFEST_CONTENT"; then
   echo "❌ manifest 合规自检失败:含 key/update_url(会被 Web Store 拒)"; exit 1
 fi
 
 # 8) 结构自检:关键文件必须在根
 for f in manifest.json sidepanel.html sidepanel.js content-script.js background.js config.js; do
-  if ! unzip -l "$OUT" | grep -qE "^\s+[0-9]+\s+[0-9-]+\s+[0-9:]+\s+$f$"; then
+  if ! grep -qE "^\s+[0-9]+\s+[0-9-]+\s+[0-9:]+\s+$f$" <<< "$LISTING"; then
     echo "❌ 结构自检失败:根目录缺 $f"; exit 1
   fi
 done
