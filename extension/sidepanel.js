@@ -492,6 +492,7 @@
   const contractFallback = document.getElementById("contract-output-fallback");
   const contractFallbackText = document.getElementById("contract-fallback-text");
   const contractBridge = document.getElementById("contract-bridge");
+  const contractSendHint = document.getElementById("contract-send-hint");
   const contractBridgeStatus = document.getElementById("contract-bridge-status");
   // v0.9 Connection Center
   const connCenter = document.getElementById("conn-center");
@@ -624,6 +625,9 @@
       if (lock) { contractBridge.textContent = t("bridge.abort"); contractBridge.disabled = false; contractBridge.classList.add("aborting"); }
       else { contractBridge.textContent = _provider ? t("bridge.sendTo").replace("{agent}", providerLabel(_provider)) : t("bridge.run"); contractBridge.disabled = !canDispatch; contractBridge.classList.remove("aborting"); }
     }
+    // v0.9.1:发送按钮因「非本地文档」置灰时给说明(远程网页 / 缺 artifact 不能直发;运行中不显示)。
+    // 普通用户不易想到要切到本地文件,故显式提示;连接问题另有 Connection Center 与 ⌄ 教程,不在此重复。
+    if (contractSendHint) contractSendHint.hidden = !(!lock && !bridgeEligible);
     // v0.8.1:「先给我看修改计划」前端先隐去(后端 plan 逻辑保留,待合适时机再细化);保持常 hidden
     if (contractPlanBtn) contractPlanBtn.hidden = true;
     if (contractCopyPrompt) contractCopyPrompt.disabled = false; // 复制 Prompt 始终可用(用户可随时复制去自己的会话)
