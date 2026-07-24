@@ -140,7 +140,9 @@ export function writeFileAtomic(targetPath, content, mode) {
 
 // 把 bridge 运行时(源码 + node_modules)物化到受管版本目录。排除测试与系统杂物。
 // 先写 staging,校验通过再切换;失败清理 staging,不碰既有安装。
-export function materializeBridge({ sourceBridgeDir, targetDir, version }) {
+// allowMissingDeps:false(默认,仓库开发路径)= 有依赖声明就必须自带 node_modules,否则 SETUP_DEPS_MISSING 提示先 npm install;
+//   true(npx 发行路径)= 依赖被 npm 提升到包外层、包根本身无 node_modules,允许物化后由 setup 在受管目录自装(返回 depsMissing:true)。
+export function materializeBridge({ sourceBridgeDir, targetDir, version, allowMissingDeps }) {
   if (!path.isAbsolute(sourceBridgeDir) || !path.isAbsolute(targetDir)) {
     const e = new Error("bridge/target dir must be absolute"); e.code = "PATH_NOT_ABSOLUTE"; throw e;
   }
@@ -167,9 +169,13 @@ export function materializeBridge({ sourceBridgeDir, targetDir, version }) {
     try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
     const e = new Error("bridge source is incomplete (host.mjs / package.json missing)"); e.code = "BRIDGE_FILES_CORRUPT"; throw e;
   }
+  let depsMissing = false;
   if (pkg.dependencies && Object.keys(pkg.dependencies).length && !isDir(path.join(staging, "node_modules"))) {
-    try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
-    const e = new Error("bridge dependencies are not installed; run `npm install` in the bridge directory first"); e.code = "SETUP_DEPS_MISSING"; throw e;
+    if (!allowMissingDeps) {
+      try { fs.rmSync(staging, { recursive: true, force: true }); } catch (_) {}
+      const e = new Error("bridge dependencies are not installed; run `npm install` in the bridge directory first"); e.code = "SETUP_DEPS_MISSING"; throw e;
+    }
+    depsMissing = true; // npx 发行态:物化后由 setup 在受管目录自装依赖
   }
   // 受管标记文件(供 doctor/repair 识别受管安装;不含任何用户数据)
   fs.writeFileSync(path.join(staging, "managed-install.json"),
@@ -189,7 +195,7 @@ export function materializeBridge({ sourceBridgeDir, targetDir, version }) {
   }
   if (hadOld) { try { fs.rmSync(backup, { recursive: true, force: true }); } catch (_) {} }
   try { fs.chmodSync(targetDir, 0o700); } catch (_) {}
-  return { version: String(version || pkg.version || "") };
+  return { version: String(version || pkg.version || ""), depsMissing };
 }
 
 // 校验某受管版本目录是否完整可用。返回 { ok, version?, code? }。
