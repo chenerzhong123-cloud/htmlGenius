@@ -23,9 +23,10 @@ test("npm files 白名单:含 bin/ 与根级 *.mjs,排除 test/verify(发布产�
   assert.ok(pkg.files.includes("bin/"), "含 bin/(受控 CLI)");
   assert.ok(pkg.files.includes("*.mjs"), "含根级 *.mjs(host 与运行时模块)");
   assert.ok(!pkg.files.some((f) => /test|verify/.test(f)), "白名单不显式含 test/verify");
-  // bin 指向的文件必须真实存在
+  // bin 指向的文件必须真实存在;且必须是单一入口(多入口会让 `npx @htmlgenius/bridge` 报"无法确定可执行文件")
   assert.ok(fs.existsSync(path.join(bridgeDir, pkg.bin["htmlgenius-bridge"])), "CLI bin 存在");
-  assert.ok(fs.existsSync(path.join(bridgeDir, pkg.bin["htmlgenius-bridge-host"])), "host bin 存在");
+  assert.equal(Object.keys(pkg.bin).length, 1, "只能有一个 bin 入口,否则 npx 直接运行会因多入口报错");
+  assert.ok(!("htmlgenius-bridge-host" in pkg.bin), "host 由 launcher 以绝对路径启动,不应作为 bin 入口");
 });
 
 test("扩展与 bridge 版本对齐:manifest 版本 == bridge 包版本", () => {
