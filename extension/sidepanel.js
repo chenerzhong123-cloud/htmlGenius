@@ -1007,7 +1007,13 @@
   }
   function connCopy(text, hintKey) {
     if (!text) return;
-    const done = () => connSetHint(t(hintKey), "ok");
+    const done = () => {
+      const message = t(hintKey);
+      connSetHint(message, "ok");
+      // Connection Center 已并入发送菜单，原来的内联提示容器不再常驻；
+      // 用全局 toast 让“复制诊断”等操作始终有可见反馈。
+      showToast(message);
+    };
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(done, done);
     } else {
@@ -1092,13 +1098,16 @@
       userCollapsed: _connCollapsed,
       devOnly: !!(_bootstrap && _bootstrap.dev_only)
     });
-    connCenter.className = "conn-center" + (st.cls ? " " + st.cls : "") + (st.collapsed ? " collapsed" : "");
+    connCenter.className = "conn-center" + (st.cls ? " " + st.cls : "") + (connHead && st.collapsed ? " collapsed" : "");
     if (connHead) connHead.setAttribute("aria-expanded", String(!st.collapsed));
-    connTitle.textContent = (st.titleKey === "conn.titleConnected")
-      ? t(st.titleKey).replace("{n}", String(st.readyCount || 0))
-      : t(st.titleKey);
-    if (connDesc) { connDesc.textContent = st.descKey ? t(st.descKey) : ""; connDesc.hidden = !st.descKey; }
-    renderConnProviders(st.showProviders && _health ? (_health.providers || []) : []);
+    if (connTitle) {
+      connTitle.textContent = (st.titleKey === "conn.titleConnected")
+        ? t(st.titleKey).replace("{n}", String(st.readyCount || 0))
+        : t(st.titleKey);
+    }
+    // Provider status is already rendered once in the send list. Repeating it in
+    // Connection Center makes the menu look like two competing Agent pickers.
+    renderConnProviders([]);
     setConnButton(connPrimary, st.primary ? t(st.primary.labelKey) : null, st.primary ? st.primary.action : null);
     setConnButton(connSecondary, st.secondary ? t(st.secondary.labelKey) : null, st.secondary ? st.secondary.action : null);
     let hint = st.permanentHintKey ? t(st.permanentHintKey) : "";
@@ -1839,10 +1848,19 @@
 
   // === Tab 切换 + 头像浮层(方案1:编辑默认主视图,批注次级,账号收头像) ===
   function switchTab(name) {
-    document.getElementById("view-edit").classList.toggle("show", name === "edit");
-    document.getElementById("view-comment").classList.toggle("show", name === "comment");
-    document.getElementById("tab-edit").classList.toggle("active", name === "edit");
-    document.getElementById("tab-comment").classList.toggle("active", name === "comment");
+    const editActive = name === "edit";
+    const editView = document.getElementById("view-edit");
+    const commentView = document.getElementById("view-comment");
+    const editTab = document.getElementById("tab-edit");
+    const commentTab = document.getElementById("tab-comment");
+    editView.classList.toggle("show", editActive);
+    commentView.classList.toggle("show", !editActive);
+    editView.hidden = !editActive;
+    commentView.hidden = editActive;
+    editTab.classList.toggle("active", editActive);
+    commentTab.classList.toggle("active", !editActive);
+    editTab.setAttribute("aria-selected", String(editActive));
+    commentTab.setAttribute("aria-selected", String(!editActive));
   }
   function updateCommentCount(n) {
     // 仅管理计数徽标;标签文案由 .tab-label[data-i18n] 承担,避免覆盖 SVG 图标
@@ -1858,6 +1876,13 @@
   }
   document.getElementById("tab-edit").addEventListener("click", () => switchTab("edit"));
   document.getElementById("tab-comment").addEventListener("click", () => switchTab("comment"));
+  document.getElementById("tabbar").addEventListener("keydown", (e) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const next = (e.key === "ArrowLeft" || e.key === "Home") ? "edit" : "comment";
+    switchTab(next);
+    document.getElementById(next === "edit" ? "tab-edit" : "tab-comment").focus();
+  });
 
   const avatarBtn = document.getElementById("avatar");
   const accountSheet = document.getElementById("account-sheet");
