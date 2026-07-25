@@ -194,6 +194,11 @@
         </button>
         <div class="conn-body" id="conn-body">
           <p class="conn-desc" id="conn-desc" hidden></p>
+          <div class="conn-checking" id="conn-checking" role="status" aria-live="polite" hidden>
+            <span class="conn-checking-dots" id="conn-checking-dots" aria-hidden="true"></span>
+            <span data-i18n="conn.checkingHint">连接需要一点时间,请勿离开</span>
+            <span class="conn-checking-elapsed" id="conn-checking-elapsed"></span>
+          </div>
           <ul class="conn-providers" id="conn-providers" hidden></ul>
           <div class="conn-actions" id="conn-actions">
             <button id="conn-primary" class="conn-primary" type="button" hidden></button>

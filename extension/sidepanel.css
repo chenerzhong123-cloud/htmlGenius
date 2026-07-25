@@ -835,3 +835,8 @@ button {
 .conn-hint { margin: 8px 0 0; color: var(--text-faint); font-size: 11px; line-height: 1.5; word-break: break-word; }
 .conn-hint.ok { color: var(--success); }
 .conn-hint.warn { color: var(--warning); }
+/* v0.9.4:检查中动态计时——循环省略号 + 已用 Ns,告诉用户没卡住 */
+.conn-checking { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; color: var(--text-muted); font-size: 11.5px; line-height: 1.55; }
+.conn-checking[hidden] { display: none; }
+.conn-checking-dots { display: inline-block; width: 1.4em; text-align: left; color: var(--brand); font-weight: 700; }
+.conn-checking-elapsed { margin-left: auto; color: var(--text-faint); font-variant-numeric: tabular-nums; }

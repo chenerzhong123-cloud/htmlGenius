@@ -497,6 +497,9 @@
   const connCheck = document.getElementById("conn-check");
   const connDiag = document.getElementById("conn-diag");
   const connHint = document.getElementById("conn-hint");
+  const connChecking = document.getElementById("conn-checking");
+  const connCheckingDots = document.getElementById("conn-checking-dots");
+  const connCheckingElapsed = document.getElementById("conn-checking-elapsed");
   const connRepairConfirm = document.getElementById("conn-repair-confirm");
   const connRepairOk = document.getElementById("conn-repair-ok");
   const connRepairCancel = document.getElementById("conn-repair-cancel");
@@ -964,12 +967,36 @@
     PROVIDER_POLICY_BLOCKED: "conn.status.probeFailed"
   };
 
+  // v0.9.4:检查中动态计时——循环省略号 + 已用 Ns,避免用户以为卡住
+  let _connCheckTimer = null, _connCheckStart = 0, _connCheckDotIdx = 0;
+  const _CONN_CHECK_DOTS = ["", ".", "..", "..."];
+  function _renderConnChecking() {
+    const s = Math.max(0, Math.round((Date.now() - _connCheckStart) / 1000));
+    if (connCheckingElapsed) connCheckingElapsed.textContent = t("conn.checkingElapsed").replace("{n}", String(s));
+    if (connCheckingDots) connCheckingDots.textContent = _CONN_CHECK_DOTS[_connCheckDotIdx++ % _CONN_CHECK_DOTS.length];
+  }
+  function startConnChecking() {
+    if (connChecking) connChecking.hidden = false;
+    _connCheckStart = Date.now(); _connCheckDotIdx = 0;
+    _renderConnChecking();
+    if (_connCheckTimer) clearInterval(_connCheckTimer);
+    _connCheckTimer = setInterval(_renderConnChecking, 400);
+  }
+  function stopConnChecking() {
+    if (_connCheckTimer) { clearInterval(_connCheckTimer); _connCheckTimer = null; }
+    if (connChecking) connChecking.hidden = true;
+  }
   async function queryHealth() {
     if (!_contractOpen) return;
     if (connCenter) connCenter.hidden = false;
     if (connTitle) connTitle.textContent = t("conn.titleChecking");
-    const resp = await chrome.runtime.sendMessage({ type: "bridge-query-health" }).catch(() => null);
-    _health = (resp && resp.health) ? resp.health : null;
+    startConnChecking();
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: "bridge-query-health" }).catch(() => null);
+      _health = (resp && resp.health) ? resp.health : null;
+    } finally {
+      stopConnChecking();
+    }
     renderConnCenter();
   }
   async function fetchBootstrap() {
