@@ -1,0 +1,5 @@
+{
+  "type": "commonjs",
+  "private": true,
+  "_comment": "CJS 飞地:从 extension/ vendor 的共享模块(change-contract / plan-validate)。type:commonjs 强制 .js 按 CJS 加载,与 bridge 根包(type:module)隔离;require 者用 ./vendor/<name>.js。"
+}

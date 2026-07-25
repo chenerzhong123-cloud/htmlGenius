@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const ChangeContract = require("../extension/change-contract.js");
+const ChangeContract = require("./vendor/change-contract.js");
 
 export const MAX_ARTIFACT_BYTES = 10 * 1024 * 1024;      // 10 MiB(source 上限)
 export const MAX_TASK_JSON_BYTES = 1 * 1024 * 1024;      // 1 MiB(task bundle 不超过 native 帧上限)
@@ -43,7 +43,7 @@ export function isSha256Tagged(v) {
   return typeof v === "string" && /^sha256:[0-9a-f]{64}$/.test(v);
 }
 
-// canonical task JSON —— 与 extension/change-contract.js 的 serialize 完全一致(同一真相源)。
+// canonical task JSON —— 与 ./vendor/change-contract.js(vendored 自 extension/)的 serialize 完全一致(同一真相源)。
 export function canonicalTaskJson(task) {
   return JSON.stringify(task, null, 2);
 }

@@ -1,4 +1,4 @@
-# htmlGenius Local Bridge (v0.9.3 · macOS · Claude Code / Codex / GitHub Copilot)
+# htmlGenius Local Bridge (v0.9.4 · macOS · Claude Code / Codex / GitHub Copilot)
 
 让 Side Panel 把一份「修改契约」**一键交给你本机已登录的 AI Agent**，产出**只写候选、绝不覆盖原文件**的新版本（`原名V1.N.html`），或先生成可审阅的**修改计划**。
 
@@ -23,7 +23,7 @@ Native Messaging 安全模型决定：扩展**不能**自行下载安装程序�
 
 > ✅ **发行状态**：npm 包 `@htmlgenius/bridge` 已发布（MIT 开源可审计，CI 带 provenance 来源证明）。Connection Center 为**生产态**，「复制 Terminal 命令」给出固定版本命令：
 > ```bash
-> npx --yes @htmlgenius/bridge@0.9.3 setup --json --scope user --extension-id <你的扩展ID>
+> npx --yes @htmlgenius/bridge@0.9.4 setup --json --scope user --extension-id <你的扩展ID>
 > ```
 > 仓库内开发命令见 §4（仅开发/调试）。
 

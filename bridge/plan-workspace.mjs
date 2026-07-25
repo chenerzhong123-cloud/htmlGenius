@@ -6,14 +6,14 @@
 // - 目录 0700;source.html 是真实源的只读 snapshot(0400),Agent 不获得真实源路径;
 // - 运行前后都重算真实 source hash + task hash;任一变化 → SOURCE/TASK_MUTATED_DURING_PLAN,计划废弃;
 // - 只读唯一的 output/plan.json;拒绝 symlink/目录/空/超长/路径逃逸;
-// - plan.json v1 schema 复用 extension/plan-validate.js 的 validatePlanSchema(host 与 background 同一真相源)。
+// - plan.json v1 schema 复用 ./vendor/plan-validate.js(vendored 自 extension/)的 validatePlanSchema(host 与 background 同一真相源)。
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { resolveSourcePath, assertSafeRunId, sha256Bytes, sha256File } from "./candidate-workspace.mjs";
 
 const require = createRequire(import.meta.url);
-const { validatePlanSchema } = require("../extension/plan-validate.js");
+const { validatePlanSchema } = require("./vendor/plan-validate.js");
 
 export const PLAN_MAX_JSON_BYTES = 16 * 1024; // §6.3:plan.json 整体最大 16 KiB
 

@@ -5,6 +5,10 @@
 
 ---
 
+## v0.9.4（2026-07-25）
+
+- **修复所有用户无法连接的关键 bug**：v0.9.3 的本地连接组件在发布包里遗漏了两个共享模块（`change-contract.js`、`plan-validate.js`），它们仍按仓库相对路径 `../extension/*` 加载，在受管安装目录里 `MODULE_NOT_FOUND` → host 启动即崩 → Connection Center 对**所有走标准流程的用户**都报「未安装 / BRIDGE_NOT_INSTALLED」。现以 vendor 子目录（CJS 飞地）把它们打进包内，host 可正常启动；新增「隔离布局加载」回归测试，杜绝此类「包内模块依赖包外仓库路径」的问题再次漏网。
+
 ## v0.9.3（2026-07-25）
 
 - **修复 `npx` 安装命令**：上一版安装包有两个命令入口，导致用户复制的 `npx --yes @htmlgenius/bridge@… setup` 报「无法确定要运行的可执行文件」。现已移除多余的 host 入口（host 本就由启动器以绝对路径拉起，无需作为命令），`npx @htmlgenius/bridge` 现在可直接运行，「复制 Terminal 命令 / 让 Agent 帮我连接」的正规接入路径恢复可用。
