@@ -47,7 +47,7 @@ test("i18n:zh/en/ja 三语言 key 集合完全一致", () => {
 test("i18n:sidepanel.html 的 data-i18n* 引用全部存在于三语言", () => {
   const html = fs.readFileSync(path.join(extDir, "sidepanel.html"), "utf8");
   const keys = new Set();
-  const re = /data-i18n(?:-placeholder|-title|-html)?="([^"]+)"/g;
+  const re = /data-i18n(?:-placeholder|-title|-html|-aria-label)?="([^"]+)"/g;
   let m;
   while ((m = re.exec(html))) keys.add(m[1]);
   assert.ok(keys.size > 20, "应扫到足量 data-i18n 引用");

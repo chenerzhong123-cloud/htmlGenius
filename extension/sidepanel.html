@@ -14,17 +14,17 @@
   </div>
 </div>
 
-<div id="tabbar">
-  <button id="tab-edit" class="active">
+<div id="tabbar" role="tablist">
+  <button id="tab-edit" class="active" type="button" role="tab" aria-selected="true" aria-controls="view-edit">
     <svg class="hg-tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span class="tab-label" data-i18n="tab.edit">编辑</span>
   </button>
-  <button id="tab-comment">
+  <button id="tab-comment" type="button" role="tab" aria-selected="false" aria-controls="view-comment">
     <svg class="hg-tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="tab-label" data-i18n="tab.comment">评论</span>
   </button>
 </div>
 
 <!-- 编辑视图(默认主视图) -->
-<div id="view-edit" class="view show">
+<div id="view-edit" class="view show" role="tabpanel" aria-labelledby="tab-edit">
   <div id="mode-indicator" data-i18n="mode.connecting">正在连接当前页面…</div>
   <button id="edit-btn" hidden>切换编辑模式</button>
   <!-- v0.8: 编辑工具区。交互展示(弹层样式等)是侧边栏自己的;但所有改动都发消息给
@@ -92,7 +92,7 @@
 </div>
 
 <!-- 评论视图(次级) -->
-<div id="view-comment" class="view">
+<div id="view-comment" class="view" role="tabpanel" aria-labelledby="tab-comment" hidden>
   <div id="draft-host"></div>
   <!-- #7: 评论区独立滚动;底部操作区(.comment-actions)固定在第一屏,不被评论数量挤出,
        之后可在该容器内继续加按钮。 -->
@@ -158,6 +158,11 @@
         <label class="scope-card"><input type="radio" name="contract-scope" value="regenerate"><span class="scope-radio"></span><span class="scope-body"><b data-i18n="compose.mode.regenerate.name">全文：重做整页</b><small data-i18n="compose.mode.regenerate.desc">按这些要求重做整页，页面其他部分也可能改变。</small></span></label>
       </div>
 
+      <div class="comment-range-entry">
+        <button id="contract-goto-range" class="contract-link" type="button" data-i18n="compose.selectRange">选择评论范围</button>
+        <p class="field-hint" data-i18n="compose.selectRangeHint">有时不用把全部评论发给 Agent。</p>
+      </div>
+
       <!-- 高级选项(默认折叠,全部非必填) -->
       <details class="contract-advanced">
         <summary><span data-i18n="compose.advanced">高级选项</span> <span class="opt" data-i18n="compose.advancedOpt">（可选）</span></summary>
@@ -172,10 +177,6 @@
           <p class="field-hint" data-i18n="compose.preserveHint">即使允许大改，也必须原样保留的内容。</p>
           <textarea id="contract-preserve" rows="3" maxlength="2000" data-i18n-placeholder="compose.preservePh" placeholder="每行一条，必须原样保留的内容"></textarea>
         </div>
-        <div class="advanced-field">
-          <button id="contract-goto-range" class="contract-link" type="button" data-i18n="compose.selectRange">选择评论范围</button>
-          <p class="field-hint" data-i18n="compose.selectRangeHint">有时不用把全部评论发给 Agent。</p>
-        </div>
       </details>
 
       <div id="contract-output-fallback" class="contract-fallback" hidden>
@@ -186,54 +187,46 @@
 
     <!-- 固定底栏 action-grid:复制 Prompt / 发送给 {Agent} ⌄ / 先给我看修改计划 -->
     <div class="contract-bottom">
-      <!-- v0.9 Connection Center:连接状态与用户级初始化入口(可折叠;不替换发送菜单/评论 UI) -->
-      <div id="conn-center" class="conn-center" hidden>
-        <button class="conn-head" id="conn-head" type="button" aria-expanded="true">
-          <span class="conn-title" id="conn-title"></span>
-          <span class="conn-chev" aria-hidden="true">▾</span>
-        </button>
-        <div class="conn-body" id="conn-body">
-          <p class="conn-desc" id="conn-desc" hidden></p>
-          <div class="conn-checking" id="conn-checking" role="status" aria-live="polite" hidden>
-            <span class="conn-checking-dots" id="conn-checking-dots" aria-hidden="true"></span>
-            <span data-i18n="conn.checkingHint">连接需要一点时间,请勿离开</span>
-            <span class="conn-checking-elapsed" id="conn-checking-elapsed"></span>
-          </div>
-          <ul class="conn-providers" id="conn-providers" hidden></ul>
-          <div class="conn-actions" id="conn-actions">
-            <button id="conn-primary" class="conn-primary" type="button" hidden></button>
-            <button id="conn-secondary" class="conn-secondary" type="button" hidden></button>
-            <button id="conn-check" class="conn-secondary" type="button" data-i18n="conn.check">检查连接</button>
-            <button id="conn-diag" class="conn-secondary" type="button" data-i18n="conn.copyDiag">复制诊断</button>
-          </div>
-          <div class="conn-repair-confirm" id="conn-repair-confirm" hidden>
-            <p data-i18n="conn.repairConfirmText">安全修复会重写 HTML Genius 的 Chrome Host 注册文件；不会安装 Agent，也不会修改你的项目文件。</p>
-            <div class="conn-actions">
-              <button id="conn-repair-ok" class="conn-primary" type="button" data-i18n="conn.repairConfirmOk">确认修复</button>
-              <button id="conn-repair-cancel" class="conn-secondary" type="button" data-i18n="conn.cancel">取消</button>
-            </div>
-          </div>
-          <p class="conn-hint" id="conn-hint" hidden></p>
-        </div>
-      </div>
       <div class="action-grid">
         <button id="contract-copy-prompt" class="contract-copy" type="button"></button>
         <div class="send-group" id="contract-send-group">
           <button id="contract-bridge" class="send-main" type="button"></button>
-          <button id="contract-send-toggle" class="send-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="menu">⌄</button>
+          <button id="contract-send-toggle" class="send-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="contract-send-menu" data-i18n-aria-label="bridge.sendMenu" aria-label="选择 Agent 与管理连接">⌄</button>
           <div class="send-menu" id="contract-send-menu" hidden>
-            <div class="menu-head" data-i18n="bridge.agentHead">已支持的 Agent</div>
-            <div class="menu-setup" id="contract-send-setup" hidden>
-              <div class="menu-setup-title" data-i18n="bridge.setupTitle">未连接?两步连上你的 Agent</div>
-              <div class="menu-setup-step"><b>1</b><span data-i18n="bridge.setupStep1">在「终端」运行这条命令,安装本地连接组件:</span></div>
-              <div class="menu-setup-cmd"><code id="contract-send-setup-cmd"></code><button class="menu-setup-copy" id="contract-send-setup-copy" type="button" data-i18n="bridge.copyCmd">复制</button></div>
-              <div class="menu-setup-step"><b>2</b><span data-i18n="bridge.setupStep2">安装并登录你要用的 Agent(Claude Code / Codex / Copilot),回来点「检查连接」。</span></div>
+            <div class="menu-content">
+              <button class="agent" data-provider="claude_code_cli" type="button"><i class="agent-dot"></i><span><b>Claude Code</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span></button>
+              <button class="agent" data-provider="codex_app_server" type="button"><i class="agent-dot"></i><span><b>Codex</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span></button>
+              <button class="agent" data-provider="github_copilot" type="button"><i class="agent-dot"></i><span><b>GitHub Copilot</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span></button>
+              <div id="conn-center" class="conn-center" hidden>
+                <div class="conn-body" id="conn-body">
+                  <div class="conn-checking" id="conn-checking" role="status" aria-live="polite" hidden>
+                    <span class="conn-checking-dots" id="conn-checking-dots" aria-hidden="true"></span>
+                    <span data-i18n="conn.checkingHint">连接需要一点时间,请勿离开</span>
+                    <span class="conn-checking-elapsed" id="conn-checking-elapsed"></span>
+                  </div>
+                  <div class="conn-actions" id="conn-actions">
+                    <button id="conn-primary" class="conn-primary" type="button" hidden></button>
+                    <button id="conn-secondary" class="conn-secondary" type="button" hidden></button>
+                    <button id="conn-check" class="conn-secondary" type="button" data-i18n="conn.check">检查连接</button>
+                    <button id="conn-diag" class="conn-secondary" type="button" data-i18n="conn.copyDiag">复制诊断</button>
+                  </div>
+                  <div class="conn-repair-confirm" id="conn-repair-confirm" hidden>
+                    <p data-i18n="conn.repairConfirmText">安全修复会重写 HTML Genius 的 Chrome Host 注册文件；不会安装 Agent，也不会修改你的项目文件。</p>
+                    <div class="conn-actions">
+                      <button id="conn-repair-ok" class="conn-primary" type="button" data-i18n="conn.repairConfirmOk">确认修复</button>
+                      <button id="conn-repair-cancel" class="conn-secondary" type="button" data-i18n="conn.cancel">取消</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="menu-setup" id="contract-send-setup" hidden>
+                <div class="menu-setup-title" data-i18n="bridge.setupTitle">未连接?两步连上你的 Agent</div>
+                <div class="menu-setup-step"><b>1</b><span data-i18n="bridge.setupStep1">在「终端」运行这条命令,安装本地连接组件:</span></div>
+                <div class="menu-setup-cmd"><code id="contract-send-setup-cmd"></code><button class="menu-setup-copy" id="contract-send-setup-copy" type="button" data-i18n="bridge.copyCmd">复制</button></div>
+                <div class="menu-setup-step"><b>2</b><span data-i18n="bridge.setupStep2">安装并登录你要用的 Agent(Claude Code / Codex / Copilot),回来点「检查连接」。</span></div>
+              </div>
+              <a class="menu-link menu-learn-link" target="_blank" rel="noopener" href="https://www.deuce.monster/htmlgenius/setup.html" data-i18n="conn.learn">查看连接配置文档</a>
             </div>
-            <button class="agent" data-provider="claude_code_cli" type="button"><i class="agent-dot"></i><span><b>Claude Code</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span></button>
-            <button class="agent" data-provider="codex_app_server" type="button"><i class="agent-dot"></i><span><b>Codex</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span></button>
-            <button class="agent" data-provider="github_copilot" type="button"><i class="agent-dot"></i><span><b>GitHub Copilot</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span></button>
-            <div class="menu-note" data-i18n="bridge.privacyNote">这里只选择 Agent。每次默认创建新的 task；不显示历史会话或 JSON 导出。</div>
-            <a class="menu-link" target="_blank" rel="noopener" href="https://www.deuce.monster/htmlgenius/agents.html" data-i18n="bridge.agentsHelp">了解支持的 Agent 与使用方法 →</a>
           </div>
         </div>
         <button id="contract-plan" class="plan-button" type="button" data-i18n="compose.plan" hidden>先给我看修改计划</button>

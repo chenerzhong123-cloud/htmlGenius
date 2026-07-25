@@ -38,14 +38,14 @@
 
 想「一键发送」而不是复制粘贴？装一次本地连接组件即可：
 
-- 未连接时，打开**发送按钮旁的 ⌄ 下拉**或契约页的 **Connection Center**，按提示运行**一条命令**安装本地连接组件；再安装并登录你要用的 Agent，回来点「检查连接」，连上后即可在发送菜单直接选。
+- 未连接时，打开「发送给 Agent」右侧的 **⌄ 下拉菜单**：这里集中显示三个 Agent 的状态、**检查连接**与**复制诊断**。按提示运行固定版本的安装命令，完成任一 Agent 的登录后，再点「检查连接」。
 - 三个 Agent 任选其一即可：
   - **Codex**：安装 Codex / ChatGPT 桌面应用并登录。
   - **Claude Code**：安装后运行 `claude auth login`。
   - **GitHub Copilot**：本机已登录 Copilot（CLI 可选，缺失时走 SDK 自带 runtime）。
 - 组件只在你机器上运行各 Agent 的官方程序、只用你的登录态，**不存任何凭证、不读取你的历史会话**。没连上也随时可以「复制 Prompt」手动交给任意 AI。
 
-> 仅支持 macOS + Chrome + Node 20.x / 22+（GitHub Copilot 另需 20.19+ / 22.12+）。详见 [Agent 说明](https://www.deuce.monster/htmlgenius/agents.html) 与 [`docs/LOCAL_BRIDGE.md`](docs/LOCAL_BRIDGE.md)。
+> 仅支持 macOS + Chrome + Node 20.x / 22+（GitHub Copilot 另需 20.19+ / 22.12+）。详见 [连接配置文档](https://www.deuce.monster/htmlgenius/setup.html)、[Agent 说明](https://www.deuce.monster/htmlgenius/agents.html) 与 [`docs/LOCAL_BRIDGE.md`](docs/LOCAL_BRIDGE.md)。
 
 ## 已知限制
 
@@ -58,4 +58,5 @@
 
 - 完整版本历史（含每次更新细节）：**[RELEASE_NOTES.md](RELEASE_NOTES.md)**
 - 开发、测试、部署与架构说明：**[DEVELOPMENT.md](DEVELOPMENT.md)**
+- 官网静态源码与发布说明：[`landing/demo-2026-07/`](landing/demo-2026-07/)
 - 各版本的设计与实现计划：`docs/` 目录

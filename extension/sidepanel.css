@@ -709,14 +709,14 @@ button {
 [data-theme="light"] .plan-button { color: var(--brand); }
 /* provider split button(发送给 X + ⌄) */
 .send-group.send-group { position: relative; display: flex; min-width: 0; }
-.send-main { flex: 1; min-width: 0; border: 0; border-radius: var(--r-md) 0 0 var(--r-md); color: var(--cta-fg, #10211f); background: var(--cta-bg, var(--brand)); font-size: 12px; font-weight: 700; cursor: pointer; }
+.send-main { display: flex; align-items: center; justify-content: center; flex: 1; min-width: 0; min-height: 38px; height: 38px; padding: 0 8px; box-sizing: border-box; border: 0; border-radius: var(--r-md) 0 0 var(--r-md); color: var(--cta-fg, #10211f); background: var(--cta-bg, var(--brand)); font-size: 12px; font-weight: 700; line-height: 1.2; cursor: pointer; }
 .send-main:disabled { opacity: .5; cursor: not-allowed; }
 /* v0.8.1 运行中:发送按钮变「终止任务」—— 警告语义用琥珀色(比红色更克制,仍醒目);下拉箭头跟随同色 */
 .send-main.aborting { background: #f59e0b; color: #2a1a04; }
 .send-main.aborting:hover { background: #fbb340; }
 .send-main.aborting + .send-toggle { background: #f59e0b; color: #2a1a04; border-left-color: rgba(0,0,0,.14); }
 .send-main.aborting + .send-toggle:hover { background: #fbb340; }
-.send-toggle { width: 33px; flex: 0 0 auto; border: 0; border-left: 1px solid rgba(255,255,255,.2); border-radius: 0 var(--r-md) var(--r-md) 0; color: var(--cta-fg, #10211f); background: var(--brand); font-size: 14px; cursor: pointer; }
+.send-toggle { width: 33px; min-height: 38px; height: 38px; flex: 0 0 auto; box-sizing: border-box; display: grid; place-items: center; padding: 0; border: 0; border-left: 1px solid rgba(255,255,255,.2); border-radius: 0 var(--r-md) var(--r-md) 0; color: var(--cta-fg, #10211f); background: var(--brand); font-size: 14px; line-height: 1; cursor: pointer; }
 [data-theme="light"] .send-main, [data-theme="light"] .send-toggle { color: #fff; border-left-color: rgba(255,255,255,.2); }
 /* provider 下拉菜单 */
 .send-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 3; width: min(285px, calc(100vw - 42px)); padding: 7px; border: 1px solid var(--line-default); border-radius: var(--r-lg); background: var(--bg-overlay); box-shadow: var(--shadow); }
@@ -758,6 +758,10 @@ button {
 .contract-advanced textarea { width: 100%; min-height: 56px; margin-top: 5px; padding: 8px 9px; resize: vertical; outline: 0; border: 1px solid var(--line-subtle); border-radius: var(--r-md); color: var(--text-primary); background: var(--bg-input); font: 12px/1.5 var(--font); box-sizing: border-box; }
 .contract-advanced textarea:focus { border-color: var(--line-focus); box-shadow: 0 0 0 3px var(--brand-soft); }
 .contract-advanced .contract-link { margin-top: 4px; }
+.comment-range-entry { margin-top: 10px; padding: 9px 10px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface); transition: border-color .14s, background .14s; }
+.comment-range-entry:hover { border-color: var(--brand); background: var(--bg-surface-raised); }
+.comment-range-entry .contract-link { display: inline-flex; align-items: center; min-height: 28px; margin: 0; }
+.comment-range-entry .field-hint { margin: 2px 0 0; }
 /* plan-review */
 .plan-state { padding: 12px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface); }
 .plan-state-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
@@ -825,9 +829,10 @@ button {
 .conn-guide:hover { text-decoration: underline; }
 .conn-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .conn-primary { flex: 1 1 100%; height: 34px; border: 0; border-radius: var(--r-md); background: var(--cta-bg); color: var(--on-cta); font-size: 12px; font-weight: 700; cursor: pointer; }
+.conn-primary[hidden], .conn-secondary[hidden] { display: none !important; }
 .conn-primary:hover { background: var(--cta-hover-bg); }
 [data-theme="light"] .conn-primary { color: #fff; }
-.conn-secondary { flex: 1 1 auto; height: 30px; padding: 0 10px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: transparent; color: var(--text-secondary); font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.conn-secondary { display: inline-flex; align-items: center; justify-content: center; flex: 1 1 auto; height: 30px; padding: 0 10px; box-sizing: border-box; border: 1px solid var(--line-default); border-radius: var(--r-md); background: transparent; color: var(--text-secondary); font-size: 11.5px; font-weight: 600; line-height: 1; cursor: pointer; }
 .conn-secondary:hover { border-color: var(--brand); color: var(--brand-hover); }
 .conn-secondary:disabled { opacity: .55; cursor: default; }
 .conn-repair-confirm { margin-top: 9px; padding: 9px 10px; border: 1px solid rgba(244,204,118,.4); border-radius: var(--r-md); background: var(--warning-soft); }
@@ -835,6 +840,27 @@ button {
 .conn-hint { margin: 8px 0 0; color: var(--text-faint); font-size: 11px; line-height: 1.5; word-break: break-word; }
 .conn-hint.ok { color: var(--success); }
 .conn-hint.warn { color: var(--warning); }
+
+/* === UI polish: narrow side-panel clarity and accessible interaction states === */
+:where(button, input, textarea, select, summary, a):focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }
+.card:focus-within { border-color: var(--line-focus); box-shadow: 0 0 0 3px var(--brand-soft); }
+.card-acts { display: flex; gap: 6px; max-height: 0; margin-top: 0; overflow: hidden; opacity: 0; transition: max-height .16s ease, margin-top .16s ease, opacity .12s ease; }
+.card:hover .card-acts, .card:focus-within .card-acts { max-height: 34px; margin-top: 8px; opacity: 1; }
+.card-acts button:focus-visible { outline-offset: -1px; }
+:where(.view, #annotations, .contract-scroll, .contract-bridge-status.expanded .cbs-detail) { scrollbar-width: thin; scrollbar-color: var(--line-default) transparent; }
+:where(.view, #annotations, .contract-scroll, .contract-bridge-status.expanded .cbs-detail)::-webkit-scrollbar { width: 8px; }
+:where(.view, #annotations, .contract-scroll, .contract-bridge-status.expanded .cbs-detail)::-webkit-scrollbar-thumb { background: var(--line-default); border: 2px solid transparent; border-radius: var(--r-pill); background-clip: padding-box; }
+.contract-bottom { box-shadow: 0 -8px 18px rgba(0, 0, 0, .08); }
+[data-theme="light"] .contract-bottom { box-shadow: 0 -8px 18px rgba(24, 29, 38, .06); }
+#export-btn:hover, .card-acts button:hover, #lark-login-btn:hover, #google-login-btn:hover, #logout-btn:hover, #invite-btn:hover, .contract-secondary:hover { background: var(--bg-surface-raised); }
+
+/* Provider choice is the primary decision; connection setup shares this menu. */
+.send-menu { max-height: min(560px, calc(100vh - 112px)); overflow-y: auto; }
+.send-menu .menu-learn-link { border-top: 0; }
+.send-menu .conn-center { margin: 10px 2px 2px; border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.send-menu .conn-body { padding: 0; }
+.send-menu .conn-actions { padding-top: 10px; border-top: 1px solid var(--line-subtle); }
+@media (prefers-reduced-motion: reduce) { .card-acts { transition: none; } }
 /* v0.9.4:检查中动态计时——循环省略号 + 已用 Ns,告诉用户没卡住 */
 .conn-checking { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; color: var(--text-muted); font-size: 11.5px; line-height: 1.55; }
 .conn-checking[hidden] { display: none; }

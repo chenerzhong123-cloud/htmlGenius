@@ -9,13 +9,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sp = fs.readFileSync(path.resolve(__dirname, "..", "..", "extension", "sidepanel.js"), "utf8");
 const html = fs.readFileSync(path.resolve(__dirname, "..", "..", "extension", "sidepanel.html"), "utf8");
 
-test("HTML:conn-center 结构齐全且在契约底栏(action-grid 之前)", () => {
-  for (const id of ["conn-center", "conn-head", "conn-title", "conn-desc", "conn-providers",
-    "conn-primary", "conn-secondary", "conn-check", "conn-diag", "conn-hint",
+test("HTML:conn-center 内嵌发送菜单，仅保留连接操作而不重复 Agent 列表", () => {
+  for (const id of ["conn-center", "conn-primary", "conn-secondary", "conn-check", "conn-diag",
     "conn-repair-confirm", "conn-repair-ok", "conn-repair-cancel"]) {
     assert.ok(html.includes('id="' + id + '"'), "缺元素 " + id);
   }
-  assert.ok(html.indexOf('id="conn-center"') < html.indexOf('class="action-grid"'), "conn-center 应在发送区之前");
+  assert.ok(html.indexOf('id="conn-center"') > html.indexOf('id="contract-send-menu"'), "conn-center 应内嵌发送菜单");
+  for (const id of ["conn-head", "conn-title", "conn-desc", "conn-providers", "conn-hint"]) {
+    assert.ok(!html.includes('id="' + id + '"'), "不应保留重复的连接管理结构: " + id);
+  }
 });
 
 test("JS:状态矩阵已移到 connection-center-state.js,sidepanel 由其驱动(§5.2/§9.1)", () => {
@@ -54,7 +56,7 @@ test("JS:诊断复制只输出 health JSON(§5.4);host 缺失用兜底形态", (
   assert.match(sp, /reason_code: "BRIDGE_NOT_INSTALLED", extension_version:/);
 });
 
-test("JS:折叠与 Copy Prompt 常驻提示由纯函数输出驱动", () => {
-  assert.match(sp, /st\.collapsed \? " collapsed" : ""/);
+test("JS:扁平连接操作与 Copy Prompt 常驻提示由纯函数输出驱动", () => {
+  assert.match(sp, /connHead && st\.collapsed \? " collapsed" : ""/);
   assert.match(sp, /st\.permanentHintKey \? t\(st\.permanentHintKey\) : ""/);
 });

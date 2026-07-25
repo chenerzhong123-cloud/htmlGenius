@@ -108,6 +108,8 @@
       "bridge.privacyNote": "不会显示或接管你正在运行的其他 Claude 会话。",
       "bridge.agentsHelp": "了解支持的 Agent 与使用方法 →",
       "bridge.agentHead": "已连接的 Agent",
+      "bridge.sendTo": "发送给",
+      "bridge.sendMenu": "选择 Agent 与管理连接",
       "bridge.setupTitle": "未连接?两步连上你的 Agent",
       "bridge.setupStep1": "在「终端」运行这条命令,安装本地连接组件:",
       "bridge.setupStep2": "安装并登录你要用的 Agent(Claude Code / Codex / Copilot),回来点「检查连接」。",
@@ -221,6 +223,9 @@
       "provider.copilotSdkRuntime": "SDK runtime",
       "conn.check": "检查连接",
       "conn.copyDiag": "复制诊断",
+      "conn.menuHeading": "连接",
+      "conn.manage": "管理连接",
+      "conn.learn": "查看连接配置文档",
       "conn.titleChecking": "正在检查连接状态…",
       "conn.checkingHint": "连接需要一点时间,请勿离开",
       "conn.checkingElapsed": "已用 {n}s",
@@ -469,6 +474,8 @@
       "bridge.privacyNote": "Won't show or take over any other Claude sessions you have running.",
       "bridge.agentsHelp": "Supported agents & how to use →",
       "bridge.agentHead": "Connected Agent",
+      "bridge.sendTo": "Send to",
+      "bridge.sendMenu": "Choose an Agent or manage connections",
       "bridge.setupTitle": "Not connected? Connect your Agent in 2 steps",
       "bridge.setupStep1": "Run this command in Terminal to install the local connection component:",
       "bridge.setupStep2": "Install and sign in to the Agent you want (Claude Code / Codex / Copilot), then come back and press Check connection.",
@@ -581,6 +588,9 @@
       "provider.copilotSdkRuntime": "SDK runtime",
       "conn.check": "Check connection",
       "conn.copyDiag": "Copy diagnostics",
+      "conn.menuHeading": "Connections",
+      "conn.manage": "Manage connections",
+      "conn.learn": "View connection setup guide",
       "conn.titleChecking": "Checking connection…",
       "conn.checkingHint": "This takes a moment — please don't leave",
       "conn.checkingElapsed": "{n}s elapsed",
@@ -828,6 +838,8 @@
       "bridge.privacyNote": "実行中の他の Claude セッションは表示も引き継ぎもしません。",
       "bridge.agentsHelp": "対応 Agent と使い方 →",
       "bridge.agentHead": "接続済みの Agent",
+      "bridge.sendTo": "送信先",
+      "bridge.sendMenu": "Agent を選択、または接続を管理",
       "bridge.setupTitle": "未接続?2 ステップで Agent を接続",
       "bridge.setupStep1": "ターミナルでこのコマンドを実行し、ローカル接続コンポーネントをインストール:",
       "bridge.setupStep2": "使いたい Agent(Claude Code / Codex / Copilot)をインストールしてログインし、戻って「接続を確認」を押してください。",
@@ -940,6 +952,9 @@
       "provider.copilotSdkRuntime": "SDK ランタイム",
       "conn.check": "接続を確認",
       "conn.copyDiag": "診断情報をコピー",
+      "conn.menuHeading": "接続",
+      "conn.manage": "接続を管理",
+      "conn.learn": "接続設定ガイドを見る",
       "conn.titleChecking": "接続状態を確認中…",
       "conn.checkingHint": "少し時間がかかります、このままお待ちください",
       "conn.checkingElapsed": "{n}秒経過",
@@ -1143,6 +1158,7 @@
     root.querySelectorAll("[data-i18n]").forEach(function (el) { el.textContent = t(el.dataset.i18n); });
     root.querySelectorAll("[data-i18n-placeholder]").forEach(function (el) { el.placeholder = t(el.dataset.i18nPlaceholder); });
     root.querySelectorAll("[data-i18n-title]").forEach(function (el) { el.title = t(el.dataset.i18nTitle); });
+    root.querySelectorAll("[data-i18n-aria-label]").forEach(function (el) { el.setAttribute("aria-label", t(el.dataset.i18nAriaLabel)); });
     root.querySelectorAll("[data-i18n-html]").forEach(function (el) { el.innerHTML = t(el.dataset.i18nHtml); });
   }
 
