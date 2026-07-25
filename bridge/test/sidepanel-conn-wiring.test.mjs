@@ -60,3 +60,16 @@ test("JS:扁平连接操作与 Copy Prompt 常驻提示由纯函数输出驱动"
   assert.match(sp, /connHead && st\.collapsed \? " collapsed" : ""/);
   assert.match(sp, /st\.permanentHintKey \? t\(st\.permanentHintKey\) : ""/);
 });
+
+test("JS:检查连接(queryHealth)成功后立即同步 provider 状态进发送菜单(v0.9.4 回归修复)", () => {
+  // 检查连接(bridge_health)与 provider_probe 是两条独立往返;点完「检查连接」必须立即把
+  // health.providers 同步进 _providerStates 并重渲染,否则 Agent 选择器仍显示旧状态,用户看不出已连接。
+  assert.match(sp, /_health\.providers\.forEach\(\(p\) => \{ if \(p && p\.id\) _providerStates\[p\.id\] = p;/);
+});
+
+test("JS:openContract 不再清空 provider 状态(v0.9.4:candidate 新页发送按钮置灰修复)", () => {
+  // provider 状态是机器级;每次开契约清空会导致切到新标签页(如新生成的 candidate)时发送按钮置灰
+  // ~2-3s(要等异步 probe/queryHealth 回来)。openContract 不得再 reset _providerStates。
+  assert.ok(!sp.includes("_provider = null; _providerStates = {}; _providerCacheAt = 0;"),
+    "openContract 不应再清空 provider 状态(candidate 页按钮置灰回归)");
+});

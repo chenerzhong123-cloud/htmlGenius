@@ -681,7 +681,10 @@
     _selectedNodeIds = new Set(allNonStaleNodeIds(items)); // 默认全选(含回复)
     // 注意:不在此处置 _contractRunning=false。若后台仍有活动 run(用户关掉契约页又重进),
     // 由 syncRunStateFromBackground 据实同步 —— 在跑就保持「终止任务」态,避免误显示可发送。
-    _provider = null; _providerStates = {}; _providerCacheAt = 0;
+    // provider 状态是机器级(不随页面/标签变化),不再每次开契约清空:切到新标签页(如新生成的 candidate)
+    // 打开契约时若清空 _providerStates,要等异步 probe/queryHealth(~2-3s)回来才重新可用,期间发送按钮
+    // 置灰,用户误以为没连上。保留上一轮/上一页状态 → 按钮立即可用;新鲜度由 queryProviders(true) 与
+    // queryHealth()(其会同步 health.providers 进 _providerStates)在后台保证。
     _plan = null; _planStale = false;
     _contractOpen = true;
     resetContractForm();
@@ -997,6 +1000,20 @@
     } finally {
       stopConnChecking();
     }
+    // v0.9.4:检查连接成功后,立即把 health.providers 同步进 _providerStates 并重渲染发送菜单。
+    // 发送菜单的 Agent 选择器读 _providerStates(由独立的 provider_probe 流填充,30s 缓存),与 _health
+    // (bridge_health)是两条往返;不同步则点完「检查连接」Agent 选择器仍显示旧状态,用户看不出已连接
+    // (要等 provider_probe 异步完成才更新,体感像"没连上")。两者同源(host 的 probeProviders),状态等价。
+    if (_health && Array.isArray(_health.providers)) {
+      _providerStates = {};
+      _health.providers.forEach((p) => { if (p && p.id) _providerStates[p.id] = p; });
+      _providerCacheAt = Date.now();
+      if (!_provider || !(_providerStates[_provider] && _providerStates[_provider].status === "ready")) {
+        _provider = (Object.keys(_providerStates).find((id) => _providerStates[id].status === "ready")) || null;
+      }
+      renderProviderMenu();
+      refreshContractUI();
+    }
     renderConnCenter();
   }
   async function fetchBootstrap() {
@@ -1175,26 +1192,23 @@
   function setBridgeStatus(text, cls) {
     if (!contractBridgeStatus) return;
     const expanded = contractBridgeStatus.classList.contains("expanded");
-    const full = contractBridgeStatus.classList.contains("expanded-full");
     contractBridgeStatus.hidden = !text && !_runEvents.length && !_candidateResult;
     const tx = cbsTextEl(); if (tx) tx.textContent = text || "";
-    contractBridgeStatus.className = "contract-bridge-status" + (cls ? " " + cls : "") + (expanded ? " expanded" : "") + (full ? " expanded-full" : "");
+    contractBridgeStatus.className = "contract-bridge-status" + (cls ? " " + cls : "") + (expanded ? " expanded" : "");
   }
-  // 发送后默认展开进度窗(capped 限高);完成/终止后收起;点击在 收起→capped→全展→收起 间循环。
-  // open=false 收起;open=true 打开,full=true 进一步全展开(看全部历史)。
-  function expandBridgeDetail(open, full) {
+  // 发送后默认展开进度窗(capped 限高);完成/终止后收起;点击在 收起↔半高 间切换(无全高态)。
+  // open=false 收起;open=true 打开半高(内部滚动看更多)。
+  function expandBridgeDetail(open) {
     if (!contractBridgeStatus) return;
     const d = contractBridgeStatus.querySelector(".cbs-detail");
     if (!d) return;
     if (!open) {
       d.hidden = true;
       contractBridgeStatus.classList.remove("expanded");
-      contractBridgeStatus.classList.remove("expanded-full");
       return;
     }
     d.hidden = false;
     contractBridgeStatus.classList.add("expanded");
-    contractBridgeStatus.classList.toggle("expanded-full", !!full);
     loadRunHistory();
   }
   function startRunTimer() { stopRunTimer(); _runStartedAt = Date.now(); updateRunTimer(); _runTimer = setInterval(updateRunTimer, 1000); }
@@ -1433,15 +1447,11 @@
   if (contractCopyPrompt) contractCopyPrompt.addEventListener("click", () => copyContract());
   // 发送按钮:运行中 → 终止任务(cancelBridgeRun);否则 → 发送(startBridgeRun)
   if (contractBridge) contractBridge.addEventListener("click", () => { if (_contractRunning) cancelBridgeRun(); else startBridgeRun(); });
-  // 状态栏点击:三态循环 收起 → capped(限高)→ 全展 → 收起
+  // 状态栏点击:两态切换 收起 ↔ 半高(capped 限高,内部滚动)
   if (contractBridgeStatus) contractBridgeStatus.addEventListener("click", () => {
     const d = contractBridgeStatus.querySelector(".cbs-detail");
     if (!d) return;
-    const isHidden = d.hidden;
-    const isFull = contractBridgeStatus.classList.contains("expanded-full");
-    if (isHidden) expandBridgeDetail(true, false);
-    else if (!isFull) expandBridgeDetail(true, true);
-    else expandBridgeDetail(false);
+    expandBridgeDetail(d.hidden);
   });
   if (contractPlanBtn) contractPlanBtn.addEventListener("click", startPlanRun);
   if (contractGotoRange) contractGotoRange.addEventListener("click", () => setContractStep("comment-scope"));

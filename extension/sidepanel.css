@@ -789,9 +789,8 @@ button {
 [data-theme="light"] .contract-bridge-status .cbs-open { color: #fff; }
 .contract-bridge-status .cbs-detail { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line-subtle); }
 .contract-bridge-status .cbs-detail[hidden] { display: none; }
-/* v0.8.1 自动展开默认 capped:约 3 行 Agent 实时输出 + 3 行本次进度(内部滚动);点击切 expanded-full 看全部 */
+/* 进度窗仅两态:收起 / 半高(capped,约 3 行 Agent 实时输出 + 3 行本次进度,内部滚动) */
 .contract-bridge-status.expanded .cbs-detail { max-height: 212px; overflow-y: auto; }
-.contract-bridge-status.expanded-full .cbs-detail { max-height: 70vh; }
 .contract-bridge-status .cbs-section-label { color: var(--text-faint); font-size: 10px; font-weight: 700; margin: 4px 0 3px; text-transform: uppercase; letter-spacing: .04em; }
 .contract-bridge-status .cbs-section-label:first-child { margin-top: 0; }
 .contract-bridge-status .cbs-progress, .contract-bridge-status .cbs-history { list-style: none; margin: 0 0 4px; padding: 0; }
