@@ -29,9 +29,11 @@ test("npm files 白名单:含 bin/ 与根级 *.mjs,排除 test/verify(发布产�
   assert.ok(!("htmlgenius-bridge-host" in pkg.bin), "host 由 launcher 以绝对路径启动,不应作为 bin 入口");
 });
 
-test("扩展与 bridge 版本对齐:manifest 版本 == bridge 包版本", () => {
+test("扩展与 bridge 版本独立(bridge 自 1.0.0 起独立编号,不再与扩展 manifest 绑定)", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(extDir, "manifest.json"), "utf8"));
-  assert.equal(manifest.version, pkg.version, "扩展版本与 bridge 包版本一致(bootstrap TARGET 指向它)");
+  // bridge 与 extension 解耦:两者各自 semver,不要求相等。TARGET 指向 bridge 版本见下方 bootstrap 测试。
+  assert.match(manifest.version, /^\d+\.\d+\.\d+$/, "扩展 manifest 版本是 x.y.z");
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/, "bridge 包版本是 x.y.z");
 });
 
 test("bootstrap 生产态命令:指向已发布包名与固定版本(无 latest)", () => {
