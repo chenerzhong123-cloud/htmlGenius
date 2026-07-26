@@ -66,11 +66,22 @@
     // 旧顺序(先断旧 port)会让 content-script 的 onDisconnect→失活 异步晚到,误杀刚激活的状态
     // (激活确认窗被移除且不恢复 → 「点刷新按钮没反应」)。配合 content-script 的延迟失活双保险。
     const oldPort = _panelPort;
+    let csReady = true;
     try { await chrome.tabs.sendMessage(tab.id, { type: "activate", showDialog: showDialog !== false }); }
-    catch (e) { /* content-script 未就绪,等 onUpdated(complete) 再试 */ }
+    catch (e) { csReady = false; /* content-script 未就绪,等 onUpdated(complete) 再试 */ }
+    // file:// 页若 content script 未就绪,几乎必是「允许访问文件网址」toggle 关了(Chrome 对所有扩展默认关)。
+    syncFileAccessHint(tab, csReady);
     // #5: 建立长连接 —— 侧边栏关闭(页面销毁)→ Chrome 自动断开 port → content-script onDisconnect 失活
     try { _panelPort = chrome.tabs.connect(tab.id, { name: "hg-panel" }); } catch (e) {}
     if (oldPort && oldPort !== _panelPort) { try { oldPort.disconnect(); } catch (e) {} } // 切标签:最后再断旧 port
+  }
+  // file:// 本地文件页:Chrome 默认禁止扩展访问(content script 不注入),需用户在 chrome://extensions
+  // 手动开「允许访问文件网址」。检测到 file:// 页 CS 未就绪 → 显示提示;CS 就绪或非 file:// → 隐藏。
+  function syncFileAccessHint(tab, csReady) {
+    const el = document.getElementById("file-access-hint");
+    if (!el) return;
+    const isFileUrl = !!(tab && tab.url && /^file:/i.test(tab.url));
+    el.hidden = !(isFileUrl && !csReady);
   }
   // #1: 心跳 —— 侧边栏在线时持续 ping 活动标签,content-script 超时未收到则自动失活(兜底)
   async function pingActiveTab() {

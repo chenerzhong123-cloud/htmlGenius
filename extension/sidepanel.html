@@ -26,6 +26,10 @@
 <!-- 编辑视图(默认主视图) -->
 <div id="view-edit" class="view show" role="tabpanel" aria-labelledby="tab-edit">
   <div id="mode-indicator" data-i18n="mode.connecting">正在连接当前页面…</div>
+  <div id="file-access-hint" class="file-access-hint" hidden>
+    <b data-i18n="fileAccess.title">本地文件需要开启访问权限</b>
+    <span data-i18n="fileAccess.body">Chrome 默认不允许扩展访问本地文件。请打开 chrome://extensions → htmlGenius → 详情 → 开启「允许访问文件网址」,然后刷新本页。</span>
+  </div>
   <button id="edit-btn" hidden>切换编辑模式</button>
   <!-- v0.8: 编辑工具区。交互展示(弹层样式等)是侧边栏自己的;但所有改动都发消息给
        content-script 的 execEdit 唯一入口执行,与页面浮动工具栏的效果完全一致。 -->
