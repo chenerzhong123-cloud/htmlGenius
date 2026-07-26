@@ -478,6 +478,19 @@
     clearTimeout(_toastTimer);
     _toastTimer = setTimeout(() => tl.classList.remove("show"), 2000);
   }
+  // v0.9.7 按钮"已生效"反馈:文案短暂切到成功提示 + 成功色,让用户明确看到这一步成功了(复制/检查等)
+  function flashBtn(btn, text, opts) {
+    if (!btn) return;
+    if (btn.dataset.hgOrig === undefined) btn.dataset.hgOrig = btn.textContent;
+    if (text != null) btn.textContent = text;
+    btn.classList.add("hg-flash-ok");
+    clearTimeout(btn._hgFlash);
+    btn._hgFlash = setTimeout(() => {
+      btn.classList.remove("hg-flash-ok");
+      if (btn.dataset.hgOrig !== undefined) btn.textContent = btn.dataset.hgOrig;
+      delete btn.dataset.hgOrig;
+    }, (opts && opts.ms) || 1600);
+  }
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -1039,14 +1052,13 @@
     if (resp && resp.ok && resp.bootstrap) _bootstrap = resp.bootstrap;
     return _bootstrap;
   }
-  function connCopy(text, hintKey) {
+  function connCopy(text, hintKey, btn) {
     if (!text) return;
     const done = () => {
       const message = t(hintKey);
-      connSetHint(message, "ok");
-      // Connection Center 已并入发送菜单，原来的内联提示容器不再常驻；
-      // 用全局 toast 让“复制诊断”等操作始终有可见反馈。
+      connSetHint(message, "ok"); // 注:#conn-hint 元件已移除 → 空操作;实际可见反馈靠 toast + 按钮闪烁
       showToast(message);
+      if (btn) flashBtn(btn, t("bridge.copied")); // v0.9.7 按钮"已复制 ✓"自带状态变化
     };
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(done, done);
@@ -1148,21 +1160,21 @@
     if (hint && st.devOnly) hint += " " + t("conn.devOnly");
     connSetPermanent(hint);
   }
-  async function connDo(action) {
+  async function connDo(action, btn) {
     if (!action) return;
     if (action === "check") {
-      if (connCheck) connCheck.disabled = true;
+      if (connCheck) { connCheck.disabled = true; if (connCheck.dataset.hgOrig === undefined) connCheck.dataset.hgOrig = connCheck.textContent; connCheck.textContent = t("btn.checking"); }
       if (connPrimary && connPrimary.dataset.action === "check") connPrimary.disabled = true;
       await queryHealth();
-      if (connCheck) connCheck.disabled = false;
       if (connPrimary) connPrimary.disabled = false;
+      if (connCheck) { connCheck.disabled = false; flashBtn(connCheck, t("btn.checked")); }
       return;
     }
     if (action === "setup" || action === "terminal") {
       const b = await fetchBootstrap();
       if (!b) return;
-      if (action === "setup") connCopy(b.setup_prompt, "conn.setupCopied");
-      else connCopy(b.terminal_command, "conn.terminalCopied");
+      if (action === "setup") connCopy(b.setup_prompt, "conn.setupCopied", btn);
+      else connCopy(b.terminal_command, "conn.terminalCopied", btn);
       renderConnCenter(); // dev_only 标注
       return;
     }
@@ -1175,17 +1187,17 @@
     _connCollapsed = !cur;
     renderConnCenter();
   });
-  if (connPrimary) connPrimary.addEventListener("click", () => connDo(connPrimary.dataset.action));
-  if (connSecondary) connSecondary.addEventListener("click", () => connDo(connSecondary.dataset.action));
+  if (connPrimary) connPrimary.addEventListener("click", () => connDo(connPrimary.dataset.action, connPrimary));
+  if (connSecondary) connSecondary.addEventListener("click", () => connDo(connSecondary.dataset.action, connSecondary));
   if (connCheck) connCheck.addEventListener("click", () => connDo("check"));
   if (connDiag) connDiag.addEventListener("click", () => {
     // §5.4:只复制脱敏 health JSON;host 不存在时用兜底形态
     const h = _health || { schema_version: 1, overall: "action_required", bridge: { status: "install_required" }, reason_code: "BRIDGE_NOT_INSTALLED", extension_version: (_bootstrap && _bootstrap.extension_version) || "" };
-    connCopy(JSON.stringify(h, null, 2), "conn.diagCopied");
+    connCopy(JSON.stringify(h, null, 2), "conn.diagCopied", connDiag);
   });
   // file:// 访问提示:Chrome 禁止扩展直接打开 chrome:// 页面(安全限制),只能复制 URL 让用户粘贴到地址栏。
   const fileAccessCopy = document.getElementById("file-access-copy");
-  if (fileAccessCopy) fileAccessCopy.addEventListener("click", () => connCopy("chrome://extensions", "fileAccess.copied"));
+  if (fileAccessCopy) fileAccessCopy.addEventListener("click", () => connCopy("chrome://extensions", "fileAccess.copied", fileAccessCopy));
   if (connRepairCancel) connRepairCancel.addEventListener("click", () => { if (connRepairConfirm) connRepairConfirm.hidden = true; });
   if (connRepairOk) connRepairOk.addEventListener("click", async () => {
     connRepairOk.disabled = true;
@@ -1496,10 +1508,7 @@
     const cmdEl = document.getElementById("contract-send-setup-cmd");
     const cmd = (cmdEl && cmdEl.textContent) || (_bootstrap && _bootstrap.terminal_command) || "";
     if (!cmd) return;
-    connCopy(cmd, "conn.terminalCopied");
-    const orig = sendSetupCopy.textContent;
-    sendSetupCopy.textContent = t("bridge.copied");
-    setTimeout(() => { sendSetupCopy.textContent = orig; }, 1500);
+    connCopy(cmd, "conn.terminalCopied", sendSetupCopy); // v0.9.7 connCopy 内置按钮"已复制 ✓"闪烁
   });
   document.addEventListener("click", (e) => { if (sendMenu && !e.target.closest(".send-group")) closeSendMenu(); });
   // 状态栏候选「打开候选版本」:新标签打开(background 完成时已自动开;此为手动兜底)。阻止冒泡,避免触发状态栏展开/收起。
@@ -1985,13 +1994,33 @@
     if (!opt) return;
     if (window.HG_I18N) HG_I18N.setLang(opt.dataset.lang);
   });
-  // 点击外部关两个浮层
+  // v0.9.6 问题反馈浮层(header 反馈按钮 → 小红书二维码引导)
+  const feedbackBtn = document.getElementById("feedback-btn");
+  const feedbackSheet = document.getElementById("feedback-sheet");
+  function closeFeedbackSheet() {
+    if (!feedbackSheet) return;
+    feedbackSheet.classList.remove("show");
+    if (feedbackBtn) feedbackBtn.setAttribute("aria-expanded", "false");
+  }
+  if (feedbackBtn && feedbackSheet) {
+    feedbackBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = feedbackSheet.classList.toggle("show");
+      feedbackBtn.setAttribute("aria-expanded", String(open));
+      if (open) { closeLangSheet(); accountSheet.classList.remove("show"); avatarBtn.classList.remove("active"); }
+    });
+    const fbClose = document.getElementById("feedback-close");
+    if (fbClose) fbClose.addEventListener("click", closeFeedbackSheet);
+  }
+
+  // 点击外部关三个浮层
   document.addEventListener("click", (e) => {
     if (!accountSheet.contains(e.target) && e.target !== avatarBtn) {
       accountSheet.classList.remove("show");
       avatarBtn.classList.remove("active");
     }
     if (langSheet && !langSheet.contains(e.target) && e.target !== langBtn) closeLangSheet();
+    if (feedbackSheet && !feedbackSheet.contains(e.target) && e.target !== feedbackBtn) closeFeedbackSheet();
   });
 
   // 切换语言后重渲染所有文案(静态 apply + 动态 renderMode/renderCards)

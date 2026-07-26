@@ -123,8 +123,8 @@ body {
 }
 .header-right { display: flex; align-items: center; gap: 4px; }
 
-/* ghost 图标按钮(主题 / 头像 / 语言) */
-.theme-btn, .avatar, .lang-btn {
+/* ghost 图标按钮(主题 / 头像 / 语言 / 反馈) */
+.theme-btn, .avatar, .lang-btn, .feedback-btn {
   width: 30px; height: 30px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   color: var(--text-muted); background: transparent;
@@ -132,13 +132,15 @@ body {
   cursor: pointer; line-height: 1; font-family: var(--font-sans);
 }
 .lang-btn { width: auto; padding: 0 9px; }
-.theme-btn:hover, .avatar:hover, .avatar.active, .lang-btn:hover, .lang-btn.active {
+.theme-btn:hover, .avatar:hover, .avatar.active, .lang-btn:hover, .lang-btn.active,
+.feedback-btn:hover, .feedback-btn.active {
   background: rgba(255,255,255,.06); color: var(--text-primary); border-color: var(--line-subtle);
 }
-.theme-btn svg, .avatar svg, .lang-btn svg { width: 17px; height: 17px; }
+.theme-btn svg, .avatar svg, .lang-btn svg, .feedback-btn svg { width: 17px; height: 17px; }
 [data-theme="light"] .theme-btn:hover,
 [data-theme="light"] .avatar:hover, [data-theme="light"] .avatar.active,
-[data-theme="light"] .lang-btn:hover, [data-theme="light"] .lang-btn.active {
+[data-theme="light"] .lang-btn:hover, [data-theme="light"] .lang-btn.active,
+[data-theme="light"] .feedback-btn:hover, [data-theme="light"] .feedback-btn.active {
   background: rgba(24,29,38,.05);
 }
 #lang-code { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
@@ -330,6 +332,16 @@ body {
 /* 未保存微标:有未提交草稿时,保存按钮右上角亮一个品牌色小圆点,提示「需点保存」 */
 .save-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--on-cta); box-shadow: 0 0 0 2px rgba(255,255,255,.35); flex: none; }
 .save-dot[hidden] { display: none; }
+/* v0.9.7 「另存为」旁的 "?" 说明:悬停/聚焦弹气泡,解释为何只能另存为新文件 */
+.save-tip { position: relative; flex: 0 0 auto; align-self: center; display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; margin-left: 4px; border: 1px solid var(--line-default); border-radius: 50%;
+  color: var(--text-muted); background: transparent; font-size: 11px; font-weight: 600; line-height: 1; cursor: help; }
+.save-tip:hover, .save-tip:focus { color: var(--text-primary); border-color: var(--brand); outline: none; }
+.save-tip-bubble { visibility: hidden; opacity: 0; position: absolute; bottom: calc(100% + 8px); right: 0; width: 196px;
+  padding: 8px 10px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-overlay);
+  box-shadow: var(--shadow-float); color: var(--text-secondary); font-size: 11px; font-weight: 400; line-height: 1.45;
+  text-align: left; white-space: normal; pointer-events: none; z-index: 70; transition: opacity .15s; }
+.save-tip:hover .save-tip-bubble, .save-tip:focus .save-tip-bubble { visibility: visible; opacity: 1; }
 
 /* 字体弹层为单列连续列表；超出高度时纵向滚动。 */
 .sp-font-pop { max-height: 320px; overflow-y: auto; }
@@ -443,6 +455,17 @@ body {
 .sheet-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
 .sheet-sub { font-size: 11px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px; }
 
+/* v0.9.6 问题反馈浮层:窄一点,居中放二维码 + 引导文案 */
+.feedback-sheet { width: 232px; }
+.feedback-close { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center; background: transparent;
+  color: var(--text-muted); border: 0; border-radius: var(--r-sm); cursor: pointer; font-size: 13px; line-height: 1; }
+.feedback-close:hover { background: var(--bg-surface-raised); color: var(--text-primary); }
+.feedback-qr-box { display: flex; align-items: center; justify-content: center; margin: 2px 0 8px; }
+/* 原图 260×358(二维码 + 下方"也可小红书搜 @AI二重同学"文字兜底),按原比例满宽显示,白底保证扫得稳 */
+.feedback-qr { width: 100%; height: auto; display: block; border-radius: var(--r-md); background: #fff; border: 1px solid var(--line-subtle); }
+.feedback-scan { font-size: 11px; color: var(--text-muted); text-align: center; }
+
 /* === 协同登录控件(浮层内;第三方按钮等权二级) === */
 .collab-row { display: flex; gap: 6px; }
 #lark-login-btn, #google-login-btn {
@@ -531,10 +554,13 @@ button {
   background: var(--bg-overlay); color: var(--text-primary);
   border: 1px solid var(--line-default);
   padding: 9px 12px; border-radius: var(--r-md); font-size: 12px;
-  opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 100;
+  opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 300;
   box-shadow: var(--shadow-float);
 }
 .toast.show { opacity: 1; }
+/* v0.9.7 按钮"已生效"反馈:成功色 + 边框(主按钮 mint 底,靠文案变化提示,不变绿) */
+.hg-flash-ok { color: var(--success) !important; border-color: var(--success) !important; }
+.conn-primary.hg-flash-ok { color: var(--on-cta) !important; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }

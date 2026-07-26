@@ -47,3 +47,6 @@ extension/fonts/cormorant-*.woff2
 
 # agents 说明页源稿(仅供另一个 Agent 本地生成页面用,不上传)
 docs/agents-page-source.md
+
+# 官网小红书二维码原始截图素材(工作文件,真正用的是 extension/icons/feedback-qrcode.jpeg)
+landing/qrcode/

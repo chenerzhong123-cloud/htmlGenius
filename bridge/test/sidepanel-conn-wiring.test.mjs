@@ -52,7 +52,8 @@ test("JS:任何状态保留复制 Prompt(既有不变量)+ 打开契约即查 he
 });
 
 test("JS:诊断复制只输出 health JSON(§5.4);host 缺失用兜底形态", () => {
-  assert.match(sp, /connCopy\(JSON\.stringify\(h, null, 2\), "conn\.diagCopied"\)/);
+  // v0.9.7:connCopy 增加可选第三参(按钮,用于"已复制 ✓"闪烁),正则不锁死尾括号
+  assert.match(sp, /connCopy\(JSON\.stringify\(h, null, 2\), "conn\.diagCopied"/);
   assert.match(sp, /reason_code: "BRIDGE_NOT_INSTALLED", extension_version:/);
 });
 
