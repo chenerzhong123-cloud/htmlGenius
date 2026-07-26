@@ -1177,6 +1177,9 @@
     const h = _health || { schema_version: 1, overall: "action_required", bridge: { status: "install_required" }, reason_code: "BRIDGE_NOT_INSTALLED", extension_version: (_bootstrap && _bootstrap.extension_version) || "" };
     connCopy(JSON.stringify(h, null, 2), "conn.diagCopied");
   });
+  // file:// 访问提示:Chrome 禁止扩展直接打开 chrome:// 页面(安全限制),只能复制 URL 让用户粘贴到地址栏。
+  const fileAccessCopy = document.getElementById("file-access-copy");
+  if (fileAccessCopy) fileAccessCopy.addEventListener("click", () => connCopy("chrome://extensions", "fileAccess.copied"));
   if (connRepairCancel) connRepairCancel.addEventListener("click", () => { if (connRepairConfirm) connRepairConfirm.hidden = true; });
   if (connRepairOk) connRepairOk.addEventListener("click", async () => {
     connRepairOk.disabled = true;

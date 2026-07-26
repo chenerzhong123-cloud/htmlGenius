@@ -217,6 +217,9 @@ body {
 .file-access-hint[hidden] { display: none; }
 [data-theme="light"] .file-access-hint { background: #fef3c7; border-color: #f59e0b; color: #422006; }
 [data-theme="light"] .file-access-hint b { color: #92400e; }
+.file-access-copy { margin-top: 7px; padding: 4px 10px; border-radius: var(--r-sm); border: 1px solid var(--line-subtle); background: var(--bg-surface); color: var(--text-primary); font-size: 11px; font-weight: 600; cursor: pointer; }
+.file-access-copy:hover { border-color: var(--brand); color: var(--brand); }
+.file-access-note { display: block; margin-top: 4px; color: var(--text-muted); font-size: 11px; }
 #edit-btn { /* 唯一主 CTA(深色=靛蓝渐变 / 浅色=近黑实色) */
   width: 100%; height: 40px; margin-bottom: 12px;
   background: var(--cta-bg);

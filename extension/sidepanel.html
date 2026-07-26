@@ -29,6 +29,8 @@
   <div id="file-access-hint" class="file-access-hint" hidden>
     <b data-i18n="fileAccess.title">本地文件需要开启访问权限</b>
     <span data-i18n="fileAccess.body">Chrome 默认不允许扩展访问本地文件。请打开 chrome://extensions → htmlGenius → 详情 → 开启「允许访问文件网址」,然后刷新本页。</span>
+    <button id="file-access-copy" class="file-access-copy" type="button" data-i18n="fileAccess.copy">复制 chrome://extensions</button>
+    <span class="file-access-note" data-i18n="fileAccess.hint">复制后粘贴到地址栏打开</span>
   </div>
   <button id="edit-btn" hidden>切换编辑模式</button>
   <!-- v0.8: 编辑工具区。交互展示(弹层样式等)是侧边栏自己的;但所有改动都发消息给
