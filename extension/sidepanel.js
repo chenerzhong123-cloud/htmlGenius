@@ -146,6 +146,10 @@
     } else if (msg.type === "toast") {
       // v0.8: content-script 侧的提示(如「请先在页面选中文字」)统一走 toast
       if (msg.text) showToast(msg.text);
+    } else if (msg.type === "unsaved-state") {
+      // v0.9.6: 草稿态同步 —— 有未提交快照时点亮保存按钮微标(保存后 content-script 会再广播 false)
+      const d = document.getElementById("save-dot");
+      if (d) d.hidden = !msg.unsaved;
     }
   });
 
@@ -168,6 +172,8 @@
     btn.textContent = _editing ? t("edit.exit") : t("edit.start");
     const tools = document.getElementById("edit-tools");
     if (tools) tools.hidden = !_editing || _elementMode; // 元素模式时让位给元素面板
+    const bar = document.getElementById("edit-actions-bar");
+    if (bar) bar.hidden = !_editing || _elementMode; // v0.9.6: 底部动作栏与工具区同步显隐
     const epanel = document.getElementById("element-panel");
     if (epanel) epanel.hidden = !_elementMode; // v0.6: 元素面板(M3 填内容)
     const adv = document.getElementById("adv-mode-btn");
@@ -1608,17 +1614,27 @@
   document.getElementById("act-undo").addEventListener("click", () => sendToContent({ type: "undo" }));
   document.getElementById("act-redo").addEventListener("click", () => sendToContent({ type: "redo" }));
   document.getElementById("act-reset").addEventListener("click", () => sendToContent({ type: "reset-edit" }));
+  // v0.9.6: 下载统一走这里(content-script 只回传 HTML;下载需在 side panel 触发以保住用户手势)
+  function downloadHtml(html, filename) {
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename || "page.html";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+  // v0.9.6: 保存按钮右上角的「未保存」微标(有未提交草稿时点亮)
+  function setSaveDot(on) {
+    const d = document.getElementById("save-dot");
+    if (d) d.hidden = !on;
+  }
   document.getElementById("act-save").addEventListener("click", async () => {
-    // #2: 下载在 side panel 触发(content-script 只回传 HTML,避免异步消息丢用户手势被拦)
-    const r = await sendToContent({ type: "save-html" });
+    // 保存(主):下载原文件名。content-script 在回复前将「当前」快照标为已提交，
+    // 避免 debounce 尚未落库时误把上一个版本当作已保存。
+    const r = await sendToContent({ type: "save-html", commit: true });
     if (r && r.html) {
-      const blob = new Blob([r.html], { type: "text/html;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = r.name || "page.html";
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-      sendToContent({ type: "mark-artifact-snapshot-exported" });
+      downloadHtml(r.html, r.name || "page.html");
+      if (r.committed) setSaveDot(false);
     }
   });
   // v0.8 #4/#1: 面板内 swatch 浮层(替代原生 color input,杜绝系统选色器右溢出;浮层挂整个
@@ -1637,13 +1653,14 @@
       p.innerHTML = arr.map((c) => '<button class="sw" type="button" data-c="' + c + '"' + (c === "transparent" ? ' title="' + esc(t("tool.clear")) + '"' : ' style="background:' + c + '"') + "></button>").join("");
     }
   }
-  // v0.8 #5: 字号 / 标题 / 对齐 列表浮层(条目文案用与工具栏相同的 i18n key)
-  const SP_SIZES = [["size.sm", "0.85em"], ["size.std", "1em"], ["size.lg", "1.3em"], ["size.xl", "1.7em"]];
+  // 字号以数字 px 展示；自定义输入支持任意正数。
+  const SP_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
   function buildSpListPops() {
     const sizePop = document.getElementById("sp-size-pop");
     if (sizePop && !sizePop.dataset.built) {
       sizePop.dataset.built = "1";
-      sizePop.innerHTML = SP_SIZES.map((s) => '<button class="li" type="button" data-kind="style" data-prop="fontSize" data-val="' + s[1] + '" style="font-size:' + s[1] + '">' + esc(t(s[0])) + "</button>").join("");
+      sizePop.innerHTML = SP_SIZES.map((s) => '<button class="li" type="button" data-kind="style" data-prop="fontSize" data-val="' + s + 'px" style="font-size:' + s + 'px">' + s + " px</button>").join("")
+        + '<label class="sp-size-custom"><input type="number" min="0.1" step="0.1" inputmode="decimal" placeholder="' + esc(t("tool.sizeCustom")) + '" aria-label="' + esc(t("tool.sizeCustom")) + '"><span>px</span></label>';
     }
     const headPop = document.getElementById("sp-heading-pop");
     if (headPop && !headPop.dataset.built) {
@@ -1656,6 +1673,15 @@
       alignPop.dataset.built = "1";
       alignPop.innerHTML = [["left", "align.left"], ["center", "align.center"], ["right", "align.right"], ["justify", "align.justify"]]
         .map((a) => '<button class="li" type="button" data-kind="block" data-fmt="align" data-val="' + a[0] + '">' + esc(t(a[1])) + "</button>").join("");
+    }
+    // 字体弹层：单列、可滚动，按一个连续列表展示全部字体。
+    const fontPop = document.getElementById("sp-font-pop");
+    if (fontPop && !fontPop.dataset.built) {
+      fontPop.dataset.built = "1";
+      const FONTS = (typeof HG_PALETTE !== "undefined" && HG_PALETTE.FONTS) || [];
+      fontPop.innerHTML = FONTS.map((g) => g.items.map((f) =>
+        '<button class="li" type="button" data-kind="style" data-prop="fontFamily" data-val="' + f[1] + '" style="font-family:' + f[1] + '">' + esc(f[0]) + "</button>"
+      ).join("")).join("");
     }
   }
   function closeAllSpPops() {
@@ -1674,6 +1700,7 @@
   document.getElementById("sp-size").addEventListener("click", () => { buildSpListPops(); toggleSpPop("sp-size-pop"); });
   document.getElementById("sp-heading").addEventListener("click", () => { buildSpListPops(); toggleSpPop("sp-heading-pop"); });
   document.getElementById("sp-align").addEventListener("click", () => { buildSpListPops(); toggleSpPop("sp-align-pop"); });
+  document.getElementById("sp-font").addEventListener("click", () => { buildSpListPops(); toggleSpPop("sp-font-pop"); });
   document.querySelector(".edit-colors").addEventListener("click", (e) => {
     const sw = e.target.closest(".sw");
     if (!sw) return;
@@ -1689,6 +1716,18 @@
     if (li.dataset.kind === "style") sendToContent({ type: "edit-style", prop: li.dataset.prop, value: li.dataset.val });
     else sendToContent({ type: "edit-block", fmt: li.dataset.fmt, value: li.dataset.val });
     closeAllSpPops();
+  });
+  function applySpCustomSize(input) {
+    const size = Number(input && input.value);
+    if (!Number.isFinite(size) || size <= 0) return;
+    sendToContent({ type: "edit-style", prop: "fontSize", value: String(size) + "px" });
+    closeAllSpPops();
+  }
+  document.getElementById("sp-size-pop").addEventListener("keydown", (e) => {
+    if (e.target.matches(".sp-size-custom input") && e.key === "Enter") { e.preventDefault(); applySpCustomSize(e.target); }
+  });
+  document.getElementById("sp-size-pop").addEventListener("change", (e) => {
+    if (e.target.matches(".sp-size-custom input")) applySpCustomSize(e.target);
   });
   document.addEventListener("click", (e) => { if (!e.target.closest(".sp-color-wrap, .sp-pop-wrap")) closeAllSpPops(); });
 

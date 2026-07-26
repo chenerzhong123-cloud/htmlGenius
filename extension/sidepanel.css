@@ -187,6 +187,9 @@ body {
 #view-comment.show { display: flex; flex-direction: column; overflow: hidden; }
 #view-comment #draft-host { flex: none; }
 #annotations { flex: 1; min-height: 0; overflow-y: auto; margin-bottom: 0; padding-bottom: 4px; }
+/* v0.9.6: 编辑视图同改列布局 —— 内容在 .edit-scroll 内滚动,底部动作栏固定第一屏(镜像评论区) */
+#view-edit.show { display: flex; flex-direction: column; overflow: hidden; }
+.edit-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 /* #7: 底部操作区 —— 固定在第一屏(不被评论数量挤出);之后要加按钮直接放这个容器里 */
 .comment-actions { flex: none; padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--line-subtle); display: flex; flex-direction: column; gap: 8px; }
 
@@ -219,6 +222,8 @@ body {
 [data-theme="light"] .file-access-hint b { color: #92400e; }
 .file-access-copy { margin-top: 7px; padding: 4px 10px; border-radius: var(--r-sm); border: 1px solid var(--line-subtle); background: var(--bg-surface); color: var(--text-primary); font-size: 11px; font-weight: 600; cursor: pointer; }
 .file-access-copy:hover { border-color: var(--brand); color: var(--brand); }
+.file-access-steps { margin: 7px 0 0; padding-left: 19px; color: var(--text-secondary); }
+.file-access-steps li { margin: 2px 0; padding-left: 1px; }
 .file-access-note { display: block; margin-top: 4px; color: var(--text-muted); font-size: 11px; }
 #edit-btn { /* 唯一主 CTA(深色=靛蓝渐变 / 浅色=近黑实色) */
   width: 100%; height: 40px; margin-bottom: 12px;
@@ -268,7 +273,7 @@ body {
 .edit-format .fmt.active { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-hover); }
 .edit-format .fmt-comment { flex: 0 0 44px; background: var(--brand-soft); color: var(--brand-hover); border-color: rgba(124,140,255,.4); }
 .edit-format .fmt-comment:hover { border-color: var(--brand); color: var(--brand-hover); background: var(--brand-soft); }
-.edit-format .fmt-clear { font-size: 12px; }
+.edit-format .fmt-clear svg { width: 16px; height: 16px; }
 /* v0.8 #4: 色板浮层挂在整个 .edit-colors 行上(整面板宽,8 列 × 2 行 = 16 色正好排满,无空位,
    也不会超出面板右边界 —— 此前的半宽挂法在极窄面板下格子过小且可能贴边) */
 .edit-colors { display: flex; gap: 8px; position: relative; }
@@ -308,8 +313,27 @@ body {
 .sp-list-pop .li.lg-h1 { font-weight: 700; font-size: 14px; }
 .sp-list-pop .li.lg-h2 { font-weight: 600; font-size: 13px; }
 .sp-list-pop .li.lg-h3 { font-weight: 600; font-size: 12px; }
+.sp-size-custom { display: flex; align-items: center; gap: 5px; margin: 5px 3px 1px; padding: 6px; border-top: 1px solid var(--line-subtle); color: var(--text-faint); font: 500 11px/1 var(--font-sans); }
+.sp-size-custom input { width: 0; min-width: 0; flex: 1; height: 28px; box-sizing: border-box; padding: 0 7px; border: 1px solid var(--line-default); border-radius: var(--r-sm); background: var(--bg-surface); color: var(--text-primary); font: 500 12px var(--font-sans); }
+.sp-size-custom input:focus { outline: 0; border-color: var(--brand); }
 .emoji-toggle { width: 100%; height: 30px; display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--bg-surface); color: var(--text-secondary); border: 1px solid var(--line-subtle); border-radius: var(--r-md); font: 600 11.5px/1 var(--font-sans); cursor: pointer; }
 .emoji-toggle:hover { background: var(--bg-surface-raised); color: var(--text-primary); }
+
+/* 底部动作栏(还原 / 保存)——镜像 .comment-actions，保存为主按钮。 */
+.edit-actions-bar { flex: none; display: flex; align-items: stretch; gap: 8px; padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--line-subtle); }
+.edit-actions-bar[hidden] { display: none; }
+/* 还原为次按钮；保存撑满剩余空间。 */
+.edit-bar-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+.edit-actions-bar .conn-primary { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; position: relative; }
+.edit-actions-bar .conn-secondary { flex: 0 0 auto; height: 34px; padding: 0 12px; }
+.edit-bar-btn svg { flex: none; }
+/* 未保存微标:有未提交草稿时,保存按钮右上角亮一个品牌色小圆点,提示「需点保存」 */
+.save-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--on-cta); box-shadow: 0 0 0 2px rgba(255,255,255,.35); flex: none; }
+.save-dot[hidden] { display: none; }
+
+/* 字体弹层为单列连续列表；超出高度时纵向滚动。 */
+.sp-font-pop { max-height: 320px; overflow-y: auto; }
+.sp-font-pop .li { font-size: 13px; }
 
 /* v0.6: 切换高级模式 按钮(右下角浮动)+ 元素面板占位 */
 .adv-mode-btn {
@@ -855,9 +879,9 @@ button {
 .card-acts { display: flex; gap: 6px; max-height: 0; margin-top: 0; overflow: hidden; opacity: 0; transition: max-height .16s ease, margin-top .16s ease, opacity .12s ease; }
 .card:hover .card-acts, .card:focus-within .card-acts { max-height: 34px; margin-top: 8px; opacity: 1; }
 .card-acts button:focus-visible { outline-offset: -1px; }
-:where(.view, #annotations, .contract-scroll, .contract-bridge-status.expanded .cbs-detail) { scrollbar-width: thin; scrollbar-color: var(--line-default) transparent; }
-:where(.view, #annotations, .contract-scroll, .contract-bridge-status.expanded .cbs-detail)::-webkit-scrollbar { width: 8px; }
-:where(.view, #annotations, .contract-scroll, .contract-bridge-status.expanded .cbs-detail)::-webkit-scrollbar-thumb { background: var(--line-default); border: 2px solid transparent; border-radius: var(--r-pill); background-clip: padding-box; }
+:where(.view, #annotations, .edit-scroll, .contract-scroll, .contract-bridge-status.expanded .cbs-detail) { scrollbar-width: thin; scrollbar-color: var(--line-default) transparent; }
+:where(.view, #annotations, .edit-scroll, .contract-scroll, .contract-bridge-status.expanded .cbs-detail)::-webkit-scrollbar { width: 8px; }
+:where(.view, #annotations, .edit-scroll, .contract-scroll, .contract-bridge-status.expanded .cbs-detail)::-webkit-scrollbar-thumb { background: var(--line-default); border: 2px solid transparent; border-radius: var(--r-pill); background-clip: padding-box; }
 .contract-bottom { box-shadow: 0 -8px 18px rgba(0, 0, 0, .08); }
 [data-theme="light"] .contract-bottom { box-shadow: 0 -8px 18px rgba(24, 29, 38, .06); }
 #export-btn:hover, .card-acts button:hover, #lark-login-btn:hover, #google-login-btn:hover, #logout-btn:hover, #invite-btn:hover, .contract-secondary:hover { background: var(--bg-surface-raised); }
