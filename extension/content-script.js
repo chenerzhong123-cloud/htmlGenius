@@ -91,6 +91,12 @@
   let _hasUnsavedLocalSnapshot = false;
   let _lastReconcileStatus = "clean";
   let _artifactVerificationError = false;
+  // v0.9.6: 重载时检测到的未提交草稿(待用户在页内横幅上选「恢复/丢弃」),不再静默应用
+  let _pendingDraft = null;
+  // v0.9.6: 草稿态同步给侧边栏(点亮/熄灭保存按钮微标)。sidepanel 未打开时 sendMessage 会 reject,吞掉即可
+  function broadcastUnsaved(unsaved) {
+    try { chrome.runtime.sendMessage({ type: "unsaved-state", unsaved: !!unsaved }).catch(() => {}); } catch (e) {}
+  }
   // content-script 的源哈希必须 = host 读磁盘拿到的原始字节哈希(两者比对,否则误报 SOURCE_CHANGED)。
   // 不能用 DOM 序列化(serializeCurrentArtifact),因为 Chrome 的 HTML parser 会规范化标记
   // (属性重排/补 head/body/小写化/插 tbody…),DOM.outerHTML ≠ 文件字节 → 永远不匹配。
@@ -185,7 +191,9 @@
       border-radius:9px; box-shadow:var(--hg-shadow); gap:4px; z-index:1; }
     #hg-toolbar .hg-popover.show{ display:flex; flex-wrap:wrap; max-width:220px; }
     #hg-toolbar .hg-popover.hg-popcol{ flex-direction:column; min-width:108px; }
-    #hg-toolbar .hg-c{ width:16px; height:16px; border-radius:4px; cursor:pointer; border:1px solid var(--hg-line); }
+    /* 页面浮动工具栏的色卡收紧到 12px；固定紧凑宽度，避免靠近右侧选区时溢出视口。 */
+    #hg-toolbar .hg-popover[data-pop="textcolor"],#hg-toolbar .hg-popover[data-pop="highlight"]{ width:142px; max-width:calc(100vw - 20px); box-sizing:border-box; gap:3px; }
+    #hg-toolbar .hg-c{ width:12px; height:12px; border-radius:3px; cursor:pointer; border:1px solid var(--hg-line); }
     /* v0.9.1:「清除高亮」格红斜杠(与 Side Panel 一致;!important 覆盖 inline background:transparent) */
     #hg-toolbar .hg-c[data-val="transparent"]{ background:linear-gradient(to top right, transparent 45%, #ef4444 45%, #ef4444 55%, transparent 55%) !important; }
     #hg-toolbar .hg-item{ background:transparent; color:var(--hg-fg); border:0; text-align:left; padding:5px 8px; border-radius:6px; cursor:pointer; font-size:12px; line-height:1.3; }
@@ -195,6 +203,13 @@
     #hg-toolbar .hg-item.hg-h1{ font-weight:700; font-size:14px; }
     #hg-toolbar .hg-item.hg-h2{ font-weight:600; font-size:13px; }
     #hg-toolbar .hg-item.hg-h3{ font-weight:600; font-size:12px; }
+    /* 字体弹层固定单列，超出高度时纵向滚动，不按分组或列折行。 */
+    /* .hg-popover.show 的 flex-wrap:wrap specificity 更高；这里必须匹配 show 才能禁止折列。 */
+    #hg-toolbar .hg-popover.hg-popfont.show{ max-height:260px; overflow-y:auto; min-width:150px; flex-wrap:nowrap; }
+    #hg-toolbar .hg-popsize{ max-height:280px; overflow-y:auto; flex-wrap:nowrap; }
+    #hg-toolbar .hg-size-custom{ display:flex; align-items:center; gap:5px; margin:4px 2px 1px; padding:6px; border-top:1px solid var(--hg-line); color:var(--hg-muted,#9aa0a6); font-size:11px; }
+    #hg-toolbar .hg-size-input{ width:0; min-width:0; flex:1; height:27px; box-sizing:border-box; padding:0 6px; border:1px solid var(--hg-line); border-radius:5px; background:var(--hg-bg); color:var(--hg-fg); font-size:12px; }
+    #hg-toolbar .hg-size-input:focus{ outline:0; border-color:var(--hg-brand); }
     /* 编辑确认弹窗(页面级;激活侧边栏时弹一次)。v0.8.1:放大 ~30% + Mint + 加深蒙版 */
     .hg-modal-mask{ position:fixed; inset:0; background:var(--mask); display:flex; align-items:center; justify-content:center; z-index:2147483647; }
     .hg-modal{ width:470px; max-width:92vw; background:var(--modal-bg); color:var(--modal-fg); border:1px solid var(--hg-line);
@@ -208,6 +223,17 @@
     .hg-modal-cancel:hover{ background:var(--hg-hover); }
     .hg-modal-ok{ background:var(--hg-cta); color:var(--on-cta); box-shadow:var(--hg-cta-shadow); }
     .hg-modal-ok:hover{ background:var(--hg-cta-hover); }
+    /* v0.9.6 未保存草稿横幅:顶部居中浮条,恢复=主色 / 丢弃=描边 */
+    .hg-draft-banner{ position:fixed; top:12px; left:50%; transform:translateX(-50%); z-index:2147483647;
+      display:flex; align-items:center; gap:12px; max-width:92vw; background:var(--hg-bg); color:var(--hg-fg);
+      border:1px solid var(--hg-line); border-radius:10px; padding:10px 14px; box-shadow:var(--hg-shadow);
+      font-size:13px; font-family:"Inter","PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
+    .hg-draft-banner .hg-draft-msg{ line-height:1.4; }
+    .hg-draft-banner button{ border-radius:7px; padding:6px 14px; font-size:12.5px; font-weight:600; cursor:pointer; border:1px solid transparent; white-space:nowrap; }
+    .hg-draft-restore{ background:var(--hg-cta); color:var(--on-cta); }
+    .hg-draft-restore:hover{ background:var(--hg-cta-hover); }
+    .hg-draft-discard{ background:transparent; color:var(--hg-fg); border-color:var(--hg-line); }
+    .hg-draft-discard:hover{ background:var(--hg-hover); }
   `;
   document.head.appendChild(style);
   // #4: 按本地存储的主题偏好设页面 <html> 的 data-hg-theme(侧边栏切换主题时经 storage.onChanged 同步)
@@ -227,8 +253,10 @@
   //   palette.js 缺失时用兜底值,不影响工具栏可用。
   const TEXT_COLORS = (typeof HG_PALETTE !== "undefined" && HG_PALETTE.TEXT_COLORS) || ["#0a0a0a","#374151","#6b7280","#9ca3af","#ffffff","#ef4444","#f97316","#f59e0b","#10b981","#06b6d4","#3b82f6","#6366f1","#8b5cf6","#ec4899","#88e6d1","#e11d48"];
   const HL_COLORS = (typeof HG_PALETTE !== "undefined" && HG_PALETTE.HL_COLORS) || ["#fff59d","#ffd54f","#ffcdd2","#f8bbd0","#e1bee7","#c5cae9","#bbdefb","#b2dfdb","#c8e6c9","#dcedc8","#ffccbc","#ffe0b2","#d7ccc8","#e5e7eb","#ffffff","transparent"];
-  // SIZES:[labelKey, em];标签随语言变化(toolbarHTML 内取 t())
-  const SIZES = [["size.sm","0.85em"],["size.std","1em"],["size.lg","1.3em"],["size.xl","1.7em"]];
+  // v0.9.6 字体:中英各 10(系统字体),与 Side Panel 同源(palette.js);分组标题键供 t()
+  const FONTS = (typeof HG_PALETTE !== "undefined" && HG_PALETTE.FONTS) || [];
+  // 常用字号以 px 展示；菜单末尾允许输入任意正数。
+  const SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48];
   const t = (k) => (window.HG_I18N ? window.HG_I18N.t(k) : k);
 
   const toolbar = document.createElement("div");
@@ -244,8 +272,15 @@
     h += `<div class="hg-popover hg-edit-tool" data-pop="textcolor">` + TEXT_COLORS.map((c) => `<span class="hg-c" data-fmt="color" data-val="${c}" style="background:${c}"></span>`).join("") + `</div>`;
     h += `<button data-act="pop-highlight" class="hg-haspop hg-edit-tool" title="${t("tool.highlight")}"><svg class="hg-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 11-6 6v3h9l3-3" fill="#fff59d" stroke="#fff59d" stroke-width="2" stroke-linejoin="round"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
     h += `<div class="hg-popover hg-edit-tool" data-pop="highlight">` + HL_COLORS.map((c) => `<span class="hg-c" data-fmt="background" data-val="${c}" style="background:${c}"></span>`).join("") + `</div>`;
+    // 字体紧邻并位于字号左侧；20 个条目按单一列表展示，不区分中英分组。
+    h += `<button data-act="pop-font" class="hg-haspop hg-edit-tool" title="${t("tool.font")}">${t("tool.fontLabel")}</button>`;
+    h += `<div class="hg-popover hg-popcol hg-popfont hg-edit-tool" data-pop="font">`
+      + FONTS.map((g) => g.items.map((f) => `<button class="hg-item" data-fmt="fontFamily" data-val="${f[1]}" style="font-family:${f[1]}">${f[0]}</button>`).join("")).join("")
+      + `</div>`;
     h += `<button data-act="pop-size" class="hg-haspop hg-edit-tool" title="${t("tool.size")}">${t("tool.sizeLabel")}</button>`;
-    h += `<div class="hg-popover hg-popcol hg-edit-tool" data-pop="size">` + SIZES.map((s) => `<button class="hg-item" data-fmt="fontSize" data-val="${s[1]}" style="font-size:${s[1]}">${t(s[0])}</button>`).join("") + `</div>`;
+    h += `<div class="hg-popover hg-popcol hg-popsize hg-edit-tool" data-pop="size">`
+      + SIZES.map((s) => `<button class="hg-item" data-fmt="fontSize" data-val="${s}px" style="font-size:${s}px">${s} px</button>`).join("")
+      + `<label class="hg-size-custom"><input class="hg-size-input" type="number" min="0.1" step="0.1" inputmode="decimal" placeholder="${t("tool.sizeCustom")}" aria-label="${t("tool.sizeCustom")}"><span>px</span></label></div>`;
     h += `<button data-act="pop-heading" class="hg-haspop hg-edit-tool" title="${t("tool.heading")}">H</button>`;
     h += `<div class="hg-popover hg-popcol hg-edit-tool" data-pop="heading">`
       + `<button class="hg-item" data-fmt="heading" data-val="P">${t("heading.normal")}</button>`
@@ -262,12 +297,33 @@
       + `</div>`;
     h += `<button data-act="pop-emoji" class="hg-haspop hg-edit-tool" title="${t("emoji.title")}">😊</button>`;
     h += `<div class="hg-popover hg-edit-tool" data-pop="emoji">` + ["😀","😄","😁","😍","😎","🤔","👍","👌","👏","🙏","💯","✅","❌","⭐","🔥","💡","❤️","🎉","🚀","✨","📌","📎","🔍","🎨","💬","⚠️","❓","❗","✏️","📝","🎯","➕"].map((e) => `<button class="hg-emoji hg-edit-tool" data-emoji="${e}">${e}</button>`).join("") + `</div>`;
-    h += sep + `<button data-act="clear" class="hg-edit-tool" title="${t("tool.clear")}">✕</button>`;
+    // 刷子图标：与关闭/删除区分，表示对选中文本执行格式清理。
+    h += sep + `<button data-act="clear" class="hg-edit-tool" title="${t("tool.clear")}" aria-label="${t("tool.clear")}"><svg class="hg-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.6 17.9-10.7-2.9"/><path d="M18.4 3.6a1 1 0 0 1 3 3L7.4 20.6a2 2 0 0 1-1.2.6l-2 .3a.5.5 0 0 1-.6-.6l.3-2a2 2 0 0 1 .6-1.2Z"/></svg></button>`;
     return h;
   }
   toolbar.innerHTML = toolbarHTML();
   document.body.appendChild(toolbar);
-  toolbar.addEventListener("mousedown", (e) => e.preventDefault());
+  // 工具按钮不抢走页面选区；自定义字号输入框必须允许获得焦点。
+  toolbar.addEventListener("mousedown", (e) => { if (!e.target.closest(".hg-size-input")) e.preventDefault(); });
+
+  function normalizeFontSize(value) {
+    const size = Number(value);
+    return Number.isFinite(size) && size > 0 ? String(size) + "px" : null;
+  }
+  function applyToolbarCustomSize(input) {
+    const value = normalizeFontSize(input && input.value);
+    if (!value) return;
+    execEdit({ kind: "style", prop: "fontSize", value, restore: "range" });
+    closeAllPopovers();
+  }
+  toolbar.addEventListener("keydown", (e) => {
+    const input = e.target.closest(".hg-size-input");
+    if (input && e.key === "Enter") { e.preventDefault(); applyToolbarCustomSize(input); }
+  });
+  toolbar.addEventListener("change", (e) => {
+    const input = e.target.closest(".hg-size-input");
+    if (input) applyToolbarCustomSize(input);
+  });
 
   // 语言变更后重建工具栏文案(事件委托绑在 toolbar 上,重设 innerHTML 不影响监听)
   function updateToolbarLabels() { toolbar.innerHTML = toolbarHTML(); }
@@ -404,6 +460,7 @@
     if (_elSelectBox) _elSelectBox.style.display = "none";
     try { chrome.runtime.sendMessage({ type: "element-selected", info: null }).catch(() => {}); } catch (er) {}
     pushUndo();
+    scheduleArtifactSnapshot();
   }
   // v0.6 #5: 元素模式下编辑选中控件的文字(子态:该控件 contentEditable=true,内部点击放行)
   function enterTextEdit() {
@@ -425,6 +482,7 @@
     _textEditingEl.contentEditable = "false";
     _textEditingEl = null;
     pushUndo();
+    scheduleArtifactSnapshot();
   }
   // 元素模式:capture 吞掉页面默认点击(链接/按钮)+ 选元素;点空白 → 取消选择
   function onElClick(e) {
@@ -473,6 +531,7 @@
       d.parent.insertBefore(d.el, d.dropBefore);
       selectEl(d.el);
       pushUndo();
+      scheduleArtifactSnapshot();
     }
   }
   function showDropIndicator(parent, before, dragEl) {
@@ -529,12 +588,15 @@
 
   // #1: 失活 —— 侧边栏收起/切走标签:隐藏浮窗+高亮,并退出编辑(contentEditable 关闭,页面恢复正常浏览)
   function deactivateNow() {
-    if (!_activated && !_editing && overlayData.length === 0) return;
+    if (!_activated && !_editing && overlayData.length === 0 && !document.getElementById("hg-draft-banner")) return;
     _activated = false;
     toolbar.classList.remove("show");
     closeAllPopovers();
     const modal = document.getElementById("hg-refresh-modal"); // 关掉可能开着的确认窗
     if (modal) modal.remove();
+    // 草稿内容保留在 IndexedDB，横幅属于 Side Panel 的交互 UI；面板关闭后不得留在页面上。
+    const draftBanner = document.getElementById("hg-draft-banner");
+    if (draftBanner) draftBanner.remove();
     if (_editing) setEditing(false); // 收起侧边栏 → 退出编辑(Q1)
     overlayData.forEach((o) => o.divs.forEach((d) => d.remove()));
     overlayData = [];
@@ -547,8 +609,9 @@
     if (sw) { execEdit({ kind: "style", prop: sw.dataset.fmt === "color" ? "color" : "background", value: sw.dataset.val }); closeAllPopovers(); return; }
     const item = e.target.closest(".hg-item");
     if (item) {
-      // #2: 字号是行内样式,走 style;其余(标题/对齐)是块级,走 block
+      // #2: 字号/字体是行内样式,走 style;其余(标题/对齐)是块级,走 block
       if (item.dataset.fmt === "fontSize") execEdit({ kind: "style", prop: "fontSize", value: item.dataset.val });
+      else if (item.dataset.fmt === "fontFamily") execEdit({ kind: "style", prop: "fontFamily", value: item.dataset.val });
       else execEdit({ kind: "block", fmt: item.dataset.fmt, value: item.dataset.val });
       closeAllPopovers(); return;
     }
@@ -614,6 +677,7 @@
         positionBox(_elSelectBox, clone.getBoundingClientRect());
         try { chrome.runtime.sendMessage({ type: "element-selected", info: elInfo(clone) }).catch(() => {}); } catch (er) {}
         pushUndo();
+        scheduleArtifactSnapshot();
         sendResponse({ ok: true });
       } else sendResponse({ ok: false });
     } else if (msg.type === "element-select-parent") {
@@ -625,6 +689,7 @@
         _selectedEl.style[msg.prop] = msg.value;
         try { chrome.runtime.sendMessage({ type: "element-selected", info: elInfo(_selectedEl) }).catch(() => {}); } catch (er) {}
         pushUndo();
+        scheduleArtifactSnapshot();
       }
       sendResponse({ ok: true });
     } else if (msg.type === "insert-text") {
@@ -664,7 +729,15 @@
     } else if (msg.type === "reset-edit") {
       resetEdit(); sendResponse({ ok: true });
     } else if (msg.type === "save-html") {
-      sendResponse({ ok: true, html: buildExportHtml(), name: (document.title || "htmlgenius-page") + ".html" });
+      // 保存必须先把「此刻」的快照标成已提交。不能让 side panel 在下载后另发
+      // mark 消息：输入事件的 1500ms debounce 可能尚未落库，届时会误标上一份快照。
+      if (msg.commit) {
+        saveCurrentArtifactSnapshot(true).then((committed) => {
+          sendResponse({ ok: true, html: buildExportHtml(), name: exportBaseName() + ".html", committed });
+        }).catch(() => sendResponse({ ok: false, code: "SNAPSHOT_FAILED" }));
+        return true;
+      }
+      sendResponse({ ok: true, html: buildExportHtml(), name: exportBaseName() + ".html", committed: false });
     } else if (msg.type === "apply-color") {
       // #3b/v0.8: 侧边栏取色 → 还原最近选区 → 与工具栏同一个 execEdit 施色(逻辑唯一,两边效果一致)
       const r = execEdit({ kind: "style", prop: msg.kind === "highlight" ? "background" : "color", value: msg.color, restore: "range" });
@@ -677,6 +750,7 @@
       _activated = true;
       _lastPingAt = Date.now();
       if (!wasActive) loadAnnotations(); // 首次激活:渲染批注高亮
+      if (_pendingDraft) showDraftRestoreBanner(); // 草稿提示只在 Side Panel 已打开时展示
       if (showDialog && !_refreshDialogShown && !_editing) { _refreshDialogShown = true; showRefreshDialog(); }
       sendResponse({ ok: true, isLocal: isLocal });
     } else if (msg.type === "panel-ping") {
@@ -685,6 +759,7 @@
       _activated = true;
       _lastPingAt = Date.now();
       if (!wasActive) loadAnnotations();
+      if (_pendingDraft) showDraftRestoreBanner();
       sendResponse({ ok: true });
     } else if (msg.type === "deactivate") {
       // #1: 侧边栏收起 → 立即失活(隐藏浮窗/高亮,退出编辑)
@@ -700,7 +775,7 @@
       else { sendResponse({ ok: true, status: "ready" }); }
     } else if (msg.type === "mark-artifact-snapshot-exported") {
       if (_logicalDocumentId) Storage.markLatestArtifactVersionExported(_logicalDocumentId).then(() => {
-        _hasUnsavedLocalSnapshot = false; sendResponse({ ok: true });
+        _hasUnsavedLocalSnapshot = false; broadcastUnsaved(false); sendResponse({ ok: true });
       }).catch(() => sendResponse({ ok: false }));
       else sendResponse({ ok: false });
       return true;
@@ -818,6 +893,8 @@
     if (!sel || sel.rangeCount === 0) return false;
     if (prop === "color") return paintRange("color", value);
     if (prop === "background") return paintRange("backgroundColor", value);
+    // v0.9.6 字体:与色/高亮同走逐文本节点包裹(跨元素选区稳健,优于 surroundContents 兜底)
+    if (prop === "fontFamily") return paintRange("fontFamily", value);
     const range = sel.getRangeAt(0);
     const span = document.createElement("span");
     span.style[prop] = value;
@@ -836,7 +913,7 @@
     const walker = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         if (!node.nodeValue || node.nodeValue.length === 0) return NodeFilter.FILTER_REJECT;
-        if (node.parentElement && node.parentElement.closest("#hg-toolbar,.hg-hl,.hg-inspect,.hg-select,.hg-tip,.hg-drop")) return NodeFilter.FILTER_REJECT;
+        if (node.parentElement && node.parentElement.closest("#hg-toolbar,#hg-draft-banner,.hg-hl,.hg-inspect,.hg-select,.hg-tip,.hg-drop")) return NodeFilter.FILTER_REJECT;
         return range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       }
     });
@@ -994,6 +1071,7 @@
         return { ok: false, code: "BAD_OP" };
     }
     pushUndo();          // 关键:每次改动立即入历史(可撤销/重做)。此前工具栏改色/字号走 DOM API
+    scheduleArtifactSnapshot(); // DOM API 修改不会触发 input；字体/颜色等也必须进入草稿态。
     scheduleReanchor();  // 不触发 input 事件、也无 push,导致改动「撤不掉、重做不回」—— 统一入口后根治。
     syncActiveStates();
     return { ok: true };
@@ -1100,15 +1178,24 @@
   const _hist = window.HgUndo.createHistory(captureBodyForSave, applyHistState, MAX_UNDO);
   function initUndoBaseline() { _hist.init(); }
   function pushUndo() { _hist.push(); }
-  function doUndo() { _hist.undo(); }
-  function doRedo() { _hist.redo(); }
-  function resetEdit() { _hist.reset(); }
+  function doUndo() { _hist.undo(); scheduleArtifactSnapshot(); }
+  function doRedo() { _hist.redo(); scheduleArtifactSnapshot(); }
+  function resetEdit() { _hist.reset(); scheduleArtifactSnapshot(); }
   // #3a/#2: 构造导出 HTML(剥离扩展注入);下载改在 side panel 触发(content-script 异步消息已失用户手势,直接 a.click 会被拦)
   function buildExportHtml() {
     const clone = document.documentElement.cloneNode(true);
-    clone.querySelectorAll("#hg-toolbar, .hg-hl, .hg-inspect, .hg-select, .hg-tip, .hg-drop").forEach((e) => e.remove());
+    clone.querySelectorAll("#hg-toolbar, #hg-draft-banner, .hg-hl, .hg-inspect, .hg-select, .hg-tip, .hg-drop").forEach((e) => e.remove());
     clone.querySelectorAll('style[data-hg-injected="ui"]').forEach((e) => e.remove()); // 剥离扩展注入样式(用户行内样式/emoji 文本保留)
     return "<!doctype html>\n" + clone.outerHTML;
+  }
+  // v0.9.6: 导出文件名优先取 artifact 路径 basename(本地 file:// 即原文件名),兜底 document.title
+  function exportBaseName() {
+    try {
+      const p = decodeURIComponent(new URL(_artifactUri).pathname.split("/").pop() || "").replace(/\.html?$/i, "").trim();
+      if (p) return p;
+    } catch (e) {}
+    const fromTitle = (document.title || "").replace(/\.html?$/i, "").trim();
+    return fromTitle || "htmlgenius-page";
   }
   // #3b/v0.6: _lastRange=非折叠选区(取色);_lastCursor=任意位(emoji 插入)。分开存,避免光标覆盖取色选区。
   document.addEventListener("selectionchange", () => {
@@ -1128,25 +1215,38 @@
     else if (_elementMode && e.key === "Escape") { if (_textEditingEl) exitTextEdit(); else deselectEl(); } // v0.6: Esc 退文字编辑/取消选控件
     else if (_elementMode && _selectedEl && !_textEditingEl && (e.key === "Delete" || e.key === "Backspace")) { e.preventDefault(); deleteSelectedEl(); } // v0.6 #6: Delete 键删控件
   });
+  // 所有编辑入口最终都调这里：输入采用 debounce，工具栏的 DOM API 修改也能进草稿。
+  function scheduleArtifactSnapshot() {
+    if (!isLocal || !isManagedArtifact) return;
+    clearTimeout(_versionTimer);
+    _versionTimer = setTimeout(() => saveCurrentArtifactSnapshot(false), 1500);
+  }
+  async function saveCurrentArtifactSnapshot(exported) {
+    clearTimeout(_versionTimer);
+    if (!isManagedArtifact || !_logicalDocumentId || !_loadedArtifactHash || !window.HgArtifactVersion) return false;
+    try {
+      const html = window.HgArtifactVersion.serializeCurrentArtifact(document.documentElement);
+      const artifactHash = await window.HgArtifactVersion.sha256Hex(html);
+      const record = { logical_document_id: _logicalDocumentId, artifact_uri: _artifactUri,
+        artifact_hash: artifactHash, parent_hash: _loadedArtifactHash, base_artifact_hash: _loadedArtifactHash,
+        source: "local_edit", html_content: html };
+      if (exported) record.exported_at = new Date().toISOString();
+      await Storage.saveArtifactVersion(record);
+      _renderedArtifactHash = artifactHash;
+      _hasUnsavedLocalSnapshot = !exported;
+      broadcastUnsaved(!exported);
+      return true;
+    } catch (e) {
+      _lastReconcileStatus = "error";
+      console.error("[hg] artifact snapshot failed", e);
+      return false;
+    }
+  }
   document.body.addEventListener("input", () => {
     if (!_editing) return;
     clearTimeout(_undoDebounce);
     _undoDebounce = setTimeout(pushUndo, 700);
-    if (isLocal) {
-      clearTimeout(_versionTimer);
-      _versionTimer = setTimeout(async () => {
-        if (!isManagedArtifact || !_logicalDocumentId || !_loadedArtifactHash || !window.HgArtifactVersion) return;
-        try {
-          const html = window.HgArtifactVersion.serializeCurrentArtifact(document.documentElement);
-          const artifactHash = await window.HgArtifactVersion.sha256Hex(html);
-          await Storage.saveArtifactVersion({ logical_document_id: _logicalDocumentId, artifact_uri: _artifactUri,
-            artifact_hash: artifactHash, parent_hash: _loadedArtifactHash, base_artifact_hash: _loadedArtifactHash,
-            source: "local_edit", html_content: html });
-          _renderedArtifactHash = artifactHash;
-          _hasUnsavedLocalSnapshot = true;
-        } catch (e) { _lastReconcileStatus = "error"; console.error("[hg] artifact snapshot failed", e); }
-      }, 1500);
-    }
+    scheduleArtifactSnapshot();
   });
   document.body.addEventListener("paste", (e) => {
     if (!_editing) return;
@@ -1179,7 +1279,7 @@
   function captureBodyForSave() {
     // 克隆 body,剥离扩展注入的 toolbar 与 overlay,只留用户正文
     const clone = document.body.cloneNode(true);
-    clone.querySelectorAll("#hg-toolbar, .hg-hl").forEach((el) => el.remove());
+    clone.querySelectorAll("#hg-toolbar, #hg-draft-banner, .hg-hl").forEach((el) => el.remove());
     return clone.innerHTML;
   }
   function applyRestoredBody(html) {
@@ -1241,14 +1341,58 @@
       if (latest && latest.html_content) {
         _hasUnsavedLocalSnapshot = !latest.exported_at;
         if (latest.base_artifact_hash === _loadedArtifactHash) {
-          applyRestoredArtifact(latest.html_content);
-          _renderedArtifactHash = latest.artifact_hash || await window.HgArtifactVersion.sha256Hex(latest.html_content);
+          if (!latest.exported_at) {
+            // 未提交草稿只记录为待处理；是否展示横幅由 Side Panel 激活状态决定。
+            _pendingDraft = latest;
+            showDraftRestoreBanner();
+          } else {
+            applyRestoredArtifact(latest.html_content);
+            _renderedArtifactHash = latest.artifact_hash || await window.HgArtifactVersion.sha256Hex(latest.html_content);
+          }
         } else _lastReconcileStatus = "conflict";
       }
       const legacy = await Storage.listVersions(legacyUriId());
       if (legacy && legacy.length) console.info("[hg] legacy body-only versions were intentionally not restored during v0.6.2 migration");
       _baseHash = _loadedArtifactHash;
     } catch (e) { _lastReconcileStatus = "error"; _baseHash = null; console.error("[hg] artifact restore unavailable", e); }
+  }
+
+  // v0.9.6: 重载后检测到未提交草稿 → 页内横幅「恢复 / 丢弃」(替代旧的静默恢复)。
+  // 恢复=套用草稿正文(进入未保存态);丢弃=标记快照已导出(清草稿位,页面保持磁盘基线)。
+  function showDraftRestoreBanner() {
+    // content script 虽然常驻，但 Side Panel 关闭时页面必须完全无扩展交互 UI。
+    if (!_activated || !_pendingDraft) return;
+    if (document.getElementById("hg-draft-banner")) return;
+    const bar = document.createElement("div");
+    bar.id = "hg-draft-banner";
+    bar.className = "hg-draft-banner";
+    bar.innerHTML = '<span class="hg-draft-msg"></span>'
+      + '<button type="button" class="hg-draft-restore"></button>'
+      + '<button type="button" class="hg-draft-discard"></button>';
+    bar.querySelector(".hg-draft-msg").textContent = t("draft.unsavedPrompt");
+    const bRestore = bar.querySelector(".hg-draft-restore");
+    const bDiscard = bar.querySelector(".hg-draft-discard");
+    bRestore.textContent = t("draft.restore");
+    bDiscard.textContent = t("draft.discard");
+    bRestore.addEventListener("click", () => {
+      if (_pendingDraft && _pendingDraft.html_content) {
+        applyRestoredArtifact(_pendingDraft.html_content); // 内部重建 body,横幅随之移除
+        _hasUnsavedLocalSnapshot = true;
+        broadcastUnsaved(true);
+        pushUndo(); // 让恢复后的内容可被撤销
+      }
+      const el = document.getElementById("hg-draft-banner"); if (el) el.remove();
+      _pendingDraft = null;
+    });
+    bDiscard.addEventListener("click", () => {
+      const done = () => { _hasUnsavedLocalSnapshot = false; broadcastUnsaved(false); };
+      if (_logicalDocumentId && Storage.markLatestArtifactVersionExported) {
+        Storage.markLatestArtifactVersionExported(_logicalDocumentId).then(done).catch(done);
+      } else done();
+      const el = document.getElementById("hg-draft-banner"); if (el) el.remove();
+      _pendingDraft = null;
+    });
+    document.body.appendChild(bar);
   }
 
   function isSha256(value) { return typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value); }
@@ -1293,7 +1437,7 @@
     let autoEdit = false;
     try { autoEdit = sessionStorage.getItem("hg_autoedit") === "1"; if (autoEdit) sessionStorage.removeItem("hg_autoedit"); } catch (e) {}
     await restoreIfFresh();
-    if (autoEdit) { _activated = true; _refreshDialogShown = true; } // 自激活:渲染高亮 + 跳过确认窗
+    if (autoEdit) { _activated = true; _refreshDialogShown = true; if (_pendingDraft) showDraftRestoreBanner(); } // 自激活:渲染高亮 + 跳过确认窗
     if (!_artifactVerificationError) await loadAnnotations();
     if (autoEdit) setEditing(true); // 直接进入编辑(广播 edit-state → 侧边栏同步「退出编辑」)
   })();

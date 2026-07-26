@@ -2,7 +2,7 @@
 (function () {
   "use strict";
 
-  const EXTENSION_SELECTOR = "#hg-toolbar, .hg-hl, .hg-inspect, .hg-select, .hg-tip, .hg-drop, style[data-hg-injected=\"ui\"]";
+  const EXTENSION_SELECTOR = "#hg-toolbar, #hg-draft-banner, .hg-hl, .hg-inspect, .hg-select, .hg-tip, .hg-drop, style[data-hg-injected=\"ui\"]";
 
   function normalizeArtifactHtml(html) {
     return String(html == null ? "" : html).replace(/\r\n?/g, "\n");

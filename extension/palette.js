@@ -16,5 +16,35 @@
     "#fff59d", "#ffd54f", "#ffcdd2", "#f8bbd0", "#e1bee7", "#c5cae9", "#bbdefb", "#b2dfdb",
     "#c8e6c9", "#dcedc8", "#ffccbc", "#ffe0b2", "#d7ccc8", "#e5e7eb", "#ffffff", "transparent"
   ];
-  root.HG_PALETTE = Object.freeze({ TEXT_COLORS: Object.freeze(TEXT_COLORS), HL_COLORS: Object.freeze(HL_COLORS) });
+  // v0.9.6 字体切换:中英各 10 种,全部用【系统已装字体】(零打包,无需 web_accessible_resources,保存后到处可渲染)。
+  // 字体名一律用单引号包裹 —— 这样 data-val="…" / style="…" 用双引号定界时不冲突,CSS font-family 也接受单引号。
+  // 每项 = [显示名(字体自身预览), font-family 栈];group 键供 i18n(中文/English 分组标题)。
+  var FONTS = [
+    { group: "font.cn", items: [
+      ["默认黑体", "'PingFang SC','Microsoft YaHei',sans-serif"],
+      ["苹方", "'PingFang SC',sans-serif"],
+      ["微软雅黑", "'Microsoft YaHei',sans-serif"],
+      ["宋体", "'Songti SC','SimSun','STSong',serif"],
+      ["楷体", "'Kaiti SC','KaiTi','STKaiti',serif"],
+      ["仿宋", "'FangSong','STFangsong',serif"],
+      ["黑体", "'Heiti SC','SimHei',sans-serif"],
+      ["思源黑体", "'Source Han Sans SC','Noto Sans SC',sans-serif"],
+      ["思源宋体", "'Source Han Serif SC','Noto Serif SC',serif"],
+      ["行楷", "'STXingkai','Libian SC',cursive"]
+    ]},
+    { group: "font.en", items: [
+      ["Arial", "Arial,sans-serif"],
+      ["Helvetica", "Helvetica,Arial,sans-serif"],
+      ["Times New Roman", "'Times New Roman',Times,serif"],
+      ["Georgia", "Georgia,serif"],
+      ["Courier New", "'Courier New',Courier,monospace"],
+      ["Verdana", "Verdana,sans-serif"],
+      ["Tahoma", "Tahoma,sans-serif"],
+      ["Trebuchet MS", "'Trebuchet MS',sans-serif"],
+      ["Palatino", "'Palatino Linotype',Palatino,serif"],
+      ["Impact", "Impact,sans-serif"]
+    ]}
+  ];
+  FONTS.forEach(function (g) { Object.freeze(g.items); g.items.forEach(function (it) { Object.freeze(it); }); Object.freeze(g); });
+  root.HG_PALETTE = Object.freeze({ TEXT_COLORS: Object.freeze(TEXT_COLORS), HL_COLORS: Object.freeze(HL_COLORS), FONTS: Object.freeze(FONTS) });
 })(typeof globalThis !== "undefined" ? globalThis : this);
