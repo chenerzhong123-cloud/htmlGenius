@@ -192,7 +192,7 @@
   var favicon = document.querySelector('link[rel="icon"]') || document.createElement('link');
   favicon.rel = 'icon';
   favicon.type = 'image/png';
-  favicon.href = '../../assets/html-genius-logo-deep-mint-128x128.png';
+  favicon.href = logoPath; // v0.9.8:用与品牌 logo 同源的路径(http→assets/...,file→../../assets/...);原先写死 ../../assets/... 在部署到 /htmlgenius/ 后会 404 → 浏览器退回域名根 /favicon.ico(奶油色)
   if (!favicon.parentNode) document.head.appendChild(favicon);
   document.querySelectorAll('.setup-guide .command-card code').forEach(function (code) {
     code.textContent = code.textContent.replace('<你的扩展ID>', officialExtensionId);

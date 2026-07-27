@@ -37,7 +37,16 @@
   // sendToContent 已把 currentTabId 更新为活动 tab → sidepanel 按 tab 独立显示评论。
   async function refreshAnnotations() {
     const resp = await sendToContent({ type: "get-annotations" });
-    if (!resp || resp.type !== "annotations-list") return;
+    const respTabId = currentTabId; // sendToContent 已把它设为本次查询的活动 tab
+    const active = await getActiveTab();
+    const stillActive = !active || active.id === respTabId; // 响应是否仍属于当前活动 tab(防快速切 tab 竞态)
+    if (!resp || resp.type !== "annotations-list") {
+      // content-script 不可达(新 tab 仍在加载 / 受限页 / file:// 未开权限):
+      // 仅在仍是当前 tab 时清空,避免残留上一页的评论;旧 tab 的迟到失败不清(让当前 tab 自己的刷新接管)
+      if (stillActive) renderCards([]);
+      return;
+    }
+    if (!stillActive) return; // 防竞态:快速切 tab 时旧 tab 的响应晚到,丢弃,不覆盖当前 tab
     isLocal = resp.isLocal;
     _editing = !!resp.editing;
     _artifactState = resp.artifact_state || _artifactState;
@@ -879,8 +888,7 @@
     const orig = btn ? btn.innerHTML : "";
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(out).then(() => {
-        if (btn) btn.innerHTML = esc(t("contract.copied"));
-        showToast(t("contract.copied"));
+        if (btn) btn.innerHTML = esc(t("contract.copied")); // v0.9.8 反馈靠按钮"已复制 ✓"状态(不用 toast,避免遮挡底部按钮)
         setTimeout(() => { if (btn) btn.innerHTML = orig; }, 1500);
       }).catch(() => showContractFallback(out));
     } else {
@@ -1055,10 +1063,8 @@
   function connCopy(text, hintKey, btn) {
     if (!text) return;
     const done = () => {
-      const message = t(hintKey);
-      connSetHint(message, "ok"); // 注:#conn-hint 元件已移除 → 空操作;实际可见反馈靠 toast + 按钮闪烁
-      showToast(message);
-      if (btn) flashBtn(btn, t("bridge.copied")); // v0.9.7 按钮"已复制 ✓"自带状态变化
+      connSetHint(t(hintKey), "ok"); // #conn-hint 已移除 → 空操作
+      if (btn) flashBtn(btn, t("bridge.copied")); // v0.9.8 反馈靠按钮"已复制 ✓"状态变化(不再用 toast,避免遮挡底部按钮)
     };
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(done, done);
@@ -2139,7 +2145,7 @@
       if (incoming) reconcileTabRun(incoming);
     })();
   });
-  chrome.tabs.onUpdated.addListener((_id, info) => { if (info && info.status === "complete") activateActiveTab(false); });
+  chrome.tabs.onUpdated.addListener((_id, info) => { if (info && info.status === "complete") { activateActiveTab(false); refreshAnnotations(); } });
   chrome.tabs.onRemoved.addListener((tabId) => { _tabStates.delete(tabId); });
   // #1: 心跳 —— 只要侧边栏开着就持续 ping 活动标签(收起后停止 → content-script 看门狗失活)
   setInterval(pingActiveTab, 4000);

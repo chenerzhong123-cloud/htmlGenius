@@ -102,9 +102,6 @@
 
 /* v0.8 #7: 整页高度受限的纵向 flex 布局 —— 评论区独立滚动,底部操作按钮永远固定第一屏 */
 html, body { height: 100%; box-sizing: border-box; } /* border-box:height 含 padding,否则底部被裁 */
-/* v0.9.8:全局兜底 —— [hidden] 必须真隐藏(否则 .edit-tools{display:flex} 等类样式会覆盖 UA 的 [hidden],
-   导致 #edit-tools 设了 hidden 仍显示,即"未编辑也露出编辑工具"的 bug) */
-[hidden] { display: none !important; }
 body {
   font-family: var(--font-sans);
   margin: 0; padding: 16px;
@@ -257,6 +254,7 @@ body {
 
 /* #3a/#3b: 编辑会话动作 + 取色(仅编辑态显示) */
 .edit-tools { margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
+.edit-tools[hidden] { display: none; } /* v0.9.8:确保 #edit-tools 的 hidden 生效(UA [hidden] 会被上面的 display:flex 覆盖);局部规则,不影响 send-menu 等 hidden+.show 机制 */
 .edit-actions { display: flex; gap: 6px; }
 .edit-actions .act {
   flex: 1; height: 34px; display: grid; place-items: center;
