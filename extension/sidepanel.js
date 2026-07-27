@@ -1486,7 +1486,10 @@
     expandBridgeDetail(d.hidden);
   });
   if (contractPlanBtn) contractPlanBtn.addEventListener("click", startPlanRun);
-  if (contractGotoRange) contractGotoRange.addEventListener("click", () => setContractStep("comment-scope"));
+  // v0.9.8:整个「选择评论范围」方框都可点(原先只有点文字才行)→ 进评论勾选级
+  const commentRangeEntry = document.getElementById("comment-range-entry");
+  if (commentRangeEntry) commentRangeEntry.addEventListener("click", () => setContractStep("comment-scope"));
+  if (commentRangeEntry) commentRangeEntry.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setContractStep("comment-scope"); } });
   // 发送组菜单:⌄ 切换 + 重新 probe(缓存过期);agent 选 provider;外部点击关闭
   const sendToggle = document.getElementById("contract-send-toggle");
   const sendMenu = document.getElementById("contract-send-menu");

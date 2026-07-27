@@ -22,7 +22,7 @@
   }
   function syncDemoHome() {
     if (!document.querySelector('main > .hero')) return;
-    var storeUrl = 'https://chromewebstore.google.com/detail/htmlgenius/fcapmgclnpiljjlcaficmjjclkaepaon?authuser=0&hl=zh-CN';
+    var storeUrl = 'https://chromewebstore.google.com/detail/htmlgenius/fcapmgclnpiljjlcaficmjjclkaepaon';
     document.querySelectorAll('.nav-cta,.hero .button:not(.ghost),.final .button').forEach(function (link) { link.href = storeUrl; link.target = '_blank'; link.rel = 'noreferrer'; });
     var zh = language === 'zh';
     var hero = document.querySelector('.hero h1');

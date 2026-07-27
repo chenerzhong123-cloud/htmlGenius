@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="zh-CN" data-language="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="htmlGenius privacy policy — what we collect, why, where it's stored, and how you control your data.">
+<title>隐私政策 · htmlGenius</title>
+<link rel="icon" type="image/png" sizes="128x128" href="../assets/html-genius-logo-deep-mint-128x128.png">
+<link rel="apple-touch-icon" href="../assets/html-genius-logo-deep-mint-128x128.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- set language BEFORE paint (shared storeKey with the landing page → choice carries over) -->
+<script>
+(function(){
+  var p=new URLSearchParams(location.search).get('lang');
+  var s=localStorage.getItem('htmlgenius-language');
+  var b=(navigator.languages||[navigator.language||'en']).some(function(l){return /^zh/i.test(l);});
+  var lang=(p==='zh'||p==='en')?p:((s==='zh'||s==='en')?s:(b?'zh':'en'));
+  var el=document.documentElement;
+  el.dataset.language=lang; el.lang=lang==='zh'?'zh-CN':'en';
+  if(p=new URLSearchParams(location.search).get('theme'),p==='mint')el.dataset.previewTheme='mint';
+  var isDemo=new URLSearchParams(location.search).has('demo');
+  el.style.setProperty('--brand-logo',isDemo?"url('../assets/html-genius-logo-deep-mint-128x128.png')":"url('assets/html-genius-logo-deep-mint-128x128.png')");
+})();
+</script>
+<style>
+  :root{--bg:#080a12;--bg-soft:#10131f;--bg-card:#151929;--ink:#f6f7fb;--ink-2:#c7ccdc;--ink-3:#8d95aa;--ink-4:#687086;--line:rgba(255,255,255,.10);--brand:#7c8cff;--brand-soft:rgba(124,140,255,.14);--warn:#ffb86b;--mono:"DM Mono",monospace;--sans:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;scroll-padding-top:80px}
+  body{margin:0;background:var(--bg);color:var(--ink-2);font:15px/1.75 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden;padding-top:0}
+  a{color:var(--brand);text-decoration:none}
+  /* bilingual show/hide (driven by <html data-language>) */
+  html[data-language="en"] .zh{display:none}
+  html[data-language="zh"] .en{display:none}
+  /* ===== shared top bar (same as the landing page) ===== */
+  .wrap{width:min(1120px,calc(100% - 48px));margin:auto}
+  .nav{height:64px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+  .nav-bar{position:fixed;top:0;left:0;right:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}
+  /* demo 站以 iframe 嵌入本页(theme=mint):隐藏自带顶栏,避免与外壳顶栏重复 */
+  html[data-preview-theme="mint"] .nav-bar{display:none}
+  html[data-preview-theme="mint"] body{padding-top:0}
+  .brand{font-weight:800;letter-spacing:-.05em;font-size:20px;display:flex;align-items:center;gap:10px;color:var(--ink)}
+  .brand-mark{width:28px;height:28px;display:block;object-fit:contain;flex:none}
+  .nav-links{display:flex;gap:28px;font-size:14px;font-weight:600;color:#c7ccdc}
+  .nav-links a:hover{color:var(--ink)}
+  .nav-tools{display:flex;align-items:center;gap:10px}
+  .language{position:relative}
+  .language-toggle{height:37px;padding:0 11px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.025);color:#c7ccdc;font:500 12px var(--sans);cursor:pointer;display:flex;gap:7px;align-items:center;transition:.16s background,.16s border-color}
+  .language-toggle:hover,.language-toggle[aria-expanded="true"]{background:rgba(255,255,255,.065);border-color:rgba(174,185,255,.34);color:var(--ink)}
+  .language-toggle svg{width:13px;transition:transform .16s}
+  .language-toggle[aria-expanded="true"] svg{transform:rotate(180deg)}
+  .language-menu{position:absolute;right:0;top:calc(100% + 8px);z-index:20;width:142px;padding:5px;border:1px solid var(--line);border-radius:10px;background:#171b2a;box-shadow:0 14px 34px rgba(0,0,0,.34);display:none}
+  .language-menu.open{display:block;animation:menu-in .16s cubic-bezier(.2,.8,.2,1)}
+  .language-option{width:100%;height:33px;padding:0 9px;border:0;border-radius:6px;background:transparent;color:#c7ccdc;font:500 12px var(--sans);text-align:left;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
+  .language-option:hover{background:rgba(255,255,255,.07);color:#fff}
+  .language-option.active{color:#b9c3ff}
+  .language-option.active:after{content:"✓";font-size:12px;color:#79e9f7}
+  @keyframes menu-in{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}
+  .nav-cta{border:1px solid rgba(163,177,255,.35);background:linear-gradient(120deg,#8492ff,#a88bff);box-shadow:0 8px 26px rgba(92,104,255,.2);border-radius:8px;font-weight:700;font-size:13px;color:#fff;padding:0 16px;height:37px;display:inline-flex;align-items:center;transition:.2s transform,.2s box-shadow}
+  .nav-cta:hover{transform:translateY(-2px);box-shadow:0 12px 34px rgba(92,104,255,.36)}
+  /* ===== privacy content ===== */
+  .legal{max-width:760px;margin:0 auto;padding:32px 24px 96px}
+  h1{font-size:32px;line-height:1.25;color:var(--ink);margin:0 0 6px;letter-spacing:-.02em;font-weight:800}
+  .lead{color:var(--ink-3);font-size:15px;margin:0 0 8px}
+  .meta{color:var(--ink-4);font-size:13px;margin:0 0 28px}
+  .callout{background:var(--brand-soft);border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:10px;padding:14px 16px;margin:22px 0;color:var(--ink-2);font-size:14px}
+  h2{font-size:19px;color:var(--ink);margin:34px 0 10px;letter-spacing:-.01em;font-weight:700}
+  h3{font-size:15px;color:var(--ink);margin:20px 0 6px;font-weight:600}
+  p{margin:10px 0}
+  ul{margin:10px 0;padding-left:20px}
+  li{margin:5px 0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px;background:var(--bg-card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{text-align:left;padding:11px 14px;border-top:1px solid var(--line);vertical-align:top}
+  th{background:var(--bg-soft);color:var(--ink);font-weight:600;white-space:nowrap}
+  td{color:var(--ink-2)}
+  code{background:var(--bg-card);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font:13px/1.6 var(--mono);color:var(--ink)}
+  .note{color:var(--ink-3);font-size:14px}
+  .footer{text-align:center;color:var(--ink-4);font-size:13px;margin-top:48px;border-top:1px solid var(--line);padding-top:18px}
+  b{color:var(--ink);font-weight:600}
+</style>
+<style>.site-header{position:sticky!important;top:0!important;background:rgba(18,23,34,.95)!important;backdrop-filter:blur(16px)}.site-header .nav{height:65px!important;gap:30px!important}.site-header .brand-mark{display:block;overflow:hidden;background:var(--brand-logo) center/contain no-repeat!important;box-shadow:none!important;color:transparent!important;font-size:0!important;transform:translateY(-.5px)}.site-header .brand{height:36px!important;align-items:center!important;line-height:1!important}.site-header .nav-links{height:36px;align-items:center}.site-header .nav-links a{height:36px;display:inline-flex;align-items:center;line-height:1}</style>
+<style>
+  /* Static preview only: policy text and normal production URL are unchanged. */
+  html[data-preview-theme="mint"]{--bg:#121722;--bg-soft:#1a2130;--bg-card:#202a3d;--ink:#f2f5fb;--ink-2:#d0d8e5;--ink-3:#9aa7bc;--ink-4:#69758a;--line:rgba(180,196,221,.12);--brand:#88e6d1;--brand-soft:rgba(136,230,209,.12)}
+  html[data-preview-theme="mint"] .nav-cta{background:#88e6d1;border-color:rgba(136,230,209,.35);color:#10211f;box-shadow:0 8px 26px rgba(136,230,209,.22)}html[data-preview-theme="mint"] .nav-cta:hover{background:#a6f2e0;box-shadow:0 12px 34px rgba(136,230,209,.30)}html[data-preview-theme="mint"] .language-option.active{color:#a6f2e0}html[data-preview-theme="mint"] .language-option.active:after{color:#88e6d1}html[data-preview-theme="mint"] .callout{border-left-color:#88e6d1}
+</style>
+<style>
+  /* Local Mint refresh: this changes the shell and typography only. Policy copy below is unchanged. */
+  :root{--bg:#121722;--bg-soft:#1a2130;--bg-card:#202a3d;--ink:#f2f5fb;--ink-2:#d0d8e5;--ink-3:#9aa7bc;--ink-4:#69758a;--line:rgba(180,196,221,.12);--brand:#88e6d1;--brand-soft:rgba(136,230,209,.12);--sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  body{background:var(--bg);font:15px/1.8 var(--sans)}
+  .nav-bar{height:65px;background:#121722;border-bottom:1px solid var(--line)}.nav{height:65px}.brand{font-size:18px;letter-spacing:-.045em}.brand-mark{width:27px;height:27px;border-radius:8px}
+  .nav-links{gap:24px;font-size:13px;color:#d0d8e5}.nav-links a{transition:color .16s}.nav-links a:hover,.nav-links a[aria-current="page"]{color:#f2f5fb}
+  .language-toggle{border-color:var(--line);border-radius:9px;color:var(--ink-2)}.language-menu{background:#222c3e;border-color:#303b51}.language-option.active{color:#a6f2e0}.language-option.active:after{color:#88e6d1}
+  .nav-cta{height:36px;border-radius:9px;background:#88e6d1;border-color:rgba(136,230,209,.35);box-shadow:0 8px 24px rgba(136,230,209,.22);color:#10211f}.nav-cta:hover{background:#a6f2e0;box-shadow:0 12px 30px rgba(136,230,209,.30)}
+  .site-header{position:fixed;top:0;z-index:50;height:65px;width:100%;background:#121722;border-bottom:1px solid var(--line)}.site-header .nav{height:65px;justify-content:flex-start;gap:30px}.site-header .brand{font-family:var(--sans);font-size:18px;font-weight:800;letter-spacing:-.045em;color:#f2f5fb}.site-header .brand-mark{width:27px;height:27px;display:grid;place-items:center;border-radius:8px;background:linear-gradient(135deg,#a6f2e0,#88e6d1 55%,#7fd4c0);box-shadow:0 5px 18px rgba(136,230,209,.26);color:#10211f;font-size:14px;font-weight:900}.site-header .nav-links{gap:24px;color:#d0d8e5;font-size:13px;font-weight:650}.site-header .nav-links a{color:#d0d8e5}.site-header .nav-links a:hover,.site-header .nav-links a[aria-current="page"]{color:#f2f5fb}.nav-actions{margin-left:auto;display:flex;gap:9px;align-items:center}.icon-button{height:36px;min-width:36px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line);border-radius:9px;color:#d0d8e5;background:rgba(255,255,255,.025);cursor:pointer;font-size:12px}.icon-button:hover{color:#f2f5fb;border-color:#88e6d1;background:rgba(255,255,255,.06)}.site-header .language-toggle{height:36px;padding:0 10px;border-radius:9px;background:rgba(255,255,255,.025);color:#d0d8e5;font:inherit}.site-header .language-toggle:hover{border-color:#88e6d1;color:#f2f5fb}.language-chevron{width:8px;height:8px;display:inline-flex;align-self:center;font-size:0}.language-chevron::before{content:"";width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg) translate(-1px,-1px)}.site-header .language-menu{top:calc(100% + 8px);min-width:136px;padding:5px;border-color:#303b51;border-radius:9px;background:#222c3e;box-shadow:0 16px 38px rgba(0,0,0,.38)}.site-header .language-option{height:auto;padding:8px 9px;color:#d0d8e5;border-radius:6px;font-size:12px}.site-header .language-option:hover{color:#f2f5fb;background:rgba(255,255,255,.07)}.site-header .nav-cta{min-height:36px;height:36px;padding:0 12px;border-radius:9px;background:#88e6d1;border-color:rgba(136,230,209,.35);box-shadow:0 8px 24px rgba(136,230,209,.22);color:#10211f;font-size:12px}.site-header .nav-cta:hover{background:#a6f2e0;box-shadow:0 12px 30px rgba(136,230,209,.30)}.mobile-toggle{display:none}.menu-wrap{position:relative}.mobile-menu{display:none;position:absolute;top:calc(100% + 8px);right:0;min-width:200px;padding:5px;background:#222c3e;border:1px solid #303b51;box-shadow:0 16px 38px rgba(0,0,0,.38);border-radius:9px}.mobile-menu.is-open{display:block}.mobile-menu a{display:block;padding:9px;color:#d0d8e5;font-size:13px}.mobile-menu a:hover{color:#f2f5fb;background:rgba(255,255,255,.07);border-radius:6px}
+  .legal{max-width:900px;padding:56px 24px 100px}.legal h1{font-size:36px;letter-spacing:-.045em;margin-bottom:10px}.lead{font-size:14px}.meta{margin-bottom:32px}.callout{border-color:rgba(136,230,209,.22);border-left-color:#88e6d1;border-radius:12px;background:rgba(136,230,209,.08);padding:16px 18px}.legal h2{font-size:21px;letter-spacing:-.03em;margin-top:42px;padding-top:6px}.legal h3{font-size:15px;margin-top:24px}.legal table{border-radius:12px;background:var(--bg-card)}.legal th{background:var(--bg-soft)}.legal code{background:#111722;color:#c7f5e9}.note{padding:14px 16px;border-left:2px solid #7fd4c0;background:rgba(127,212,192,.07)}
+  @media(max-width:720px){.site-header .nav-links,.site-header .language{display:none}.site-header .nav-cta{display:none}.mobile-toggle{display:inline-flex}.legal{padding:42px 16px 72px}.legal h1{font-size:30px}.wrap{width:min(100% - 32px,1160px)}}
+</style>
+</head>
+<body>
+<header class="site-header nav-bar"><div class="wrap nav">
+  <a href="index.html" data-demo-route="index.html" target="_top" class="brand"><span class="brand-mark">H</span>htmlGenius</a>
+  <nav class="nav-links">
+    <a href="agents.html" data-demo-route="agents.html" target="_top">Agents</a>
+    <a href="setup.html" data-demo-route="setup.html" target="_top"><span class="zh">配置文档</span><span class="en">Setup guide</span></a>
+    <a href="privacy.html" data-demo-route="privacy.html" target="_top" aria-current="page"><span class="zh">隐私</span><span class="en">Privacy</span></a>
+    <a href="https://github.com/chenerzhong123-cloud/htmlGenius" target="_blank" rel="noreferrer">GitHub ↗</a>
+  </nav>
+  <div class="nav-actions nav-tools">
+    <div class="language">
+      <button class="icon-button language-toggle" id="language-toggle" aria-haspopup="menu" aria-expanded="false"><span id="language-current">English</span><span class="language-chevron" aria-hidden="true">⌄</span></button>
+      <div class="lang-menu language-menu" id="language-menu" role="menu">
+        <button class="language-option" data-language="zh" role="menuitem">中文</button>
+        <button class="language-option" data-language="en" role="menuitem">English</button>
+      </div>
+    </div>
+    <a class="button small nav-cta" href="https://chromewebstore.google.com/detail/htmlgenius/fcapmgclnpiljjlcaficmjjclkaepaon?authuser=0&amp;hl=zh-CN" target="_blank" rel="noreferrer"><span class="zh">前往 Chrome 商店</span><span class="en">Chrome Store</span></a>
+    <div class="menu-wrap mobile-toggle"><button class="icon-button" data-mobile-toggle aria-label="menu">☰</button><div class="mobile-menu"><a href="agents.html" data-demo-route="agents.html" target="_top">Agents</a><a href="setup.html" data-demo-route="setup.html" target="_top"><span class="zh">配置文档</span><span class="en">Setup guide</span></a><a href="privacy.html" data-demo-route="privacy.html" target="_top">隐私</a><a href="https://github.com/chenerzhong123-cloud/htmlGenius" target="_blank" rel="noreferrer">GitHub ↗</a></div></div>
+  </div>
+</div></header>
+
+<main class="legal">
+  <h1><span class="zh">隐私政策</span><span class="en">Privacy Policy</span></h1>
+  <p class="lead"><span class="zh">生效日期：2026-07-14　·　适用范围：htmlGenius 浏览器扩展</span><span class="en">Effective date: 2026-07-14 · Scope: the htmlGenius browser extension</span></p>
+  <p class="meta"><span class="zh">本政策说明我们收集什么、为什么收集、存在哪里、以及你如何控制自己的数据。</span><span class="en">This policy explains what we collect, why we collect it, where it is stored, and how you stay in control of your data.</span></p>
+
+  <div class="callout">
+    <span class="zh">htmlGenius 奉行<b>最小收集</b>原则：只收集让「登录身份」与「团队协作批注」正常运转所必需的数据，且全部存放在我们自己控制的服务器上，不接入任何广告网络或第三方数据分析。</span>
+    <span class="en">htmlGenius follows a <b>minimal-collection</b> principle: we gather only the data essential for login identity and collaborative team annotations to work. Everything is stored on servers we control — no ad networks, no third-party analytics.</span>
+  </div>
+
+  <h2><span class="zh">1. 我们收集的信息</span><span class="en">1. Information We Collect</span></h2>
+
+  <h3><span class="zh">你主动提供或登录时产生的信息</span><span class="en">Information you provide or that is created on sign-in</span></h3>
+  <table>
+    <tr><th><span class="zh">数据</span><span class="en">Data</span></th><th><span class="zh">何时产生</span><span class="en">When</span></th><th><span class="zh">用途</span><span class="en">Purpose</span></th></tr>
+    <tr>
+      <td><span class="zh"><b>Google 账户</b>：邮箱、显示名称、头像、Google 唯一标识（sub）</span><span class="en"><b>Google account</b>: email, display name, avatar, Google unique ID (sub)</span></td>
+      <td><span class="zh">你选择「Google 登录」时</span><span class="en">When you choose “Sign in with Google”</span></td>
+      <td><span class="zh">建立账号身份、显示头像/昵称、把批注绑定到你本人</span><span class="en">Establishes account identity, shows your avatar/nickname, ties annotations to you</span></td>
+    </tr>
+    <tr>
+      <td><span class="zh"><b>飞书账户</b>：飞书 open_id、显示名称</span><span class="en"><b>Lark account</b>: Lark open_id, display name</span></td>
+      <td><span class="zh">你选择「飞书登录」时</span><span class="en">When you choose “Sign in with Lark”</span></td>
+      <td><span class="zh">同上（仅在你选用飞书登录时收集）</span><span class="en">Same as above (collected only if you use Lark login)</span></td>
+    </tr>
+    <tr>
+      <td><span class="zh"><b>批注内容</b>：你写下的评论文字、你选中的网页原文片段（quote）、选区位置</span><span class="en"><b>Annotation content</b>: the comment text you write, the quoted page snippet you select, and the selection position</span></td>
+      <td><span class="zh">你创建或编辑一条批注时</span><span class="en">When you create or edit an annotation</span></td>
+      <td><span class="zh">让批注能保存、展示、并跨页面版本自动重新定位</span><span class="en">Lets annotations be saved, displayed, and automatically re-located across page versions</span></td>
+    </tr>
+    <tr>
+      <td><span class="zh"><b>团队关系</b>：你加入/创建了哪个团队、邀请码</span><span class="en"><b>Team membership</b>: which team you joined/created, invite code</span></td>
+      <td><span class="zh">你加入团队或新建团队时</span><span class="en">When you join or create a team</span></td>
+      <td><span class="zh">团队成员间共享同一份批注并相互隔离</span><span class="en">Lets teammates share the same annotations while keeping teams isolated</span></td>
+    </tr>
+    <tr>
+      <td><span class="zh"><b>在线状态</b>：你正在查看哪个文档</span><span class="en"><b>Presence</b>: which document you are viewing</span></td>
+      <td><span class="zh">你打开某文档的侧边栏时</span><span class="en">When you open a document’s sidebar</span></td>
+      <td><span class="zh">在同一团队内显示「谁在线」，便于协作</span><span class="en">Shows “who’s online” within a team to aid collaboration</span></td>
+    </tr>
+  </table>
+
+  <h3><span class="zh">浏览器本地存储（不发送到我们的服务器）</span><span class="en">Browser-local storage (never sent to our servers)</span></h3>
+  <ul>
+    <li><span class="zh"><b>本地模式</b>下，或未登录时：批注保存在你浏览器的 IndexedDB 中，<b>完全不离开你的电脑</b>。</span><span class="en">In <b>local mode</b>, or when not signed in: annotations are stored in your browser’s IndexedDB and <b>never leave your device</b>.</span></li>
+    <li><span class="zh">登录后：你的登录会话凭证（session token）保存在 <code>chrome.storage.sync</code>，用于后续请求鉴权（由 Chrome 在你的账户间同步）。</span><span class="en">After signing in: your session token is stored in <code>chrome.storage.sync</code> to authenticate later requests (synced across your devices by Chrome).</span></li>
+  </ul>
+
+  <h3><span class="zh">我们不收集的信息</span><span class="en">What we do not collect</span></h3>
+  <p><span class="zh">我们<b>不</b>收集：浏览历史、完整网页内容、键盘输入、设备指纹、位置信息、财务信息，也不接入任何广告、追踪或用户分析 SDK。</span><span class="en">We do <b>not</b> collect: browsing history, full page content, keystrokes, device fingerprints, location, or financial information, and we integrate no advertising, tracking, or analytics SDKs.</span></p>
+  <div class="callout"><span class="zh">当你在某个网页上选中文字并创建批注时，<b>你选中的那段原文片段</b>会上送到我们的后端以便保存这条批注；其余页面内容不上送。</span><span class="en">When you select text on a page and create an annotation, <b>the quoted snippet you selected</b> is sent to our backend to save that annotation; no other page content is sent.</span></div>
+
+  <h3><span class="zh">本机 AI Agent（可选功能，仅在你主动启用时）</span><span class="en">On-device AI Agent (optional, only when you choose to use it)</span></h3>
+  <p><span class="zh">「发送给 Codex / Claude Code」是<b>可选</b>功能，且仅在 macOS 上可用。使用时，扩展会把你本次勾选的评论 + 相关页面文本，通过浏览器的原生消息（Native Messaging）<b>只发送给你自己电脑上已安装、已登录的 Codex（Codex Mac App）或 Claude Code CLI</b>，由<b>你本机的</b> Agent 在本地生成一份候选 HTML。</span><span class="en">"Send to Codex / Claude Code" is an <b>optional</b> feature, available only on macOS. When used, the extension sends your selected comments + the relevant page text, via the browser's Native Messaging, <b>only to the Codex (Codex Mac App) or Claude Code CLI you have installed and signed into on your own computer</b>. The candidate HTML is generated <b>locally by your own agent</b>.</span></p>
+  <ul>
+    <li><span class="zh">这部分数据<b>只在你本机处理</b>，<b>不会发送到 htmlGenius 的服务器或插件作者</b>，也不会用于我们的任何分析。</span><span class="en">This data is <b>processed only on your device</b>; it is <b>never sent to htmlGenius's servers or the extension author</b>, nor used for any of our analytics.</span></li>
+    <li><span class="zh">扩展<b>不读取、不保存、不上传</b>你的 Codex / Claude 登录凭证（API Key / Token / Cookie）——它只复用你本机<b>已经存在</b>的登录态。</span><span class="en">The extension <b>does not read, store, or upload</b> your Codex / Claude credentials (API key / token / cookie) — it only reuses the sign-in that <b>already exists</b> on your machine.</span></li>
+    <li><span class="zh">生成的候选版本只写成本地文件（如 <code>原名V1.1.html</code>），<b>不上传</b>任何候选内容。</span><span class="en">Generated candidates are written only as local files (e.g. <code>nameV1.1.html</code>); <b>no candidate content is uploaded</b>.</span></li>
+    <li><span class="zh">Codex / Claude 各自有其独立的隐私政策，约束它们如何处理你交给它们的内容。</span><span class="en">Codex / Claude each have their own independent privacy policies governing how they handle content you give them.</span></li>
+  </ul>
+
+  <h2><span class="zh">2. 信息如何被使用</span><span class="en">2. How Information Is Used</span></h2>
+  <ul>
+    <li><span class="zh">提供登录、身份识别与团队协作功能；</span><span class="en">Provide login, identity, and team-collaboration features;</span></li>
+    <li><span class="zh">在你与团队成员之间实时同步批注（SSE 推送）；</span><span class="en">Sync annotations in real time between you and your teammates (via SSE);</span></li>
+    <li><span class="zh">让你能查看、编辑、删除自己的批注；</span><span class="en">Let you view, edit, and delete your own annotations;</span></li>
+    <li><span class="zh">诊断与保障服务稳定性（服务端日志，见第 4 节）。</span><span class="en">Diagnose and maintain service stability (server logs; see Section 4).</span></li>
+  </ul>
+  <p><span class="zh">我们<b>不会</b>把你的数据用于跨站追踪、画像或出售给任何第三方。</span><span class="en">We <b>never</b> use your data for cross-site tracking, profiling, or sale to any third party.</span></p>
+
+  <h2><span class="zh">3. 信息的存储与传输</span><span class="en">3. Storage &amp; Transmission</span></h2>
+  <ul>
+    <li><span class="zh"><b>存储位置</b>：上述数据存放在我们自有的服务器（阿里云，域名 <code>www.deuce.monster</code>）上的数据库中。服务器与数据库均在我们自己控制下，不使用第三方托管数据库。</span><span class="en"><b>Location</b>: the above data is stored in a database on our own servers (Alibaba Cloud, domain <code>www.deuce.monster</code>). Both server and database are under our control; we use no third-party hosted database.</span></li>
+    <li><span class="zh"><b>传输加密</b>：扩展与后端之间的所有通信均通过 HTTPS（TLS）加密。</span><span class="en"><b>Encryption in transit</b>: all communication between the extension and the backend is encrypted via HTTPS (TLS).</span></li>
+    <li><span class="zh"><b>本地数据</b>：保存在你浏览器 IndexedDB / <code>chrome.storage</code> 中的数据，遵循 Chrome 本身的存储与同步机制。</span><span class="en"><b>Local data</b>: data stored in your browser’s IndexedDB / <code>chrome.storage</code> follows Chrome’s own storage and sync mechanism.</span></li>
+  </ul>
+
+  <h2><span class="zh">4. 第三方服务</span><span class="en">4. Third-Party Services</span></h2>
+  <p><span class="zh">我们仅在你主动选择对应登录方式时，与以下第三方交互，且只为完成登录鉴权：</span><span class="en">We interact with the following third parties only when you actively choose the corresponding sign-in method, and solely to complete login authentication:</span></p>
+  <ul>
+    <li><span class="zh"><b>Google Identity Services</b>：用于「Google 登录」。只读取 <code>openid</code>、<code>email</code>、<code>profile</code> 三个基础范围。受 <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google 隐私政策</a> 约束。</span><span class="en"><b>Google Identity Services</b>: used for “Sign in with Google”. Reads only the three basic scopes <code>openid</code>, <code>email</code>, and <code>profile</code>. Subject to <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google’s Privacy Policy</a>.</span></li>
+    <li><span class="zh"><b>飞书开放平台</b>：用于「飞书登录」。仅在你点击飞书登录时调用，读取用户标识与昵称。</span><span class="en"><b>Lark Open Platform</b>: used for “Sign in with Lark”. Called only when you click Lark login; reads your user ID and nickname.</span></li>
+  </ul>
+  <p><span class="zh">除上述登录鉴权外，我们<b>不与任何第三方共享你的数据</b>，也不接入广告/分析网络。</span><span class="en">Aside from the login authentication above, we <b>share your data with no third party</b> and integrate no ad/analytics networks.</span></p>
+  <p class="note"><span class="zh">服务端运行日志（用于排查故障）可能短暂记录请求路径、时间与状态码；这些日志默认不含你的批注正文，且会定期清除。</span><span class="en">Server runtime logs (used for troubleshooting) may briefly record request paths, timestamps, and status codes; these logs do not contain your annotation text by default and are periodically purged.</span></p>
+
+  <h2><span class="zh">5. 数据保留与删除</span><span class="en">5. Data Retention &amp; Deletion</span></h2>
+  <ul>
+    <li><span class="zh">你可以<b>随时删除</b>自己创建的任何一条批注（在侧边栏批注卡片上操作）。仅作者本人可删除自己的批注。</span><span class="en">You can <b>delete</b> any annotation you created at any time (from the sidebar annotation card). Only the author can delete their own annotations.</span></li>
+    <li><span class="zh">你可以<b>编辑</b>自己创建的批注（仅作者本人）。</span><span class="en">You can <b>edit</b> annotations you created (author only).</span></li>
+    <li><span class="zh"><b>退出登录</b>会使当前会话凭证立即失效。</span><span class="en"><b>Signing out</b> immediately invalidates your current session token.</span></li>
+    <li><span class="zh"><b>彻底注销账号 / 删除全部数据</b>：请通过第 8 节的联系方式联系我们，我们会在合理时间内从后端数据库删除你的账号及其名下批注。</span><span class="en"><b>Permanently close your account / delete all data</b>: contact us via Section 8 and we will remove your account and its annotations from the backend database within a reasonable timeframe.</span></li>
+  </ul>
+
+  <h2><span class="zh">6. 权限说明（与 Chrome 商店声明一致）</span><span class="en">6. Permissions (consistent with the Chrome Web Store listing)</span></h2>
+  <ul>
+    <li><span class="zh"><code>activeTab</code> / <code>sidePanel</code>：在当前标签页注入批注侧边栏与浮动工具栏。</span><span class="en"><code>activeTab</code> / <code>sidePanel</code>: inject the annotation sidebar and floating toolbar into the current tab.</span></li>
+    <li><span class="zh"><code>host_permissions</code>（内容脚本 + 连接后端）：批注功能需要在你打开的任意网页上读取/标注选中文本，并与我们的后端通信以保存与同步批注。</span><span class="en"><code>host_permissions</code> (content script + backend connection): the annotation feature needs to read/annotate selected text on any page you open, and communicate with our backend to save and sync annotations.</span></li>
+    <li><span class="zh"><code>identity</code>：完成 Google / 飞书 OAuth 登录。</span><span class="en"><code>identity</code>: complete Google / Lark OAuth sign-in.</span></li>
+    <li><span class="zh"><code>storage</code>：在本地保存你的偏好（语言、主题）、登录会话与本地批注。</span><span class="en"><code>storage</code>: store your preferences (language, theme), login session, and local annotations.</span></li>
+  </ul>
+
+  <h2><span class="zh">7. 未成年人</span><span class="en">7. Minors</span></h2>
+  <p><span class="zh">本扩展不面向 13 岁以下儿童，我们也不 knowingly 收集儿童信息。如发现误收，请联系我们删除。</span><span class="en">This extension is not intended for children under 13, and we do not knowingly collect information from children. If we learn we have inadvertently collected any, please contact us to delete it.</span></p>
+
+  <h2><span class="zh">8. 联系我们 / 政策变更</span><span class="en">8. Contact / Policy Changes</span></h2>
+  <ul>
+    <li><span class="zh">如对本政策有任何问题，或希望行使删除权，请通过扩展官网或 GitHub 仓库 <a href="https://github.com/chenerzhong123-cloud/htmlGenius" target="_blank" rel="noopener">chenerzhong123-cloud/htmlGenius</a> 留言。</span><span class="en">For any questions about this policy, or to exercise your right to deletion, reach out via the extension’s website or the GitHub repo <a href="https://github.com/chenerzhong123-cloud/htmlGenius" target="_blank" rel="noopener">chenerzhong123-cloud/htmlGenius</a>.</span></li>
+    <li><span class="zh">本政策如有重大变更，我们会更新本页面顶部的「生效日期」并在扩展内提示。</span><span class="en">If this policy changes materially, we will update the “Effective date” at the top of this page and notify you within the extension.</span></li>
+  </ul>
+
+  <div class="footer"><span class="zh">本隐私政策最后更新于 2026-07-14　·　htmlGenius</span><span class="en">This privacy policy was last updated on 2026-07-14 · htmlGenius</span></div>
+</main>
+
+<script>
+(function(){
+  if(new URLSearchParams(location.search).get('theme')==='mint')document.documentElement.dataset.previewTheme='mint';
+  var lang=document.documentElement.dataset.language||'en';
+  var titles={zh:'隐私政策 · htmlGenius',en:'Privacy Policy · htmlGenius'};
+  var cur=document.getElementById('language-current');
+  function render(l){
+    var el=document.documentElement;
+    el.dataset.language=l; el.lang=l==='zh'?'zh-CN':'en';
+    document.title=titles[l];
+    if(cur) cur.textContent=l==='zh'?'中文':'English';
+    document.querySelectorAll('.language-option').forEach(function(o){o.classList.toggle('active',o.dataset.language===l);});
+  }
+  render(lang);
+  if(new URLSearchParams(location.search).has('demo'))document.querySelectorAll('[data-demo-route]').forEach(function(link){link.href='demo-2026-07/'+link.dataset.demoRoute;});
+  // persist so the choice carries over to / from the landing page (shared storeKey)
+  localStorage.setItem('htmlgenius-language',lang);
+
+  var menu=document.getElementById('language-menu'),toggle=document.getElementById('language-toggle');
+  toggle.addEventListener('click',function(){var open=menu.classList.toggle('open');toggle.setAttribute('aria-expanded',open);});
+  document.querySelectorAll('.language-option').forEach(function(o){
+    o.addEventListener('click',function(){ render(o.dataset.language); localStorage.setItem('htmlgenius-language',o.dataset.language); menu.classList.remove('open'); toggle.setAttribute('aria-expanded','false'); });
+  });
+  var mobileToggle=document.querySelector('[data-mobile-toggle]'),mobileMenu=document.querySelector('.mobile-menu');
+  if(mobileToggle&&mobileMenu)mobileToggle.addEventListener('click',function(e){e.stopPropagation();mobileMenu.classList.toggle('is-open');});
+  document.addEventListener('click',function(e){if(!e.target.closest('.language')){menu.classList.remove('open');toggle.setAttribute('aria-expanded','false');}if(!e.target.closest('.menu-wrap')&&mobileMenu)mobileMenu.classList.remove('is-open');});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'){menu.classList.remove('open');toggle.setAttribute('aria-expanded','false');toggle.focus();}});
+})();
+</script>
+</body>
+</html>

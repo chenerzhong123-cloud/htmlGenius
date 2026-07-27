@@ -102,6 +102,9 @@
 
 /* v0.8 #7: 整页高度受限的纵向 flex 布局 —— 评论区独立滚动,底部操作按钮永远固定第一屏 */
 html, body { height: 100%; box-sizing: border-box; } /* border-box:height 含 padding,否则底部被裁 */
+/* v0.9.8:全局兜底 —— [hidden] 必须真隐藏(否则 .edit-tools{display:flex} 等类样式会覆盖 UA 的 [hidden],
+   导致 #edit-tools 设了 hidden 仍显示,即"未编辑也露出编辑工具"的 bug) */
+[hidden] { display: none !important; }
 body {
   font-family: var(--font-sans);
   margin: 0; padding: 16px;
@@ -122,6 +125,8 @@ body {
   color: var(--text-primary); letter-spacing: -0.04em; line-height: 1;
 }
 .header-right { display: flex; align-items: center; gap: 4px; }
+/* v0.9.8:账号/登录入口暂时隐藏(功能未完善,代码保留,后续完善后再展示)*/
+#avatar { display: none !important; }
 
 /* ghost 图标按钮(主题 / 头像 / 语言 / 反馈) */
 .theme-btn, .avatar, .lang-btn, .feedback-btn {
@@ -817,7 +822,8 @@ button {
 .contract-advanced textarea { width: 100%; min-height: 56px; margin-top: 5px; padding: 8px 9px; resize: vertical; outline: 0; border: 1px solid var(--line-subtle); border-radius: var(--r-md); color: var(--text-primary); background: var(--bg-input); font: 12px/1.5 var(--font); box-sizing: border-box; }
 .contract-advanced textarea:focus { border-color: var(--line-focus); box-shadow: 0 0 0 3px var(--brand-soft); }
 .contract-advanced .contract-link { margin-top: 4px; }
-.comment-range-entry { margin-top: 10px; padding: 9px 10px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface); transition: border-color .14s, background .14s; }
+.comment-range-entry { margin-top: 10px; padding: 9px 10px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface); transition: border-color .14s, background .14s; cursor: pointer; }
+.comment-range-entry:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 .comment-range-entry:hover { border-color: var(--brand); background: var(--bg-surface-raised); }
 .comment-range-entry .contract-link { display: inline-flex; align-items: center; min-height: 28px; margin: 0; }
 .comment-range-entry .field-hint { margin: 2px 0 0; }
