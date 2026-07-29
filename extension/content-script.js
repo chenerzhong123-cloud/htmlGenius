@@ -297,8 +297,8 @@
       + `</div>`;
     h += `<button data-act="pop-emoji" class="hg-haspop hg-edit-tool" title="${t("emoji.title")}">😊</button>`;
     h += `<div class="hg-popover hg-edit-tool" data-pop="emoji">` + ["😀","😄","😁","😍","😎","🤔","👍","👌","👏","🙏","💯","✅","❌","⭐","🔥","💡","❤️","🎉","🚀","✨","📌","📎","🔍","🎨","💬","⚠️","❓","❗","✏️","📝","🎯","➕"].map((e) => `<button class="hg-emoji hg-edit-tool" data-emoji="${e}">${e}</button>`).join("") + `</div>`;
-    // 刷子图标：与关闭/删除区分，表示对选中文本执行格式清理。
-    h += sep + `<button data-act="clear" class="hg-edit-tool" title="${t("tool.clear")}" aria-label="${t("tool.clear")}"><svg class="hg-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.6 17.9-10.7-2.9"/><path d="M18.4 3.6a1 1 0 0 1 3 3L7.4 20.6a2 2 0 0 1-1.2.6l-2 .3a.5.5 0 0 1-.6-.6l.3-2a2 2 0 0 1 .6-1.2Z"/></svg></button>`;
+    // 清除格式图标:与 Side Panel #act-clear 完全同款(0.9.8 用户提供的刷子/橡皮擦 SVG),两边一眼一致。
+    h += sep + `<button data-act="clear" class="hg-edit-tool" title="${t("tool.clear")}" aria-label="${t("tool.clear")}"><svg class="hg-ico" width="16" height="16" viewBox="0 0 1053 1024" fill="currentColor" aria-hidden="true"><path d="M896 533.333333H128v-85.333333c0-17.066667 6.4-34.133333 19.2-44.8 10.666667-12.8 27.733333-19.2 44.8-19.2h640c17.066667 0 34.133333 6.4 44.8 19.2 12.8 12.8 19.2 27.733333 19.2 44.8v85.333333zM170.666667 490.666667h682.666666v-42.666667c0-6.4-2.133333-10.666667-6.4-14.933333s-8.533333-6.4-14.933333-6.4H192c-6.4 0-10.666667 2.133333-14.933333 6.4-4.266667 4.266667-6.4 8.533333-6.4 14.933333v42.666667z"/><path d="M768 874.666667H256c-17.066667 0-34.133333-6.4-44.8-19.2S192 827.733333 192 810.666667V490.666667h640v320c0 17.066667-6.4 34.133333-19.2 44.8-10.666667 12.8-27.733333 19.2-44.8 19.2zM234.666667 533.333333v277.333334c0 6.4 2.133333 10.666667 6.4 14.933333s8.533333 6.4 14.933333 6.4h512c6.4 0 10.666667-2.133333 14.933333-6.4 4.266667-4.266667 6.4-8.533333 6.4-14.933333V533.333333H234.666667z"/><path d="M394.666667 654.933333h42.666666v185.6h-42.666666zM586.666667 654.933333h42.666666v185.6h-42.666666z"/><path d="M576 426.666667h-128V192c0-17.066667 6.4-34.133333 19.2-44.8 23.466667-23.466667 66.133333-23.466667 89.6 0 12.8 10.666667 19.2 27.733333 19.2 44.8v234.666667z m-85.333333-42.666667h42.666666V192c0-6.4-2.133333-10.666667-6.4-14.933333-8.533333-8.533333-21.333333-8.533333-29.866666 0-4.266667 4.266667-6.4 8.533333-6.4 14.933333v192z"/></svg></button>`;
     return h;
   }
   toolbar.innerHTML = toolbarHTML();
@@ -336,7 +336,21 @@
     if (!pop) return;
     const willOpen = !pop.classList.contains("show");
     closeAllPopovers();
-    if (willOpen) pop.classList.add("show");
+    if (!willOpen) return;
+    // 弹层跟随触发按钮:左缘对齐按钮左缘,出现在其正下方(CSS 默认 left:0 会一律贴工具栏最左)。
+    // 靠近视口右缘时整体左移收回,不溢出屏幕;左缘溢出同理夹回。先隐式撑开量宽,再落位显示。
+    const btn = toolbar.querySelector('button[data-act="pop-' + name + '"]');
+    pop.style.visibility = "hidden";
+    pop.classList.add("show");
+    if (btn) {
+      const barRect = toolbar.getBoundingClientRect();
+      let left = btn.offsetLeft;
+      const overflowR = barRect.left + left + pop.offsetWidth - (window.innerWidth - 8);
+      if (overflowR > 0) left -= overflowR;
+      if (barRect.left + left < 8) left = 8 - barRect.left;
+      pop.style.left = left + "px";
+    }
+    pop.style.visibility = "";
   }
 
   // 统一开关编辑态:设 contentEditable + 工具栏 editing 类 + 广播给侧边栏同步按钮
@@ -779,6 +793,26 @@
       }).catch(() => sendResponse({ ok: false }));
       else sendResponse({ ok: false });
       return true;
+    } else if (msg.type === "draft-restore") {
+      // v0.9.9: 草稿恢复横幅迁到 Side Panel 后,「恢复」由面板按钮回传执行(逻辑同原页内横幅按钮)
+      if (_pendingDraft && _pendingDraft.html_content) {
+        applyRestoredArtifact(_pendingDraft.html_content); // 重建 body,进入未保存态
+        _hasUnsavedLocalSnapshot = true;
+        broadcastUnsaved(true);
+        pushUndo(); // 让恢复后的内容可被撤销
+      }
+      _pendingDraft = null;
+      try { chrome.runtime.sendMessage({ type: "draft-restore-prompt", show: false }).catch(() => {}); } catch (e) {}
+      sendResponse({ ok: true });
+    } else if (msg.type === "draft-discard") {
+      // v0.9.9: 「丢弃」标记最新快照已导出(清草稿位,页面保持磁盘基线),逻辑同原页内横幅按钮
+      const done = () => { _hasUnsavedLocalSnapshot = false; broadcastUnsaved(false); };
+      if (_logicalDocumentId && Storage.markLatestArtifactVersionExported) {
+        Storage.markLatestArtifactVersionExported(_logicalDocumentId).then(done).catch(done);
+      } else done();
+      _pendingDraft = null;
+      try { chrome.runtime.sendMessage({ type: "draft-restore-prompt", show: false }).catch(() => {}); } catch (e) {}
+      sendResponse({ ok: true });
     } else if (msg.type === "artifact-update-ready") {
       handleArtifactUpdateReady(msg, sender).then(sendResponse).catch((error) => sendResponse({ ok: false, code: "VALIDATION_ERROR", error: String(error && error.message || error) }));
       return true;
@@ -885,6 +919,25 @@
     sel.removeAllRanges();
   }
 
+  // 把选区与缓存选区(_lastRange/_lastCursor)重锚定到新包裹/重插的内容上。
+  // 根因:span 包裹(surroundContents/extractContents)与 unwrap 重插之后,浏览器对原选区边界点的
+  // 自动修正常使选区退化(折叠/指向已移走的节点),缓存选区随之失效 —— 表现为「字号/颜色只有第一次
+  // 点击生效,之后静默无反应,必须重新圈选」。这里在每次成功改动后统一重建选区并同步缓存,
+  // 保证从侧边栏/工具栏连续点击字号、颜色、清除格式都持续有效。
+  function reanchorSelection(startNode, endNode) {
+    if (!startNode || !startNode.isConnected) return;
+    const end = endNode && endNode.isConnected ? endNode : startNode;
+    try {
+      const nr = document.createRange();
+      nr.setStartBefore(startNode);
+      nr.setEndAfter(end);
+      const sel = document.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(nr);
+      _lastRange = nr.cloneRange();
+      _lastCursor = nr.cloneRange();
+    } catch (e) { /* 非关键:重锚失败不影响本次改动本身 */ }
+  }
   // === inline 样式:color / background 走逐段包裹(正确处理跨元素/部分选区);fontSize 等 span 包裹 ===
   // 注:B/I/U/S 走 execCommand(见 click handler),不在此处理。
   // 返回是否真的改动了文档 —— 选区失效(指向幽灵节点)时返回 false,由 execEdit 报 NO_SELECTION。
@@ -895,14 +948,21 @@
     if (prop === "background") return paintRange("backgroundColor", value);
     // v0.9.6 字体:与色/高亮同走逐文本节点包裹(跨元素选区稳健,优于 surroundContents 兜底)
     if (prop === "fontFamily") return paintRange("fontFamily", value);
+    // v0.9.9 字号同样走 paintRange(逐文本节点包裹)。此前 surroundContents 把新 span 套在旧 span【外层】,
+    // CSS 级联里旧的内层 span 的 font-size 总是赢家 → 表现为「连点多次字号无效,只有重新圈选才生效一次」。
+    // paintRange 包的是文本节点本身,新 span 落在最内层(离文字最近),其 font-size 总生效 → 连续改字号逐次可见。
+    if (prop === "fontSize") return paintRange("fontSize", value);
     const range = sel.getRangeAt(0);
     const span = document.createElement("span");
     span.style[prop] = value;
-    try { range.surroundContents(span); return true; }
+    let ok = false;
+    try { range.surroundContents(span); ok = true; }
     catch (e) {
-      try { span.appendChild(range.extractContents()); range.insertNode(span); return span.isConnected; }
-      catch (e2) { return false; } // stale 选区(节点已脱离文档)→ 明确无效
+      try { span.appendChild(range.extractContents()); range.insertNode(span); ok = span.isConnected; }
+      catch (e2) { ok = false; } // stale 选区(节点已脱离文档)→ 明确无效
     }
+    if (ok) reanchorSelection(span); // 选区留在新 span 上 → 再点字号/颜色继续生效
+    return ok;
   }
   // 把选区内每一段文本节点包裹进带样式的 span(修「只改前半/末字变样」「高亮盖字」)。
   function paintRange(prop, value) {
@@ -925,13 +985,14 @@
     }
     if (!slices.length) {
       const span = document.createElement("span"); span.style[prop] = value;
-      try { range.surroundContents(span); return true; }
+      try { range.surroundContents(span); reanchorSelection(span); return true; }
       catch (e) {
-        try { span.appendChild(range.extractContents()); range.insertNode(span); return span.isConnected; }
+        try { span.appendChild(range.extractContents()); range.insertNode(span); if (span.isConnected) reanchorSelection(span); return span.isConnected; }
         catch (e2) { return false; }
       }
     }
     let applied = false;
+    let firstSpan = null, lastSpan = null;
     for (const s of slices) {
       const node = s.node;
       if (!node.nodeValue || node.nodeValue.length === 0) continue;
@@ -946,7 +1007,10 @@
       inside.parentNode.insertBefore(span, inside);
       span.appendChild(inside);
       applied = true;
+      if (!firstSpan) firstSpan = span;
+      lastSpan = span;
     }
+    if (applied) reanchorSelection(firstSpan, lastSpan); // 选区覆盖全部新 span → 连续改色/改字号持续生效
     return applied;
   }
   // 重锚定 overlay(编辑/插入后让批注高亮跟随文字新位置)
@@ -1010,7 +1074,9 @@
         sp.remove();
       }
     });
+    const first = frag.firstChild, last = frag.lastChild; // 记住首尾,重插后重锚选区(连续清除仍有效)
     range.insertNode(frag);
+    if (first && last) reanchorSelection(first, last);
     return true;
   }
 
@@ -1357,42 +1423,14 @@
     } catch (e) { _lastReconcileStatus = "error"; _baseHash = null; console.error("[hg] artifact restore unavailable", e); }
   }
 
-  // v0.9.6: 重载后检测到未提交草稿 → 页内横幅「恢复 / 丢弃」(替代旧的静默恢复)。
+  // v0.9.6: 重载后检测到未提交草稿 → 询问用户「恢复 / 丢弃」。v0.9.9: 从页内固定横幅改为 Side Panel
+  // 内提示(位于「另存为」上方),页面不再遗留扩展交互 UI。content-script 仅负责检测 + 执行恢复/丢弃;
   // 恢复=套用草稿正文(进入未保存态);丢弃=标记快照已导出(清草稿位,页面保持磁盘基线)。
+  // 展示与按钮交互交给 Side Panel(消息 draft-restore-prompt / draft-restore / draft-discard)。
   function showDraftRestoreBanner() {
-    // content script 虽然常驻，但 Side Panel 关闭时页面必须完全无扩展交互 UI。
+    // content script 常驻,但 Side Panel 关闭时不应展示提示 → 仅在已激活(面板打开)且有待处理草稿时广播。
     if (!_activated || !_pendingDraft) return;
-    if (document.getElementById("hg-draft-banner")) return;
-    const bar = document.createElement("div");
-    bar.id = "hg-draft-banner";
-    bar.className = "hg-draft-banner";
-    bar.innerHTML = '<span class="hg-draft-msg"></span>'
-      + '<button type="button" class="hg-draft-restore"></button>'
-      + '<button type="button" class="hg-draft-discard"></button>';
-    bar.querySelector(".hg-draft-msg").textContent = t("draft.unsavedPrompt");
-    const bRestore = bar.querySelector(".hg-draft-restore");
-    const bDiscard = bar.querySelector(".hg-draft-discard");
-    bRestore.textContent = t("draft.restore");
-    bDiscard.textContent = t("draft.discard");
-    bRestore.addEventListener("click", () => {
-      if (_pendingDraft && _pendingDraft.html_content) {
-        applyRestoredArtifact(_pendingDraft.html_content); // 内部重建 body,横幅随之移除
-        _hasUnsavedLocalSnapshot = true;
-        broadcastUnsaved(true);
-        pushUndo(); // 让恢复后的内容可被撤销
-      }
-      const el = document.getElementById("hg-draft-banner"); if (el) el.remove();
-      _pendingDraft = null;
-    });
-    bDiscard.addEventListener("click", () => {
-      const done = () => { _hasUnsavedLocalSnapshot = false; broadcastUnsaved(false); };
-      if (_logicalDocumentId && Storage.markLatestArtifactVersionExported) {
-        Storage.markLatestArtifactVersionExported(_logicalDocumentId).then(done).catch(done);
-      } else done();
-      const el = document.getElementById("hg-draft-banner"); if (el) el.remove();
-      _pendingDraft = null;
-    });
-    document.body.appendChild(bar);
+    try { chrome.runtime.sendMessage({ type: "draft-restore-prompt", show: true }).catch(() => {}); } catch (e) {}
   }
 
   function isSha256(value) { return typeof value === "string" && /^sha256:[0-9a-f]{64}$/.test(value); }

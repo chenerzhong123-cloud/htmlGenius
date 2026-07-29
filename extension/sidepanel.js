@@ -71,6 +71,10 @@
   async function activateActiveTab(showDialog) {
     const tab = await getActiveTab();
     if (!tab || !tab.id) return;
+    // v0.9.9: 切 tab 前先隐藏草稿恢复提示,避免上一标签的草稿态残留到新标签;
+    //         新标签若有待恢复草稿,content-script 会在 activate 回调里重新广播显示。
+    const drp = document.getElementById("draft-restore-prompt");
+    if (drp) drp.hidden = true;
     // v0.8.1 顺序修复:先 activate → 连新 port → 最后断旧 port。
     // 旧顺序(先断旧 port)会让 content-script 的 onDisconnect→失活 异步晚到,误杀刚激活的状态
     // (激活确认窗被移除且不恢复 → 「点刷新按钮没反应」)。配合 content-script 的延迟失活双保险。
@@ -89,7 +93,11 @@
   function syncFileAccessHint(tab, csReady) {
     const el = document.getElementById("file-access-hint");
     if (!el) return;
-    const isFileUrl = !!(tab && tab.url && /^file:/i.test(tab.url));
+    // 「允许访问文件网址」关闭时,Chrome 会把 file:// 标签的 url 对扩展隐藏(tab.url 为 undefined)——
+    // 这正是「一开始就该展示引导」的情形。此前只认 /^file:/ 前缀,开关打开、url 可见后(刷新前 CS
+    // 仍未注入)才显示提示,时机反了。url 被隐藏(且页面已加载完成)视同 file:// 未开权限。
+    const urlHidden = !!(tab && tab.id != null && !tab.url && tab.status === "complete");
+    const isFileUrl = !!(tab && tab.url && /^file:/i.test(tab.url)) || urlHidden;
     el.hidden = !(isFileUrl && !csReady);
   }
   // #1: 心跳 —— 侧边栏在线时持续 ping 活动标签,content-script 超时未收到则自动失活(兜底)
@@ -159,6 +167,10 @@
       // v0.9.6: 草稿态同步 —— 有未提交快照时点亮保存按钮微标(保存后 content-script 会再广播 false)
       const d = document.getElementById("save-dot");
       if (d) d.hidden = !msg.unsaved;
+    } else if (msg.type === "draft-restore-prompt") {
+      // v0.9.9: 草稿恢复横幅迁入 Side Panel —— content-script 检测到待恢复草稿时广播显隐
+      const p = document.getElementById("draft-restore-prompt");
+      if (p) p.hidden = !msg.show;
     }
   });
 
@@ -381,7 +393,8 @@
     draft.querySelector(".draft-save").addEventListener("click", commitDraft);
     draft.querySelector(".draft-cancel").addEventListener("click", cancelDraft);
     ta.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitDraft(); }
+      // IME 组词(选字)中的回车只提交候选,不保存;再按一次回车(isComposing=false)才真正保存。
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); commitDraft(); }
       if (e.key === "Escape") { e.preventDefault(); cancelDraft(); }
     });
   }
@@ -426,7 +439,8 @@
     editor.querySelector(".reply-save").addEventListener("click", submit);
     editor.querySelector(".reply-cancel").addEventListener("click", () => editor.remove());
     ta.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+      // IME 组词(选字)中的回车只提交候选,不保存;再按一次回车(isComposing=false)才真正保存。
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); }
       if (e.key === "Escape") { e.preventDefault(); editor.remove(); }
     });
   }
@@ -458,7 +472,8 @@
     editor.querySelector(".reply-save").addEventListener("click", submit);
     editor.querySelector(".reply-cancel").addEventListener("click", () => editor.remove());
     ta.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+      // IME 组词(选字)中的回车只提交候选,不保存;再按一次回车(isComposing=false)才真正保存。
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); submit(); }
       if (e.key === "Escape") { e.preventDefault(); editor.remove(); }
     });
   }
@@ -1655,6 +1670,11 @@
       if (r.committed) setSaveDot(false);
     }
   });
+  // v0.9.9: 草稿恢复横幅迁入 Side Panel —— 恢复/丢弃回传 content-script 执行(逻辑同原页内横幅按钮)
+  const draftRestoreBtn = document.getElementById("draft-restore-btn");
+  const draftDiscardBtn = document.getElementById("draft-discard-btn");
+  if (draftRestoreBtn) draftRestoreBtn.addEventListener("click", () => { sendToContent({ type: "draft-restore" }); });
+  if (draftDiscardBtn) draftDiscardBtn.addEventListener("click", () => { sendToContent({ type: "draft-discard" }); });
   // v0.8 #4/#1: 面板内 swatch 浮层(替代原生 color input,杜绝系统选色器右溢出;浮层挂整个
   //   .edit-colors 行,8 列 × 2 行 = 16 色整齐无空位)。
   // v0.9.1:文字色与高亮色均取自单一来源 palette.js(与 content-script 工具栏同一份取值,杜绝漂移)。
@@ -2021,6 +2041,13 @@
     const fbClose = document.getElementById("feedback-close");
     if (fbClose) fbClose.addEventListener("click", closeFeedbackSheet);
   }
+  // v0.9.9 前往官网(header 主页按钮 → 新标签打开;URL 取 manifest.homepage_url,与商店/仓库同源)
+  const websiteBtn = document.getElementById("website-btn");
+  if (websiteBtn) websiteBtn.addEventListener("click", () => {
+    const url = (chrome.runtime.getManifest().homepage_url) || "https://www.deuce.monster/htmlgenius/";
+    try { chrome.tabs.create({ url }).catch(() => { window.open(url, "_blank"); }); }
+    catch (e) { window.open(url, "_blank"); }
+  });
 
   // 点击外部关三个浮层
   document.addEventListener("click", (e) => {

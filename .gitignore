@@ -9,8 +9,6 @@ node_modules/
 extension.pem
 # pack.sh 产物(商店上传 zip),不入库
 dist/
-# Google OAuth 客户端密钥(敏感,严禁提交)
-docs/client_secret_*.json
 
 # htmlGenius 本机 bridge 运行时产物(候选/任务/snapshot/版本计数,本地测试生成,不入库)
 samples/.htmlgenius-bridge/
@@ -25,28 +23,14 @@ verification-report*.json
 annotations.db-shm
 annotations.db-wal
 
-# v0.9.1 仓库瘦身:停止跟踪的过时文档与素材(本地保留,不再上传 GitHub)
-docs/2026-06-25-*.md
-docs/2026-06-25-*.html
-docs/2026-06-27-*.md
-docs/2026-06-30-*.md
-docs/2026-07-05-v0.4-plugin-collab-*.md
-docs/2026-07-06-*.md
-docs/2026-07-08-*.md
-docs/2026-07-17-landing-visual-directions-spec.md
-docs/CWS_SUBMISSION_TODO.md
-docs/logo-exploration-*.html
-docs/screenshots-v0.7.2/
-docs/ui-mockups-v0.5/
-docs/ui-mockups-v0.6/
-docs/ui-mockups-v0.7.1/
-docs/ui-mockups-v0.8/
-docs/style-experiments-2026-07/
-docs/store-assets/
 extension/fonts/cormorant-*.woff2
 
-# agents 说明页源稿(仅供另一个 Agent 本地生成页面用,不上传)
-docs/agents-page-source.md
+# v0.9.9:docs/ 整体不再跟踪(审计报告/spec/计划/密钥等本地工作文档,只留本地;
+# 此前按文件名逐条忽略的方式作废,统一为整目录)
+docs/
 
 # 官网小红书二维码原始截图素材(工作文件,真正用的是 extension/icons/feedback-qrcode.jpeg)
 landing/qrcode/
+
+# 社媒封面与营销素材（本地工作产物，不上传 GitHub）
+assets/social/

@@ -2,9 +2,12 @@
 <meta charset="UTF-8"><link rel="stylesheet" href="sidepanel.css">
 </head><body>
 <div id="header">
-  <span class="brand">htmlGenius</span>
-  <div class="header-right">
+  <!-- v0.9.9:去掉顶部品牌文案,图标组整体左对齐;报错反馈旁新增「前往官网」入口 -->
+  <div class="header-actions">
     <button id="feedback-btn" class="feedback-btn" data-i18n-title="feedback.title" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="feedback-sheet"><svg viewBox="0 0 1024 1024" fill="currentColor" aria-hidden="true"><path d="M128 160.86c-8.837 0-16 7.293-16 16.288v556.034c0 8.995 7.163 16.287 16 16.287h277.555l94.486 108.203c7.934 7.329 18.047 6.723 23.918 0l94.486-108.203H896c8.837 0 16-7.292 16-16.287V177.148c0-8.995-7.163-16.287-16-16.287H128z m0-48.86h768c35.346 0 64 29.168 64 65.148v556.034c0 35.98-28.654 65.148-64 65.148H640l-80.166 91.803c-23.483 26.892-63.935 29.314-90.353 5.41a64.586 64.586 0 0 1-5.315-5.41L384 798.33H128c-35.346 0-64-29.168-64-65.148V177.148C64 141.168 92.654 112 128 112z m342.207 130h83.336c10.055 0 18.206 7.163 18.206 16 0 0.441-0.021 0.882-0.063 1.321l-31.118 330c-0.782 8.296-8.672 14.679-18.144 14.679h-21.099c-9.471 0-17.361-6.383-18.143-14.679l-31.119-330c-0.83-8.806 6.62-16.537 16.64-17.266 0.5-0.037 1.002-0.055 1.504-0.055z m32.999 386h18.206c10.055 0 18.206 7.163 18.206 16v38c0 8.837-8.151 16-18.206 16h-18.206C493.15 698 485 690.837 485 682v-38c0-8.837 8.151-16 18.206-16z"/></svg></button>
+    <button id="website-btn" class="website-btn" data-i18n-title="header.website" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>
+    </button>
     <button id="theme-btn" class="theme-btn" data-i18n-title="theme.title"></button>
     <button id="lang-btn" class="lang-btn" data-i18n-title="lang.title">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg><span id="lang-code">EN</span>
@@ -108,6 +111,15 @@
   <div class="reload-hint" data-i18n="reloadHint">若评论或编辑长时间无响应,刷新当前页面即可恢复</div>
   <button id="adv-mode-btn" class="adv-mode-btn" data-i18n="adv.enter" hidden>切换高级模式</button>
   </div><!-- /.edit-scroll -->
+  <!-- v0.9.9: 未保存草稿恢复提示(原页内 #hg-draft-banner 横幅迁入 Side Panel,位于「另存为」上方)。
+       content-script 检测到待恢复草稿时广播 draft-restore-prompt 显示;恢复/丢弃回传执行。 -->
+  <div id="draft-restore-prompt" class="draft-restore-prompt" hidden>
+    <span class="draft-restore-msg" data-i18n="draft.unsavedPrompt">检测到未保存的修改,是否恢复?</span>
+    <div class="draft-restore-acts">
+      <button id="draft-restore-btn" class="draft-restore-btn" type="button" data-i18n="draft.restore">恢复</button>
+      <button id="draft-discard-btn" class="draft-discard-btn" type="button" data-i18n="draft.discard">丢弃</button>
+    </div>
+  </div>
   <!-- 底部动作栏：保存为主按钮，还原为次按钮。 -->
   <div id="edit-actions-bar" class="edit-actions-bar" hidden>
     <button id="act-reset" class="conn-secondary edit-bar-btn" type="button" data-i18n-title="tool.reset">
