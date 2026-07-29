@@ -23,6 +23,17 @@
 - 版本号：扩展看 `extension/manifest.json`（0.x.x）；bridge 看 `bridge/package.json`（自 1.0.0 起独立编号，发 npm 时单独递增）。
 - `docs/` 已 gitignore：审计报告 / spec / 计划等本地工作文档不入库；README / DEVELOPMENT 只链根目录下的文档，docs/ 内容一律以「本地工作文档，不入库」说明，不留断链。
 
+## Bridge 版本升级：必须同步所有引用点
+
+升 `bridge/package.json` 版本（发 npm）时，**所有写死/引用 bridge 版本的地方必须一起改到同版本**，否则用户按旧版本号 `npx` 安装会拿到旧包、或指向不存在的版本。已知引用点（升级时逐一核对）：
+
+- `extension/background.js`：`TARGET_BRIDGE_VERSION = "..."`（bootstrap 安装命令、setup prompt 都从此派生）+ 附近注释里的 `@htmlgenius/bridge@<ver>`。
+- `landing/demo-2026-07/shared.js`：`var bridgeVersion = '...'`（官网 setup prompt / 命令由此派生）。
+- `landing/demo-2026-07/setup.html`：写死的 `npx --yes @htmlgenius/bridge@<ver> doctor/setup/uninstall`（含 `data-copy` 属性，多处）。
+- 全仓核对：`grep -rn "@htmlgenius/bridge@\|TARGET_BRIDGE_VERSION\|bridgeVersion" extension/ landing/`。
+
+顺序：**先 `npm publish` 确认新版本上 registry，再提交/部署引用了新版本号的改动**（否则安装命令会指向不存在的版本）。bridge 走 2FA 时发布需 OTP。
+
 ## 安全审计修复批次（2026-07-29，v0.9.10）
 
 本批次按 `docs/AUDIT-2026-07-28.md`（v1）与 `docs/AUDIT-2026-07-28-v2.md`（v2）修复。完成范围与**有意排除**项（用户决定）记录如下，避免后续重复劳动或误以为未做：

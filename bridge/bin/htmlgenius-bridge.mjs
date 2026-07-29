@@ -199,22 +199,22 @@ function preflight(flags) {
   return {};
 }
 
-// 受管目录自装运行时依赖(npx 发行态专用):用 `npm ci` 按 lockfile 安装——锁版本 + integrity,
-// 不现场解析传递依赖、不装 dev(R-5 供应链加固:杜绝 @github/copilot-sdk 浮动 ^ 依赖与 koffi 等 install-script
-// 传递包在用户机 setup 时被劫持导致 RCE)。lockfile 随包分发(package.json files 含 package-lock.json)、
-// 并由 materializeBridge 一并物化到受管目录,故此处可强制 ci;保留默认 audit(不再传 --no-audit)。
+// 受管目录自装运行时依赖(npx 发行态专用):用 `npm install` 装运行时依赖(--omit=dev 不装 dev)。
+// 注:R-5 曾尝试 `npm ci` + 随包 lockfile 做供应链加固,但 npm 发布【默认不把 package-lock.json 打进 tarball】
+// (即便写入 files)→ npx 安装的受管目录无 lockfile → npm ci 必失败,会打断新用户 setup。故暂回退 npm install;
+// R-5 的锁定方案待改用"重命名 lockfile 随包分发 + 物化时还原为 package-lock.json"或 vendor 依赖后再上。
 // 需要本机有 npm 与网络(装 bridge 本身就需要联网取包)。失败返回通用文案——npm 原始 stderr 可能含绝对路径,
 // 仅原样写到用户自己的 Terminal(stderr),绝不进入 --json 输出(§3.2 成功/错误 JSON 均不含绝对路径)。
 function installManagedDeps(targetDir) {
   try {
-    const res = spawnSync("npm", ["ci", "--omit=dev", "--no-fund", "--loglevel=error"], {
+    const res = spawnSync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund", "--loglevel=error"], {
       cwd: targetDir, encoding: "utf8", timeout: 300000
     });
     if (res.error) return { ok: false, message: "failed to start npm to install bridge dependencies" };
     if (res.status !== 0) {
       const detail = String(res.stderr || res.stdout || "").trim();
-      if (detail) { try { process.stderr.write("[htmlgenius-bridge] npm ci detail:\n" + detail.slice(0, 2000) + "\n"); } catch (_) {} }
-      return { ok: false, message: "npm ci of bridge dependencies failed (network or npm required)" };
+      if (detail) { try { process.stderr.write("[htmlgenius-bridge] npm install detail:\n" + detail.slice(0, 2000) + "\n"); } catch (_) {} }
+      return { ok: false, message: "npm install of bridge dependencies failed (network or npm required)" };
     }
     return { ok: true };
   } catch (_) {
