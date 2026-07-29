@@ -32,7 +32,8 @@ function truncate(s) {
 
 // 最小环境变量白名单:claude 需要 HOME(~/.claude 登录态)与 PATH(找到 claude/node);
 // 其余一律不透传 —— extension 的内容永远进不了子进程 env。
-function sanitizedEnv() {
+// BR-7:导出供 provider-probe 等只读探测路径复用,保持与 handoff 执行路径一致的 env 边界。
+export function sanitizedEnv() {
   const keep = ["PATH", "HOME", "USER", "SHELL", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TZ"];
   const env = {};
   for (const k of keep) { if (process.env[k] != null) env[k] = process.env[k]; }

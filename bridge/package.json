@@ -20,7 +20,8 @@
   "files": [
     "bin/",
     "*.mjs",
-    "vendor/"
+    "vendor/",
+    "package-lock.json"
   ],
   "publishConfig": {
     "access": "public"

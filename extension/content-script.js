@@ -35,7 +35,8 @@
 
   // applyRemoteChange:把 delta 应用到 window.__hgAnnotations(纯 Sync.applyDelta)
   // 再调 loadAnnotations() 重渲染 overlay(读 Storage 全量 + anchor)。
-  // 测试钩子:window.__hgApplyRemoteChange。
+  // R-4(v0.9.9):不再挂 window.__hgApplyRemoteChange —— 页面脚本曾可借 window 直调伪造调用;
+  // 本函数仍由 SSE 回调内部使用,只是不暴露给页面。
   function applyRemoteChange(delta) {
     if (!window.__hgAnnotations) window.__hgAnnotations = [];
     if (window.Sync && typeof window.Sync.applyDelta === "function") {
@@ -43,7 +44,6 @@
     }
     loadAnnotations();
   }
-  window.__hgApplyRemoteChange = applyRemoteChange;
 
   // startSync:解析 docId 后开 EventSource,回调映射到 applyRemoteChange。
   function startSync() {
@@ -63,6 +63,10 @@
           try {
             chrome.runtime.sendMessage({ type: "presence", users }).catch(() => {});
           } catch (e) { /* 非关键路径 */ }
+        },
+        // R-12:session 失效(SSE 取票 401/403)→ 通知 sidepanel 弹「请重新登录」可见提示
+        onFatal: () => {
+          try { chrome.runtime.sendMessage({ type: "sync-fatal", reason: "auth" }).catch(() => {}); } catch (e) { /* 非关键 */ }
         },
       });
     });
@@ -1230,7 +1234,9 @@
         const r = d.getBoundingClientRect();
         if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
           d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), 800);
-          try { chrome.runtime.sendMessage({ type: "annotation-clicked", id: d.dataset.annId }); } catch (er) {}
+          // CORE-7:sendMessage 返回 Promise,面板关闭时 reject;外层 try/catch 只抓同步抛出,
+          // 补 .catch 吞掉 rejection,避免控制台刷未处理 promise rejection(本文件多处已用此范式)。
+          try { chrome.runtime.sendMessage({ type: "annotation-clicked", id: d.dataset.annId }).catch(() => {}); } catch (er) {}
           return;
         }
       }
@@ -1455,8 +1461,9 @@
     }
     return { ok: true, action: "navigate_required" };
   }
-  // 浏览器手工/扩展集成测试钩子；不暴露任何文件写入能力。
-  window.__hgArtifactVersionTest = { artifactStateSnapshot, getArtifactState, applyRestoredArtifact, handleArtifactUpdateReady };
+  // R-4(v0.9.9):移除 window.__hgArtifactVersionTest 测试钩子 —— 页面脚本曾可直调
+  // handleArtifactUpdateReady 并伪造 sender(绕过消息入口的 sender.id 校验)→ 持久 DoS / 跨文档混淆。
+  // 这些函数仍由消息系统入口(chrome.runtime.onMessage,sender 校验 intact)正常调度,只是不再暴露给页面。
 
   // === #5: i18n —— 读本地存储的语言偏好(覆盖浏览器检测),并监听 sidepanel 的切换实时重建工具栏 ===
   if (window.HG_I18N) {

@@ -93,9 +93,9 @@
   function syncFileAccessHint(tab, csReady) {
     const el = document.getElementById("file-access-hint");
     if (!el) return;
-    // 「允许访问文件网址」关闭时,Chrome 会把 file:// 标签的 url 对扩展隐藏(tab.url 为 undefined)——
-    // 这正是「一开始就该展示引导」的情形。此前只认 /^file:/ 前缀,开关打开、url 可见后(刷新前 CS
-    // 仍未注入)才显示提示,时机反了。url 被隐藏(且页面已加载完成)视同 file:// 未开权限。
+    // 方案 A(v0.9.9):manifest 已加 "tabs" 权限 → chrome:// 新标签页等页面的 tab.url 现在可读,
+    // 不再因 url 隐藏被误判成 file://(修「新标签页误显 hint」)。file:// 关「允许访问文件网址」时
+    // Chrome 仍可能隐藏其 url → 兜底:加载完成却读不到 url 视同 file:// 未开权限,显示引导。
     const urlHidden = !!(tab && tab.id != null && !tab.url && tab.status === "complete");
     const isFileUrl = !!(tab && tab.url && /^file:/i.test(tab.url)) || urlHidden;
     el.hidden = !(isFileUrl && !csReady);
@@ -146,7 +146,11 @@
     } else if (msg.type === "annotation-clicked") {
       // #4: 页面点高亮 → 切到评论 tab + 滚到卡片 + 聚焦回复输入
       switchTab("comment");
-      const card = document.querySelector('.card[data-id="' + msg.id + '"]');
+      // CORE-5:msg.id 来自消息,不拼进属性选择器(防 CSS 注入/转义歧义)→ 遍历卡片比对 dataset.id
+      const _id = String(msg.id);
+      const _cards = document.querySelectorAll(".card");
+      let card = null;
+      for (const c of _cards) { if (String(c.dataset.id) === _id) { card = c; break; } }
       const ann = (_lastItems || []).find((a) => a.id === msg.id);
       if (card && ann) {
         card.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -171,6 +175,9 @@
       // v0.9.9: 草稿恢复横幅迁入 Side Panel —— content-script 检测到待恢复草稿时广播显隐
       const p = document.getElementById("draft-restore-prompt");
       if (p) p.hidden = !msg.show;
+    } else if (msg.type === "sync-fatal") {
+      // R-12:SSE session 失效(取票 401/403,sync.js 已停止重连)→ 长显提示用户重新登录
+      showToast(t("toast.sessionExpired"), 6000);
     }
   });
 
@@ -494,13 +501,13 @@
     conf.querySelector(".del-cancel").addEventListener("click", () => conf.remove());
   }
 
-  function showToast(msg) {
+  function showToast(msg, duration) {
     let tl = document.querySelector(".toast");
     if (!tl) { tl = document.createElement("div"); tl.className = "toast"; document.body.appendChild(tl); }
     tl.textContent = msg;
     tl.classList.add("show");
     clearTimeout(_toastTimer);
-    _toastTimer = setTimeout(() => tl.classList.remove("show"), 2000);
+    _toastTimer = setTimeout(() => tl.classList.remove("show"), duration || 2000);
   }
   // v0.9.7 按钮"已生效"反馈:文案短暂切到成功提示 + 成功色,让用户明确看到这一步成功了(复制/检查等)
   function flashBtn(btn, text, opts) {
@@ -520,8 +527,21 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
   function linkify(text) {
-    const safe = esc(text);
-    return safe.replace(/https?:\/\/[^\s<]+/g, (u) => '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>');
+    // CORE-6:从原文(esc 前)按 URL 切片,URL 段经 new URL() 白名单只放行 http(s);
+    // 非 URL 段统一 esc 显示,href 属性单独 esc。避免「先 esc 再匹配」时 &amp;/&copy;
+    // 等 HTML 实体在 href 中被浏览器二次解码而损坏链接。
+    const raw = String(text == null ? "" : text);
+    return raw.split(/(https?:\/\/[^\s<"'`]*)/).map((piece) => {
+      if (/^https?:\/\//.test(piece)) {
+        try {
+          const u = new URL(piece);
+          if (u.protocol === "http:" || u.protocol === "https:") {
+            return '<a href="' + esc(piece) + '" target="_blank" rel="noopener noreferrer">' + esc(piece) + '</a>';
+          }
+        } catch (e) { /* 非法 URL → 当普通文本 */ }
+      }
+      return esc(piece);
+    }).join("");
   }
 
   // === v0.8.1 创建编辑任务(状态机 spec §2/§4.1)===
@@ -762,6 +782,8 @@
   async function syncRunStateFromBackground(tabId) {
     if (!tabId) return;
     const resp = await chrome.runtime.sendMessage({ type: "bridge-query-active-run", tab_id: tabId }).catch(() => null);
+    // CORE-4(v0.9.9):await 期间用户可能已切 tab —— 不再把 A tab 的运行态错写到 B tab(镜像 refreshAnnotations 的 stillActive 守卫)
+    if (currentTabId !== tabId) return;
     if (resp && resp.active) {
       _contractRunning = true;
       if (resp.run_id) _contractRunId = resp.run_id;

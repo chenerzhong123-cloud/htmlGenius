@@ -24,11 +24,17 @@ _USERS: "dict[tuple[str, str], dict[str, dict]]" = defaultdict(dict)
 
 
 def _gc(key: "tuple[str, str]") -> None:
-    """清理 last_seen 落后超过 _TTL 秒的 user(now - last_seen > _TTL)。"""
+    """清理 last_seen 落后超过 _TTL 秒的 user(now - last_seen > _TTL)。
+
+    BE-4: 清完若房间已空就删 key —— 否则 _USERS 会随历史 (team,doc) 无界增长
+    (每个打开过的文档留一个空 dict)。del 在 defaultdict 上安全,访问时自重建。
+    """
     now = time.time()
     stale = [u for u, v in _USERS[key].items() if now - v["last_seen"] > _TTL]
     for uid in stale:
         _USERS[key].pop(uid, None)
+    if not _USERS[key]:
+        del _USERS[key]
 
 
 async def update(team_id: str, doc: str, user: dict, op: str) -> None:
@@ -43,8 +49,14 @@ async def update(team_id: str, doc: str, user: dict, op: str) -> None:
     _gc(key)
     uid = user.get("id")
     if op == "bye":
-        _USERS[key].pop(uid, None)
+        # _gc 可能已把空房间删掉(defaultdict 重建空 dict 反而造成泄漏),
+        # 故 bye 仅在房间仍存在时 pop。
+        if key in _USERS:
+            _USERS[key].pop(uid, None)
     else:  # join | heartbeat
         _USERS[key][uid] = {"user": user, "last_seen": time.time()}
-    users = [v["user"] for v in _USERS[key].values()]
+    users = [v["user"] for v in _USERS[key].values()] if key in _USERS else []
+    # BE-4: 尾部再清一次空房间(join/heartbeat 不会变空,bye 可能清空)。
+    if key in _USERS and not _USERS[key]:
+        del _USERS[key]
     await rooms.broadcast(team_id, doc, "presence", {"users": users})

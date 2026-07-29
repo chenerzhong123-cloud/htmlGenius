@@ -76,7 +76,7 @@ uv run uvicorn server.app:app --port 8000 --reload
 
 鉴权：扩展走 `chrome.identity.launchWebAuthFlow` → `/auth/lark/login` → 飞书授权 → `/auth/lark/callback` 换 session token；后续请求带 `Authorization: Bearer <session_token>`。批注 author = 飞书 `open_id`（后端 session 注入，硬身份）。批注写后经 SSE 广播 `annotation:created` / `annotation:updated` / `annotation:deleted`；作者可编辑（`PATCH /api/annotations/:id`，跨团队/非作者 403）、删除（级联子树）自己的批注。所有数据自存自管（SQLite），不用 SaaS。
 
-完整部署（Nginx SSE 关 buffering、HTTP/2、env 文件、manifest `host_permissions`、飞书后台重定向 URI、稳定 URL 约束、集成验收矩阵、常见坑）：见 [`docs/2026-07-05-v0.4-deploy.md`](docs/2026-07-05-v0.4-deploy.md)（含 v0.5 补充）。
+完整部署（Nginx SSE 关 buffering、HTTP/2、env 文件、manifest `host_permissions`、飞书后台重定向 URI、稳定 URL 约束、集成验收矩阵、常见坑）：详见本地 `docs/2026-07-05-v0.4-deploy.md`（含 v0.5 补充；该文档为本地工作文档，已 `.gitignore`，不入库）。
 
 ### 稳定 URL 约束（跨版本 re-anchor 的前提）
 
@@ -115,13 +115,13 @@ uv run uvicorn server.app:app --port 8000 --reload
 | v0.5 | 已归档 | 已归档 |
 | v0.5 验收 | — | 已归档 |
 | v0.5.1 / v0.5.2 | — | — |
-| v0.6 | [`docs/2026-07-15-v0.6-element-editing-design.md`](docs/2026-07-15-v0.6-element-editing-design.md) | — |
-| v0.6.1 | [`docs/2026-07-18-v0.6.1-change-contract-spec.md`](docs/2026-07-18-v0.6.1-change-contract-spec.md) | — |
-| v0.6.2 | — | [`docs/2026-07-18-v0.6.2-artifact-version-reconciliation-plan.md`](docs/2026-07-18-v0.6.2-artifact-version-reconciliation-plan.md) |
-| v0.7 | [`docs/2026-07-18-v0.7-codex-local-bridge-spec.md`](docs/2026-07-18-v0.7-codex-local-bridge-spec.md) | — |
-| v0.7.1 | [`docs/2026-07-19-v0.7.1-claude-code-handoff-spec.md`](docs/2026-07-19-v0.7.1-claude-code-handoff-spec.md) | — |
-| v0.7.2（选择流） | [`docs/2026-07-20-v0.7.1-comment-task-selection-ui-spec.md`](docs/2026-07-20-v0.7.1-comment-task-selection-ui-spec.md) | — |
-| Night Pack A（候选闭环） | [`docs/2026-07-20-night-pack-a-candidate-closed-loop-spec.md`](docs/2026-07-20-night-pack-a-candidate-closed-loop-spec.md) | [`docs/implementation-notes/2026-07-20-night-pack-a-preflight.md`](docs/implementation-notes/2026-07-20-night-pack-a-preflight.md) |
-| v0.4 部署 | — | [`docs/2026-07-05-v0.4-deploy.md`](docs/2026-07-05-v0.4-deploy.md) |
+| v0.6 | 本地 `docs/`（不入库） | — |
+| v0.6.1 | 本地 `docs/`（不入库） | — |
+| v0.6.2 | — | 本地 `docs/`（不入库） |
+| v0.7 | 本地 `docs/`（不入库） | — |
+| v0.7.1 | 本地 `docs/`（不入库） | — |
+| v0.7.2（选择流） | 本地 `docs/`（不入库） | — |
+| Night Pack A（候选闭环） | 本地 `docs/`（不入库） | 本地 `docs/`（不入库） |
+| v0.4 部署 | — | 本地 `docs/`（不入库） |
 
-> 路线 ↔ 代码的**唯一事实层**：[`docs/CURRENT_IMPLEMENTATION_STATE.md`](docs/CURRENT_IMPLEMENTATION_STATE.md)（每次施工后整体重写）。本机 Agent 桥安装/登录/诊断：[`docs/LOCAL_BRIDGE.md`](docs/LOCAL_BRIDGE.md)。
+> v0.6 起的各版本设计 / 实现计划均为**本地工作文档**，存于本地 `docs/`（已 `.gitignore`，不入库），需要时本机查阅。路线 ↔ 代码的**唯一事实层**为本地 `docs/CURRENT_IMPLEMENTATION_STATE.md`（每次施工后整体重写，不入库）。本机 Agent 桥安装/登录/诊断：[`LOCAL_BRIDGE.md`](LOCAL_BRIDGE.md)。

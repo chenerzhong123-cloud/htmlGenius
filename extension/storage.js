@@ -69,6 +69,26 @@ async function dbPut(store, value) {
   });
 }
 
+// SUP-7:单事务原子读改写 —— 把 get + 合并 + put 放进同一个 readwrite 事务,
+// 避免跨事务「读-改-写」在并发更新下 last-write-wins 丢字段。
+// mutator(current) 返回要写回的对象;返回 undefined 表示不写(记录不存在等),此时 resolve(null)。
+async function dbUpdate(store, key, mutator) {
+  const db = await openDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, "readwrite");
+    const os = tx.objectStore(store);
+    const req = os.get(key);
+    req.onsuccess = () => {
+      const next = mutator(req.result || null);
+      if (next === undefined || next === null) { tx.oncomplete = () => res(null); return; }
+      os.put(next);
+      tx.oncomplete = () => res(next);
+    };
+    req.onerror = () => rej(req.error);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+
 async function dbGet(store, key) {
   const db = await openDB();
   return new Promise((res, rej) => {
@@ -170,11 +190,13 @@ const LocalStore = {
   },
   async updateAnnotation(id, bodyPatch) {
     // 按 id 读出 → 合并 body → 写回(保留 id / parent_id 回复链 / author / selector)
-    const ann = await dbGet("annotations", id);
-    if (!ann) return false;
-    ann.body = Object.assign({}, ann.body || {}, bodyPatch);
-    await dbPut("annotations", ann);
-    return true;
+    // SUP-7:读+合并+写放进单事务,避免并发更新互相覆盖。
+    const result = await dbUpdate("annotations", id, (ann) => {
+      if (!ann) return undefined;
+      ann.body = Object.assign({}, ann.body || {}, bodyPatch);
+      return ann;
+    });
+    return result !== null && result !== undefined;
   },
   async saveVersion(docId, html, baseHash) {
     // base_hash:本次编辑所基于的「原始文件」正文哈希;重开时用它判断磁盘文件是否被外部改动过
@@ -225,9 +247,11 @@ const LocalStore = {
   async markLatestArtifactVersionExported(logicalDocumentId) {
     const latest = await this.getLatestArtifactVersion(logicalDocumentId, "local_edit");
     if (!latest) return null;
-    latest.exported_at = new Date().toISOString();
-    await dbPut("artifact_versions", latest);
-    return latest;
+    // SUP-7:对该版本记录的读+标 exported_at+写放进单事务,避免覆盖并发写入的其他字段。
+    return dbUpdate("artifact_versions", latest.id, (rec) => {
+      if (!rec) return undefined;
+      return Object.assign({}, rec, { exported_at: new Date().toISOString() });
+    });
   },
   // === v0.7.1 bridge session / run(本地,扩展 IndexedDB;不进 RemoteStore)===
   // 仅按 logical_document_id + provider 读写会话;不提供按 session_id 浏览/导入(§5.1)。
@@ -246,16 +270,22 @@ const LocalStore = {
     const runs = await dbGetAllByIndex("bridge_runs", "tab_id", tabId);
     return runs.find((r) => r.status === "starting" || r.status === "running") || null;
   },
+  // CORE-1:SW 重启对账用 —— 所有未终态(starting/running)的 run。status 索引已建(见 onupgradeneeded)。
+  async listActiveBridgeRuns() {
+    const starting = await dbGetAllByIndex("bridge_runs", "status", "starting");
+    const running = await dbGetAllByIndex("bridge_runs", "status", "running");
+    return (starting || []).concat(running || []);
+  },
   async saveBridgeRun(record) {
     const rec = Object.assign({}, record, { created_at: record.created_at || new Date().toISOString() });
     return dbPut("bridge_runs", rec);
   },
   async updateBridgeRun(runId, patch) {
-    const run = await dbGet("bridge_runs", runId);
-    if (!run) return null;
-    const updated = Object.assign({}, run, patch);
-    await dbPut("bridge_runs", updated);
-    return updated;
+    // SUP-7:读+合并+写放进单事务,避免并发 run 状态更新互相覆盖。
+    return dbUpdate("bridge_runs", runId, (run) => {
+      if (!run) return undefined;
+      return Object.assign({}, run, patch);
+    });
   },
   // Night Pack A §6:最近一次 completed 的 candidate run(只读 run metadata;不含 prompt/comment/candidate HTML)
   async getLatestCompletedCandidateRun(logicalDocumentId) {
@@ -274,21 +304,31 @@ const LocalStore = {
   },
   async getBridgePlan(planId) { return dbGet("bridge_plans", planId); },
   async updateBridgePlan(planId, patch) {
-    const plan = await dbGet("bridge_plans", planId);
-    if (!plan) return null;
-    const updated = Object.assign({}, plan, patch, { updated_at: new Date().toISOString() });
-    await dbPut("bridge_plans", updated);
-    return updated;
+    // SUP-7:读+合并+写放进单事务,避免并发 plan 更新互相覆盖。
+    return dbUpdate("bridge_plans", planId, (plan) => {
+      if (!plan) return undefined;
+      return Object.assign({}, plan, patch, { updated_at: new Date().toISOString() });
+    });
   },
   async markDraftPlansStaleForDocument(logicalDocumentId, exceptPlanId) {
     const plans = await dbGetAllByIndex("bridge_plans", "logical_document_id", logicalDocumentId);
     const updated = [];
-    for (const p of (plans || [])) {
-      if (p && p.status === "draft" && p.plan_id !== exceptPlanId) {
-        const u = Object.assign({}, p, { status: "stale", updated_at: new Date().toISOString() });
-        await dbPut("bridge_plans", u); updated.push(u);
-      }
-    }
+    // SUP-8:所有 draft→stale 写入放进同一个 readwrite 事务,中途抛错则整体回滚(全有或全无),
+    // 避免原先循环里每次 dbPut 各开事务导致「部分 stale、部分 draft」的不一致。
+    const db = await openDB();
+    await new Promise((res, rej) => {
+      const tx = db.transaction("bridge_plans", "readwrite");
+      const os = tx.objectStore("bridge_plans");
+      (plans || []).forEach((p) => {
+        if (p && p.status === "draft" && p.plan_id !== exceptPlanId) {
+          const u = Object.assign({}, p, { status: "stale", updated_at: new Date().toISOString() });
+          updated.push(u);
+          os.put(u);
+        }
+      });
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
     return updated;
   },
 };
@@ -326,6 +366,7 @@ const Storage = {
   saveBridgeSession(record) { return LocalStore.saveBridgeSession(record); },
   getBridgeRun(runId) { return LocalStore.getBridgeRun(runId); },
   getActiveBridgeRunForTab(tabId) { return LocalStore.getActiveBridgeRunForTab(tabId); },
+  listActiveBridgeRuns() { return LocalStore.listActiveBridgeRuns(); },
   saveBridgeRun(record) { return LocalStore.saveBridgeRun(record); },
   updateBridgeRun(runId, patch) { return LocalStore.updateBridgeRun(runId, patch); },
   // Night Pack A §6:最近一次 completed candidate run。facade 之前漏挂这一行 → background.js:55 报

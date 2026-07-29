@@ -33,6 +33,13 @@ const PROVIDER_DIR_NAME = 'copilot';
 
 // copilot workspace 目录:.htmlgenius-bridge/copilot/<logicalId>/(与 claude / codex 的 provider 子目录并列)
 export function copilotWorkspacePathFor({ sourcePath, logicalDocumentId }) {
+  // BR-1:与 claude 的 workspacePathFor 同款白名单校验,防 logical_document_id 路径穿越
+  // (path.join 会归一化 "..";调用处 try/catch 会以 BAD_LOGICAL_ID 上报 failed)。
+  if (typeof logicalDocumentId !== 'string' || !/^[A-Za-z0-9_:-]{1,128}$/.test(logicalDocumentId)) {
+    const e = new Error('logical_document_id must match [A-Za-z0-9_:-]{1,128}');
+    e.code = 'BAD_LOGICAL_ID';
+    throw e;
+  }
   return path.join(path.dirname(sourcePath), BRIDGE_DIR_NAME, PROVIDER_DIR_NAME, logicalDocumentId);
 }
 

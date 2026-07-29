@@ -4,7 +4,7 @@ def test_v02_edit_creates_version(server, page):
     page.wait_for_function("window.__frame !== undefined", timeout=10000)
     page.wait_for_function("window.__vm !== undefined", timeout=5000)
     page.evaluate(
-        "async () => { await fetch('/api/documents', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({document_id:'01_token'})}); }"
+        "async () => { await fetch('/api/documents', {method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('hg_session')},body:JSON.stringify({document_id:'01_token'})}); }"
     )
     page.evaluate(
         """() => {

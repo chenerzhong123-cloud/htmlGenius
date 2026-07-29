@@ -45,17 +45,18 @@
   - **GitHub Copilot**：本机已登录 Copilot（CLI 可选，缺失时走 SDK 自带 runtime）。
 - 组件只在你机器上运行各 Agent 的官方程序、只用你的登录态，**不存任何凭证、不读取你的历史会话**。没连上也随时可以「复制 Prompt」手动交给任意 AI。
 
-> 仅支持 macOS + Chrome + Node 20.x / 22+（GitHub Copilot 另需 20.19+ / 22.12+）。详见 [连接配置文档](https://www.deuce.monster/htmlgenius/setup.html)、[Agent 说明](https://www.deuce.monster/htmlgenius/agents.html) 与 [`docs/LOCAL_BRIDGE.md`](docs/LOCAL_BRIDGE.md)。
+> 仅支持 macOS + Chrome + Node 20.x / 22+（GitHub Copilot 另需 20.19+ / 22.12+）。详见 [连接配置文档](https://www.deuce.monster/htmlgenius/setup.html)、[Agent 说明](https://www.deuce.monster/htmlgenius/agents.html) 与 [`LOCAL_BRIDGE.md`](LOCAL_BRIDGE.md)。
 
 ## 已知限制
 
 - **回灌需手动粘贴**：复制指令后要自己粘进 AI 对话框（用本机 Agent 闭环则不用）。
 - **远程网页的编辑是临时的**：刷新或关闭页面即丢失，无法存回原网站。
 - **候选 ≠ 接受修改**：候选版本不会自动覆盖原文件；diff / 审查 / 显式提升尚在路线图。
+- **本地文件需开权限**：在本地 HTML 文件（`file://`）上使用时，需到 `chrome://extensions` 打开 htmlGenius 的「允许访问文件网址」开关；v0.9.10 起未开会主动提示。
 
 ## 更多
 
 - 完整版本历史（含每次更新细节）：**[RELEASE_NOTES.md](RELEASE_NOTES.md)**
 - 开发、测试、部署与架构说明：**[DEVELOPMENT.md](DEVELOPMENT.md)**
 - 官网静态源码与发布说明：[`landing/demo-2026-07/`](landing/demo-2026-07/)
-- 各版本的设计与实现计划：`docs/` 目录
+- 各版本的设计与实现计划：仅存于本地 `docs/`（审计报告 / spec / 计划等本地工作文档，已 `.gitignore`，不入库）。

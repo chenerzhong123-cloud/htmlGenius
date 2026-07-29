@@ -77,17 +77,38 @@ test("bridge_repair:未经确认(confirmed_actions 缺失)→ REPAIR_NOT_CONFIRM
 test("bridge_repair:确认后只重写自身 launcher+manifest(受控标记 + 单 origin),回 health ready", async () => {
   const hostsDir = tmp();
   try {
+    // BR-5:repair 不 bootstrap,需先有归属本扩展的 manifest(state=ours_match)才刷新。
+    // 预置一套旧注册(无受控标记的 launcher + ID_A origin 的 manifest),验证 repair 会重写它们。
+    const manifestPath = path.join(hostsDir, HOST_NAME + ".json");
+    const launcherPath = path.join(hostsDir, HOST_NAME + ".launcher.sh");
+    fs.writeFileSync(launcherPath, "#!/bin/sh\nexec '/old/node' '/old/host.mjs' \"$@\"\n", { mode: 0o700 });
+    fs.writeFileSync(manifestPath, JSON.stringify({
+      name: HOST_NAME, path: launcherPath, type: "stdio",
+      allowed_origins: ["chrome-extension://" + ID_A + "/"]
+    }, null, 2) + "\n");
     const { out } = await runHost([encodeMessage({
       type: "bridge_repair", protocol_version: 1, extension: { id: ID_A }, confirmed_actions: ["repair_native_host"]
     })], { HTMLGENIUS_HOSTS_DIR: hostsDir });
     assert.equal(out[0].type, "bridge_health_result", "修复后回 health");
     assert.equal(out[0].health.bridge.status, "ready");
-    const manifest = JSON.parse(fs.readFileSync(path.join(hostsDir, HOST_NAME + ".json"), "utf8"));
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     assert.equal(manifest.name, HOST_NAME);
     assert.deepEqual(manifest.allowed_origins, ["chrome-extension://" + ID_A + "/"]);
-    const launcher = fs.readFileSync(path.join(hostsDir, HOST_NAME + ".launcher.sh"), "utf8");
-    assert.ok(launcher.includes(LAUNCHER_MARKER));
-    assert.equal(fs.statSync(path.join(hostsDir, HOST_NAME + ".launcher.sh")).mode & 0o777, 0o700);
+    const launcher = fs.readFileSync(launcherPath, "utf8");
+    assert.ok(launcher.includes(LAUNCHER_MARKER), "旧无标记 launcher 被重写为受控 launcher");
+    assert.equal(fs.statSync(launcherPath).mode & 0o777, 0o700);
+  } finally { fs.rmSync(hostsDir, { recursive: true, force: true }); }
+});
+
+test("bridge_repair:无 manifest(state=none)→ 拒绝 bootstrap(REPAIR_NO_EXISTING_REGISTRATION),不写任何文件", async () => {
+  const hostsDir = tmp();
+  try {
+    const { out } = await runHost([encodeMessage({
+      type: "bridge_repair", protocol_version: 1, extension: { id: ID_A }, confirmed_actions: ["repair_native_host"]
+    })], { HTMLGENIUS_HOSTS_DIR: hostsDir });
+    assert.equal(out[0].type, "bridge_failed");
+    assert.equal(out[0].code, "REPAIR_NO_EXISTING_REGISTRATION");
+    assert.deepEqual(fs.readdirSync(hostsDir), [], "repair 不得 bootstrap,不落任何文件");
   } finally { fs.rmSync(hostsDir, { recursive: true, force: true }); }
 });
 

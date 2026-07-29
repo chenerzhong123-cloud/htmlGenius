@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="htmlGenius privacy policy — what we collect, why, where it's stored, and how you control your data.">
 <title>隐私政策 · htmlGenius</title>
-<link rel="icon" type="image/png" sizes="128x128" href="../assets/html-genius-logo-deep-mint-128x128.png">
-<link rel="apple-touch-icon" href="../assets/html-genius-logo-deep-mint-128x128.png">
+<link rel="icon" type="image/png" sizes="128x128" href="favicon.png">
+<link rel="apple-touch-icon" href="favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -14,14 +14,14 @@
 <script>
 (function(){
   var p=new URLSearchParams(location.search).get('lang');
-  var s=localStorage.getItem('htmlgenius-language');
+  var s=localStorage.getItem('htmlgenius-demo-language');
   var b=(navigator.languages||[navigator.language||'en']).some(function(l){return /^zh/i.test(l);});
   var lang=(p==='zh'||p==='en')?p:((s==='zh'||s==='en')?s:(b?'zh':'en'));
   var el=document.documentElement;
-  el.dataset.language=lang; el.lang=lang==='zh'?'zh-CN':'en';
+  el.dataset.language=lang; el.lang=lang==='zh'?'zh-CN':'en'; try{localStorage.setItem('htmlgenius-demo-language',lang)}catch(e){}
   if(p=new URLSearchParams(location.search).get('theme'),p==='mint')el.dataset.previewTheme='mint';
   var isDemo=new URLSearchParams(location.search).has('demo');
-  el.style.setProperty('--brand-logo',isDemo?"url('../assets/html-genius-logo-deep-mint-128x128.png')":"url('assets/html-genius-logo-deep-mint-128x128.png')");
+  el.style.setProperty('--brand-logo',"url('favicon.png')");
 })();
 </script>
 <style>

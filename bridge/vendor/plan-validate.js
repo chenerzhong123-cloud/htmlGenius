@@ -9,6 +9,14 @@
   var PROVIDER_RE = /^(claude_code_cli|codex_app_server|github_copilot)$/;
   // v0.8.2 §3.1:Copilot 的 Host-only runtime 枚举(UI 最多显示 runtime_label,不显示路径)
   var PROVIDER_RUNTIME_RE = /^(local_cli|bundled_sdk_cli)$/;
+
+  // SUP-9:对 host 回送的展示型文本做 HTML 转义,保证调用方即使直接 innerHTML 也安全(函数名/文档承诺 UI 安全)。
+  // 不转义 runtime/capabilities——它们是程序化枚举/令牌,需保留原值用于 === / includes 比较。
+  function _escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
   var PLAN_MAX_MARKDOWN_BYTES = 12 * 1024;
   var PLAN_MAX_SUMMARY_BYTES = 1024;
   var PLAN_MAX_OUT_OF_SCOPE = 20;
@@ -173,20 +181,21 @@
       var status = _PROBE_VALID_STATUS[p.status] ? p.status : "error";
       var rec = {
         id: p.id,
-        label: _PROBE_LABELS[p.id] || p.label || p.id,
+        // SUP-9:label 走固定常量,否则对 host 回送的 p.label 做 HTML 转义(供安全 innerHTML)
+        label: _PROBE_LABELS[p.id] || _escapeHtml(p.label) || p.id,
         status: status,
         capabilities: Array.isArray(p.capabilities) ? p.capabilities.slice() : []
       };
-      // 仅 ready 时附简短版本摘要(截断,非完整 stderr/路径)
+      // 仅 ready 时附简短版本摘要(截断 + HTML 转义,非完整 stderr/路径)
       if (status === "ready" && typeof p.version === "string" && p.version) {
-        rec.version = String(p.version).slice(0, 64);
+        rec.version = _escapeHtml(String(p.version).slice(0, 64));
       }
       // v0.8.2 §6.4:Copilot runtime 摘要——仅保留枚举与短标签,绝不保留 runtime 路径
       if (typeof p.runtime === "string" && PROVIDER_RUNTIME_RE.test(p.runtime)) {
         rec.runtime = p.runtime;
       }
       if (typeof p.runtime_label === "string" && p.runtime_label) {
-        rec.runtime_label = String(p.runtime_label).slice(0, 64);
+        rec.runtime_label = _escapeHtml(String(p.runtime_label).slice(0, 64));
       }
       out.push(rec);
     }

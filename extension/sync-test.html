@@ -40,6 +40,16 @@ sync test
     if (!d || d.op !== "create" || typeof d.annotation !== "object") {
       throw new Error("空 data 容错");
     }
+    // 畸形 JSON → null(SUP-12:杜绝幽灵空批注)
+    d = Sync.parseEvent("annotation:created", "{not-json");
+    if (d !== null) {
+      throw new Error("畸形 JSON 应返回 null");
+    }
+    // 非对象 JSON → null(SUP-12)
+    d = Sync.parseEvent("annotation:created", "\"oops\"");
+    if (d !== null) {
+      throw new Error("非对象 JSON 应返回 null");
+    }
     document.title = "PASS";
   } catch (e) {
     document.title = "FAIL: " + e.message;

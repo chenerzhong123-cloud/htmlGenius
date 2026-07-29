@@ -36,6 +36,10 @@ export class NativeFrameDecoder {
     while (this._buf.length >= 4) {
       const declared = this._buf.readUInt32LE(0);
       if (declared > this._max) {
+        // 抛错前先推进缓冲,避免调用方在相同 4 字节上无限重抛卡死(审计 R-6)。
+        // declared 已不可信,只能尽力跳过:整帧已在缓冲内则跳整帧,否则只丢头部 4 字节。
+        const skip = (4 + declared <= this._buf.length) ? (4 + declared) : 4;
+        this._buf = this._buf.subarray(skip);
         const err = new Error("declared frame length exceeds limit");
         err.code = "FRAME_TOO_LARGE";
         err.declared = declared;
@@ -48,6 +52,8 @@ export class NativeFrameDecoder {
       try {
         obj = JSON.parse(body.toString("utf8"));
       } catch (cause) {
+        // 抛错前先丢掉这帧(长度已知为 declared),避免调用方在相同字节上无限重抛卡死(审计 R-6)。
+        this._buf = this._buf.subarray(end);
         const err = new Error("native frame body is not valid JSON");
         err.code = "INVALID_JSON";
         err.cause = cause && cause.message;

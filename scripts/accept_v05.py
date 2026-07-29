@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""v0.5 飞书 OAuth 后端验收脚本 —— 对已部署的后端跑(默认线上阿里云)。
+"""v0.5 飞书 OAuth 后端验收脚本 —— 默认对本地后端跑(BE-3:不再默认指向生产)。
 
-用 /auth/dev-login 旁路造任意飞书身份(需 HG_AUTH_ALLOW_DEV=1),无需真飞书。
+用 /auth/dev-login 旁路造任意飞书身份(需 HG_AUTH_ALLOW_DEV=1 且 HG_ENV∈dev/test),无需真飞书。
 覆盖 v0.5 核心保证:硬身份 author 注入、仅作者删除(403/200)、session 校验、
 logout 失效、SSE 实时推送。
 
-用法:
-    HG_BASE=https://www.deuce.monster/hg uv run python scripts/accept_v05.py
-    # 或: HG_BASE=... python3 scripts/accept_v05.py  (需 httpx)
+用法(本地后端须先以 HG_AUTH_ALLOW_DEV=1 HG_ENV=dev 启动):
+    uv run python scripts/accept_v05.py            # 默认 http://localhost:8000
+    # 或: HG_BASE=https://<host>/hg python3 scripts/accept_v05.py  (需 httpx)
 退出码:0=全过,1=有失败。
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ import time
 
 import httpx
 
-BASE = os.environ.get("HG_BASE", "https://www.deuce.monster/hg").rstrip("/")
+BASE = os.environ.get("HG_BASE", "http://localhost:8000").rstrip("/")  # BE-3:默认本地,勿指向生产
 TIMEOUT = 30
 
 _ok: list[str] = []
@@ -104,8 +104,10 @@ def main() -> int:
         import subprocess
 
         tl = dev_login(c, "ou_listener", "Listener")  # SSE 订阅专用(未注销)
+        # R-11(v0.9.9):SSE 走短时效 ticket(POST /api/stream/ticket 换取),不再把长期 token 拼进 URL
+        _tk = c.post(f"{BASE}/api/stream/ticket", headers=auth(tl)).json().get("ticket", "")
         proc = subprocess.Popen(
-            ["curl", "-sN", "--max-time", "6", f"{BASE}/api/stream?doc=doc_sse&token={tl}"],
+            ["curl", "-sN", "--max-time", "6", f"{BASE}/api/stream?doc=doc_sse&ticket={_tk}"],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )

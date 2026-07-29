@@ -51,4 +51,10 @@ test("workspacePathForFileUrl:<source-parent>/.htmlgenius-bridge/claude/<id>;非
     "/a/spa ce/.htmlgenius-bridge/claude/hgd_2"); // %20 解码为空格
   assert.equal(workspacePathForFileUrl("https://example.com/r.html", "hgd_3"), null);
   assert.equal(workspacePathForFileUrl("not a url", "hgd_4"), null);
+  // SUP-10:logicalDocumentId 须匹配 hgd_ 格式,杜绝路径穿越(../../tmp、缺前缀、含斜杠/点 一律 null)
+  assert.equal(workspacePathForFileUrl("file:///Users/x/r.html", "../../tmp"), null);
+  assert.equal(workspacePathForFileUrl("file:///Users/x/r.html", "hgd_../../tmp"), null);
+  assert.equal(workspacePathForFileUrl("file:///Users/x/r.html", "no_prefix"), null);
+  assert.equal(workspacePathForFileUrl("file:///Users/x/r.html", "hgd_a/b"), null);
+  assert.equal(workspacePathForFileUrl("file:///Users/x/r.html", null), null);
 });

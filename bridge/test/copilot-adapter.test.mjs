@@ -292,3 +292,29 @@ test('copilot plan:runtime 选择失败 → 失败码透传,不建 session', asy
   assert.equal(events.find((e) => e.type === 'bridge_failed').code, COPILOT_ERRORS.RUNTIME_CHANGED);
   assert.ok(!sdk.__calls.some((c) => c.name === 'client.createSession'));
 });
+
+// BR-1:copilotWorkspacePathFor 白名单校验,防 logical_document_id 路径穿越
+// (与 claude/codex 同款;regex ^[A-Za-z0-9_:-]{1,128}$)。审计 v2 第 40 行建议补的回归用例。
+test('BR-1: copilotWorkspacePathFor 拒绝穿越/非法 logical_document_id → BAD_LOGICAL_ID', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-copilot-ws-bad-'));
+  const src = path.join(dir, 'report.html');
+  fs.writeFileSync(src, '<!doctype html><html></html>');
+  const bad = ['../', '..', 'a/b', '../../etc/passwd', '', 'a'.repeat(129), 'with space', 'semi;colon'];
+  for (const id of bad) {
+    assert.throws(
+      () => copilotWorkspacePathFor({ sourcePath: src, logicalDocumentId: id }),
+      (e) => e.code === 'BAD_LOGICAL_ID',
+      'expected BAD_LOGICAL_ID for: ' + JSON.stringify(id)
+    );
+  }
+});
+
+test('BR-1: copilotWorkspacePathFor 接受合法 logical_document_id,返回 .htmlgenius-bridge/copilot/<id>', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-copilot-ws-ok-'));
+  const src = path.join(dir, 'report.html');
+  fs.writeFileSync(src, '<!doctype html><html></html>');
+  for (const id of ['ok_id', 'hgd_abc']) {
+    const p = copilotWorkspacePathFor({ sourcePath: src, logicalDocumentId: id });
+    assert.equal(p, path.join(dir, '.htmlgenius-bridge', 'copilot', id));
+  }
+});

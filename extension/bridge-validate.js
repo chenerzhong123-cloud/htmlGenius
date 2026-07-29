@@ -39,8 +39,12 @@
   }
 
   // session 记录的 workspace_path(续发时 host 需要同一 cwd):<source-parent>/.htmlgenius-bridge/claude/<id>。
+  // SUP-10:logicalDocumentId 直接拼进路径,须先按 storage 实际格式(hgd_<UUID> 或 hgd_<base36>_<base36>)
+  // 校验,阻止将来传 "../../tmp" 之类造成路径穿越;不符返 null。当前调用方都产安全 id,纯防御。
+  var DOC_ID_RE = /^hgd_[A-Za-z0-9_-]+$/;
   function workspacePathForFileUrl(fileUrl, logicalDocumentId) {
     try {
+      if (typeof logicalDocumentId !== "string" || !DOC_ID_RE.test(logicalDocumentId)) return null;
       var u = new URL(fileUrl);
       if (u.protocol !== "file:") return null;
       var dir = decodeURIComponent(u.pathname).replace(/\/[^/]*$/, "");

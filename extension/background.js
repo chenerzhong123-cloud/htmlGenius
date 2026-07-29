@@ -52,6 +52,10 @@ function broadcast(payload) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || !msg.type) return;
+  // CORE-3:bridge-* 消息只接受本扩展自身(side panel / content-script)发起 —— sender.id 必须等于本扩展 id,
+  // 拦截跨扩展伪造(manifest 未开 externally_connectable,此为纵深防御)。native host 回送走 connectNative
+  // 的 port.onMessage(onHostMessage / probe 等),不经 runtime.onMessage,故不受此校验影响。
+  if (!sender || sender.id !== chrome.runtime.id) return;
   if (msg.type === "bridge-start") {
     handleBridgeStart(msg).then(sendResponse, (e) => sendResponse({ ok: false, code: "BG_ERROR", message: String(e && e.message || e) }));
     return true;
@@ -244,6 +248,13 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
   else if (provider === COPILOT_PROVIDER) sessionField = { mode: session_mode };
   else sessionField = { mode: session_mode, session_id: continueRef };
 
+  // R-7:工作区根 = 用户打开的 artifact 所在目录(file: URL)。仅本地 file:// 有工作区概念;
+  // bridge 据此做 realpath 包含校验,把可读源 .html 限定在该工作区内,堵住「artifact_uri 指向任意
+  // 本地 .html → 经 Agent 流式外泄」。远程页留空 → bridge 回退既有 symlink/realpath 防御。
+  const _wsRoot = (art && /^file:/i.test(art.url))
+    ? (() => { try { const u = new URL(art.url); u.pathname = u.pathname.replace(/[^/]*$/, ""); return u.href; } catch (e) { return undefined; } })()
+    : undefined;
+
   const startMsg = {
     type: HANDOFF_START_TYPES[provider],
     provider,
@@ -252,7 +263,8 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
     source: {
       logical_document_id: logicalId,
       artifact_uri: art.url,
-      base_artifact_hash: loadedHash
+      base_artifact_hash: loadedHash,
+      workspace_root_uri: _wsRoot
     },
     session: sessionField,
     task: task
@@ -325,6 +337,17 @@ function onHostDisconnect(tab_id, runId) {
 }
 
 async function failRun(tab_id, runId, code, message) {
+  // R-10(v0.9.9):终态守卫 —— run 已 completed/failed 则不再覆盖。避免迟到的失败(host 在 bridge_completed
+  // 后又补发 bridge_failed、或 reconcile 与关 tab 竞态)把成功 run 误标失败 + 双广播/状态长期不一致。
+  try {
+    if (runId) {
+      const cur = await Storage.getBridgeRun(runId);
+      if (cur && (cur.status === "completed" || cur.status === "failed")) {
+        console.log("[hg] failRun skip (already terminal) run=", runId, "status=", cur.status, "code=", code);
+        return;
+      }
+    }
+  } catch (e) { /* 读不到则按原逻辑继续 */ }
   const entry = _runsByTab.get(tab_id);
   if (entry) entry.terminal = true;
   console.log("[hg] run FAILED run=", runId, "tab=", tab_id, "code=", code, "msg=", String(message || "").slice(0, 160));
@@ -346,6 +369,41 @@ async function cancelRun(tab_id, runId) {
   broadcast({ type: "bridge-failed", tab_id, run_id: rid, code: "USER_CANCELLED", message: "user cancelled" });
   return true;
 }
+
+// CORE-1:SW 会被 Chrome 机会性杀死(空闲约 30s / 内存压力)。重启后内存 _runsByTab 清空、
+// native host port 已断,但 DB 里 run 仍停在 starting/running → 该 tab 下次 bridge-start 命中
+// getActiveBridgeRunForTab 守卫永远 RUN_IN_PROGRESS,sidepanel 一直转圈。每次 SW 新实例加载时
+// 对账:DB 中活跃但本实例无 port 的 run 一律标失败并广播。
+// 不会误伤:真正在跑的 run 其 SW 实例不会被杀、模块不会重跑;且 saveBridgeRun→_runsByTab.set
+// 之间无 await(事件循环视角原子),新建 run 必已在 _runsByTab 中。
+async function reconcileOrphanedRuns() {
+  let active;
+  try { active = await Storage.listActiveBridgeRuns(); } catch (e) { return; }
+  for (const run of active || []) {
+    if (!run || !run.run_id) continue;
+    const entry = _runsByTab.get(run.tab_id);
+    if (entry && entry.run_id === run.run_id) continue;  // 本实例仍持有活跃 port,非孤儿
+    console.log("[hg] reconcile 孤儿 run 标失败 run=", run.run_id, "tab=", run.tab_id, "was=", run.status);
+    await failRun(run.tab_id, run.run_id, "SW_RESTARTED_ORPHANED", "service worker restarted; native host port lost");
+  }
+}
+reconcileOrphanedRuns().catch(() => {});
+
+// CORE-2:运行中关闭 tab → native port 随 tab 断开,但 DB run 未转终态;Chrome 复用 tab id 后,
+// 拿到同 id 的无关页签被 getActiveBridgeRunForTab 永久阻塞。关 tab 时主动清理该 tab 的活跃 run。
+chrome.tabs.onRemoved.addListener((tabId) => {
+  const entry = _runsByTab.get(tabId);
+  _runsByTab.delete(tabId);
+  if (entry && !entry.terminal) {
+    try { if (entry.port) entry.port.disconnect(); } catch (e) {}
+    failRun(tabId, entry.run_id, "USER_TAB_CLOSED", "tab closed during run");
+    return;
+  }
+  // 内存无记录但 DB 可能残留活跃 run(如 SW 重启尚未对账就关 tab)→ 按 tab 兜底清理。
+  Storage.getActiveBridgeRunForTab(tabId).then((run) => {
+    if (run) failRun(tabId, run.run_id, "USER_TAB_CLOSED", "tab closed during run");
+  }).catch(() => {});
+});
 
 // v0.8.1 Chrome 系统通知:候选生成成功后提醒用户回来看新 candidate.html;点击通知打开候选页签。
 const _notifyCandidateUri = new Map(); // notificationId → candidate_uri

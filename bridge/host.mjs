@@ -48,25 +48,45 @@ async function hostHealth(msg) {
   });
 }
 
-// repair allow-list(§4.1):仅重写它自身的 launcher + manifest(指向本 host 目录)+ 重探。
+// repair allow-list(§4.1):仅刷新已存在且归属本扩展的 launcher + manifest(指向本 host 目录)+ 重探。
 // 不安装 Node/Agent、不跑包管理器、不开 shell、不写项目目录。未经明确确认拒绝。
+// BR-5:origin 以磁盘上的 manifest 为 ground truth —— 不信任 msg.extension.id;且 repair 不得 bootstrap。
+// 从 "chrome-extension://<32×a-p>/" 提取 extension id;不合法返回 null。
+function extensionIdFromOrigin(origin) {
+  if (typeof origin !== "string") return null;
+  const m = origin.match(/^chrome-extension:\/\/([a-p]{32})\/$/);
+  return m ? m[1] : null;
+}
 async function hostRepair(msg) {
   const confirmed = Array.isArray(msg && msg.confirmed_actions) ? msg.confirmed_actions : [];
   if (!confirmed.includes("repair_native_host")) {
     const e = new Error("repair requires confirmed_actions to include repair_native_host");
     e.code = "REPAIR_NOT_CONFIRMED"; throw e;
   }
-  const extId = msg && msg.extension && msg.extension.id;
-  validateExtensionId(extId); // 非法 → INVALID_EXTENSION_ID
+  const claimedId = msg && msg.extension && msg.extension.id;
+  validateExtensionId(claimedId); // 非法 → INVALID_EXTENSION_ID(早拒,不读盘)
   const hostsDir = hostsDirForHost();
-  const ins = inspectExistingManifest({ hostsDir, extensionId: extId });
-  if (ins.state === "ours_mismatch" || ins.state === "foreign") {
-    const e = new Error("existing host registration belongs to another extension; refusing to overwrite");
+  // BR-5:只在「manifest 已存在且归属本扩展」时刷新;none/mismatch/foreign 一律拒。
+  //   - none:没有 manifest 即没有 origin ground truth,repair 不得凭消息自称的 id 新建(bootstrap 是 setup 的职责)。
+  //   - mismatch/foreign:属别家 origin,绝不覆盖。
+  const ins = inspectExistingManifest({ hostsDir, extensionId: claimedId });
+  if (ins.state !== "ours_match") {
+    const code = ins.state === "none" ? "REPAIR_NO_EXISTING_REGISTRATION"
+               : ins.state === "foreign" ? "MANIFEST_FOREIGN"
+               : "EXTENSION_ORIGIN_MISMATCH";
+    const e = new Error("repair requires an existing host registration owned by this extension; run setup to bootstrap (state=" + ins.state + ")");
+    e.code = code; throw e;
+  }
+  // BR-5:不信任 msg.extension.id —— 从 manifest 的 allowed_origins 取权威 origin 解析出已连接的 extension id。
+  const authoritativeId = extensionIdFromOrigin(
+    ins.manifest && Array.isArray(ins.manifest.allowed_origins) ? ins.manifest.allowed_origins[0] : "");
+  if (!authoritativeId) {
+    const e = new Error("existing manifest has invalid allowed_origin; refusing repair");
     e.code = "EXTENSION_ORIGIN_MISMATCH"; throw e;
   }
   const dir = hostBridgeDir();
   const launcherSource = buildLauncherSource({ nodePath: process.execPath, hostPath: path.join(dir, "host.mjs"), version: hostBridgeVersion() });
-  ensureHostRegistration({ hostsDir, extensionId: extId, launcherSource });
+  ensureHostRegistration({ hostsDir, extensionId: authoritativeId, launcherSource });
   return await hostHealth(msg);
 }
 
@@ -152,17 +172,37 @@ async function pump() {
   if (pumping) return;
   pumping = true;
   try {
-    for (const msg of decoder.messages()) {
-      let reply;
-      try { reply = await dispatch(msg); }
-      catch (e) {
-        log("dispatch error:", e && e.message);
-        reply = { type: "bridge_failed", code: (e && e.code) || "host_error", message: (e && e.message) || "host dispatch error" };
+    // 外层循环:生成器在坏帧上抛错后已在解码器侧推进缓冲(见 native-protocol.mjs),这里吞掉错误、回 bridge_failed,
+    // 再重拉一批以处理坏帧之后的合法帧。既不让异常逃逸到 data 回调造成永久卡死(审计 R-6),也不在相同字节上死循环。
+    for (;;) {
+      let frameError = null;
+      try {
+        for (const msg of decoder.messages()) {
+          let reply;
+          try { reply = await dispatch(msg); }
+          catch (e) {
+            log("dispatch error:", e && e.message);
+            reply = { type: "bridge_failed", code: (e && e.code) || "host_error", message: (e && e.message) || "host dispatch error" };
+          }
+          if (reply) {
+            try { writeMessage(process.stdout, reply); }
+            catch (e) { log("write failed:", e && e.message); }
+          }
+        }
+      } catch (genErr) {
+        // 解码生成器抛出(INVALID_JSON / FRAME_TOO_LARGE);解码器已推进缓冲,下次不会在相同字节重抛。
+        frameError = genErr;
+        log("frame decode error:", (genErr && genErr.code) || (genErr && genErr.message));
+        try {
+          writeMessage(process.stdout, {
+            type: "bridge_failed",
+            code: (genErr && genErr.code) || "frame_decode_error",
+            message: (genErr && genErr.message) || "frame decode error",
+          });
+        } catch (e) { log("write failed:", e && e.message); }
       }
-      if (reply) {
-        try { writeMessage(process.stdout, reply); }
-        catch (e) { log("write failed:", e && e.message); }
-      }
+      // 生成器正常结束 → 本次已抽干,等下一次 data;仅在抛过坏帧错误时重拉(解码器每次至少前进坏帧字节,终将清空)。
+      if (!frameError) break;
     }
   } finally { pumping = false; }
 }
@@ -170,7 +210,10 @@ async function pump() {
 process.stdin.on("data", (chunk) => { decoder.feed(chunk); pump(); });
 process.stdin.on("end", () => { log("stdin ended, exiting"); process.exit(0); });
 process.stdin.on("error", (e) => { log("stdin error:", e && e.message); process.exit(1); });
-process.on("uncaughtException", (e) => { log("uncaughtException:", (e && e.stack) || e); });
+// 严重错误兜底:host 处于不可恢复状态时退出,Chrome 会按需重新 spawn(审计 R-6)。
+// 单点坏帧已在 pump() 内吞掉并回 bridge_failed,能到这里的都是非帧级故障。
+process.on("uncaughtException", (e) => { log("uncaughtException:", (e && e.stack) || e); process.exit(1); });
+process.on("unhandledRejection", (reason) => { log("unhandledRejection:", (reason && reason.stack) || reason); process.exit(1); });
 process.on("exit", (code) => { log("host exit code=" + code); });
 
 log("host started, node=" + process.version);

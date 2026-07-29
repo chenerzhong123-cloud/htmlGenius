@@ -19,7 +19,7 @@ import {
 import {
   preparePlanRun, verifyTaskBundleUnchanged, validatePlanJson, writePlanManifest, quarantinePlan
 } from "./plan-workspace.mjs";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 
 const realClaude = { checkAuth, runHandoff, resumeHandoff };
 
@@ -35,10 +35,50 @@ function truncateMsg(s) {
   return t.length > 400 ? t.slice(0, 400) + "…" : t;
 }
 
-export async function executeHandoff(msg, { emit, claude } = {}) {
-  if (typeof emit !== "function") throw new Error("emit is required");
+// —— bridge_stream 流量围栏(R-7):封堵「Agent 被 prompt 诱导回显,经流式通道外泄」的大体积通道 ——
+// 累计字节上限:进度/状态 UI 足够,但封死整文件回显式外泄。超限只发一条固定截断提示(不含模型/用户文本)。
+const MAX_STREAM_BYTES = 256 * 1024;
+
+// handoff 是 ack-only:模型文本一律不回传(即便将来 adapter 改为流式也不泄漏)。
+// candidate/plan 允许进度流,但累计字节超 MAX_STREAM_BYTES 后停止转发 bridge_stream(其余帧不受影响)。
+// 导出供单测校验流围栏(R-7 关键不变量)。
+export const STREAM_BYTE_LIMIT = MAX_STREAM_BYTES;
+export function wrapEmit(rawEmit, { runId, allowStream }) {
+  if (!allowStream) {
+    return (payload) => {
+      if (payload && payload.type === "bridge_stream") return; // handoff:丢弃所有模型文本帧
+      rawEmit(payload);
+    };
+  }
+  let used = 0;
+  let capped = false;
+  return (payload) => {
+    if (!payload || payload.type !== "bridge_stream") { rawEmit(payload); return; }
+    if (capped) return;
+    used += Buffer.byteLength(String(payload.text || ""), "utf8");
+    if (used > MAX_STREAM_BYTES) {
+      capped = true;
+      try { rawEmit({ type: "bridge_stream", run_id: runId, kind: "info", text: "[stream truncated: byte limit reached]" }); } catch (_) {}
+      return;
+    }
+    rawEmit(payload);
+  };
+}
+
+// R-7:从消息读「用户显式打开的工作区根」(扩展可选字段 workspace_root_uri,file: URL)。
+// 命中则 realpath 包含校验在 resolveSource* 内生效;未提供返回 null → 仅靠软链/realpath 硬化兜底(向后兼容)。
+function sourceWorkspaceRoot(source) {
+  const u = source && source.workspace_root_uri;
+  if (typeof u !== "string" || !/^file:/i.test(u)) return null;
+  try { return fileURLToPath(u); } catch (_) { return null; }
+}
+
+export async function executeHandoff(msg, { emit: rawEmit, claude } = {}) {
+  if (typeof rawEmit !== "function") throw new Error("emit is required");
   const cli = claude || realClaude;
   const runId = msg && msg.run_id;
+  // R-7:handoff 是 ack-only,模型文本一律不回传(桥接通道上绝不出现 bridge_stream)。
+  const emit = wrapEmit(rawEmit, { runId, allowStream: false });
   const status = (s) => emit({ type: "bridge_status", run_id: runId, status: s });
   const failed = (code, message) => emit({ type: "bridge_failed", run_id: runId, code, message: truncateMsg(message) });
 
@@ -57,9 +97,11 @@ export async function executeHandoff(msg, { emit, claude } = {}) {
   status("checking");
 
   // —— 2. source 解析 + host 自算哈希(不与 extension 的 DOM 序列化哈希比对;两者方法不同必然不匹配) ——
+  // R-7:workspace_root_uri(扩展可选)提供时,resolveSourceArtifact 做 realpath 工作区包含校验。
+  const workspaceRoot = sourceWorkspaceRoot(source);
   let sourcePath, hostSourceHash;
   try {
-    sourcePath = resolveSourceArtifact(source.artifact_uri).sourcePath;
+    sourcePath = resolveSourceArtifact(source.artifact_uri, { workspaceRoot }).sourcePath;
     hostSourceHash = sha256File(sourcePath);
   } catch (e) { failed(e.code || "PREPARE_FAILED", e.message); return; }
 
@@ -140,10 +182,12 @@ const CANDIDATE_FAIL_STATUS = {
   CLAUDE_TIMEOUT: "timed_out"
 };
 
-export async function executeCandidateRun(msg, { emit, claude } = {}) {
-  if (typeof emit !== "function") throw new Error("emit is required");
+export async function executeCandidateRun(msg, { emit: rawEmit, claude } = {}) {
+  if (typeof rawEmit !== "function") throw new Error("emit is required");
   const cli = claude || realClaude;
   const runId = msg && msg.run_id;
+  // R-7:candidate 允许进度流,但累计字节超 MAX_STREAM_BYTES 后停止转发(封堵大体积外泄)。
+  const emit = wrapEmit(rawEmit, { runId, allowStream: true });
   const status = (s) => emit({ type: "bridge_status", run_id: runId, status: s });
   const failed = (code, message, runsDir, ctx) => {
     if (runsDir) {
@@ -182,9 +226,11 @@ export async function executeCandidateRun(msg, { emit, claude } = {}) {
 
   // 2. source 解析 + 稳定 workspace + task bundle
   // host 自算源哈希(不与 extension 的 DOM 序列化哈希比对;两者方法不同必然不匹配,导致误报 SOURCE_CHANGED_BEFORE_START)
+  // R-7:workspace_root_uri(扩展可选)提供时,resolveSourcePath 做 realpath 工作区包含校验。
+  const workspaceRoot = sourceWorkspaceRoot(source);
   let sourcePath, workspace, bundle;
   try {
-    sourcePath = resolveSourcePath(source.artifact_uri);
+    sourcePath = resolveSourcePath(source.artifact_uri, { workspaceRoot });
     const hostHash = sha256File(sourcePath);
     workspace = createWorkspace({ sourcePath, logicalDocumentId: source.logical_document_id });
     bundle = writeTaskBundle({ workspace, runId, task, sourcePath, baseArtifactHash: hostHash });
@@ -292,10 +338,12 @@ const PLAN_FAIL_STATUS = {
   CLAUDE_TIMEOUT: "timed_out"
 };
 
-export async function executePlanRun(msg, { emit, claude } = {}) {
-  if (typeof emit !== "function") throw new Error("emit is required");
+export async function executePlanRun(msg, { emit: rawEmit, claude } = {}) {
+  if (typeof rawEmit !== "function") throw new Error("emit is required");
   const cli = claude || realClaude;
   const runId = msg && msg.run_id;
+  // R-7:plan 同 candidate,允许进度流但累计字节封顶(封堵大体积外泄)。
+  const emit = wrapEmit(rawEmit, { runId, allowStream: true });
   const status = (s) => emit({ type: "bridge_status", run_id: runId, status: s });
   const failed = (code, message, plansDir, ctx) => {
     if (plansDir) {
@@ -332,9 +380,11 @@ export async function executePlanRun(msg, { emit, claude } = {}) {
   status("checking");
 
   // 2. source 解析 + 稳定 workspace + task bundle
+  // R-7:workspace_root_uri(扩展可选)提供时,resolveSourcePath 做 realpath 工作区包含校验。
+  const workspaceRoot = sourceWorkspaceRoot(source);
   let sourcePath, workspace, bundle;
   try {
-    sourcePath = resolveSourcePath(source.artifact_uri);
+    sourcePath = resolveSourcePath(source.artifact_uri, { workspaceRoot });
     const hostHash = sha256File(sourcePath);
     workspace = createWorkspace({ sourcePath, logicalDocumentId: source.logical_document_id });
     bundle = writeTaskBundle({ workspace, runId, task, sourcePath, baseArtifactHash: hostHash });

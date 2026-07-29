@@ -9,6 +9,8 @@ client = TestClient(app)
 
 def _init(tmp_path, monkeypatch, dev="1"):
     monkeypatch.setenv("HG_AUTH_ALLOW_DEV", dev)
+    # BE-3:dev-login 需 HG_ENV∈dev/test 才启用;测试默认标 test。
+    monkeypatch.setenv("HG_ENV", "test")
     monkeypatch.setenv("HG_LARK_APP_ID", "cli_x")
     monkeypatch.setenv("HG_LARK_APP_SECRET", "sec_x")
     monkeypatch.setenv("HG_DEFAULT_TEAM", "team_d")
@@ -40,6 +42,14 @@ def test_dev_login_and_me_and_logout(tmp_path, monkeypatch):
 
 def test_dev_login_disabled_in_prod(tmp_path, monkeypatch):
     _init(tmp_path, monkeypatch, dev="0")
+    r = client.post("/auth/dev-login", json={"open_id": "ou_1", "name": "alice"})
+    assert r.status_code == 404
+
+
+def test_dev_login_blocked_when_env_production(tmp_path, monkeypatch):
+    # BE-3:即便误设 HG_AUTH_ALLOW_DEV=1,只要 HG_ENV 是生产值,dev-login 也必须禁用。
+    _init(tmp_path, monkeypatch, dev="1")
+    monkeypatch.setenv("HG_ENV", "production")
     r = client.post("/auth/dev-login", json={"open_id": "ou_1", "name": "alice"})
     assert r.status_code == 404
 

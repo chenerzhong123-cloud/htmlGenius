@@ -57,7 +57,13 @@ window.Login = (function () {
     var clientId = (window.HG_CONFIG && window.HG_CONFIG.google_client_id) || "";
     if (!clientId) throw new Error("config 缺 google_client_id");
     var redirect = chrome.identity.getRedirectURL();  // https://<ext-id>.chromiumapp.org/
-    var nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    // SUP-3:nonce 改用 CSPRNG(crypto.getRandomValues 16 字节 → base64url),替代可预测的 Math.random,防重放。
+    var nonce = (function () {
+      var bytes = new Uint8Array(16);
+      globalThis.crypto.getRandomValues(bytes);
+      var b64 = btoa(String.fromCharCode.apply(null, bytes));
+      return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    })();
     var authUrl = "https://accounts.google.com/o/oauth2/v2/auth?"
       + "client_id=" + encodeURIComponent(clientId)
       + "&response_type=id_token"

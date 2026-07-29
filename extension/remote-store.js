@@ -46,7 +46,9 @@ window.RemoteStore = (function () {
         ann = ann || {};
         const docId = ann.document_id || await this.getDocumentId();
         const req = buildCreateRequest(cfg, docId, ann);
-        console.log("[hg] RS.save POST", req.url, "headers:", JSON.stringify(req.headers));
+        // SUP-1:不打印 req.headers —— 其中含 Authorization: Bearer <session token>,
+        // content-script 与页面共享 console,页面脚本钩住 console.log 即可窃取 token。
+        console.log("[hg] RS.save POST", req.url);
         try {
           const r = await fetch(req.url, {
             method: "POST",

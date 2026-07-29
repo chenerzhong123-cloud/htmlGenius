@@ -1,13 +1,14 @@
 """Task 4: SSE RoomManager + /api/stream 端点测试."""
 import asyncio
+import base64
 import os
 import threading
+from urllib.parse import urlencode
 
 import httpx
 
 from server.app import app
-from server import sessions
-from server import storage
+from server import auth, sessions, storage
 from server.models import DocumentCreate
 from server.sse import rooms
 
@@ -101,13 +102,14 @@ def test_stream_emits_hello(tmp_path, monkeypatch):
     0.5s 后断开。不用 httpx.ASGITransport 的 stream():本环境下它不向
     StreamingResponse 推送增量 body(已实测确认),用裸 ASGI 才能稳定拿到首块。
     """
-    tok = _init(tmp_path, monkeypatch)
+    _init(tmp_path, monkeypatch)  # team_a
+    ticket = auth.issue_stream_ticket("team_a", ttl=60)  # R-11:?token= 已下线,改用短时效票据
 
     async def run():
         scope = {
             "type": "http", "method": "GET", "path": "/api/stream",
             "raw_path": b"/api/stream",
-            "query_string": ("doc=doc_x&token=" + tok).encode(),
+            "query_string": ("doc=doc_x&ticket=" + ticket).encode(),
             "headers": [], "server": ("t", 80), "client": ("c", 1),
             "root_path": "", "scheme": "http", "http_version": "1.1",
         }
@@ -151,5 +153,85 @@ def test_stream_emits_hello(tmp_path, monkeypatch):
         body = b"".join(body_chunks).decode("utf-8", "replace")
         assert "event: hello" in body, f"body: {body!r}"
         assert '"room": "team_a:doc_x"' in body, f"body: {body!r}"
+
+    _run(run())
+
+
+# === SUP-2: SSE 短时效流票据(token 不再进 URL) ===
+
+
+def test_stream_ticket_roundtrip_and_safety():
+    """票据 roundtrip 取回 team_id;篡改签名/畸形/过期一律拒(返 None)。"""
+    ticket = auth.issue_stream_ticket("team_z", ttl=60)
+    assert auth.consume_stream_ticket(ticket) == "team_z"
+    body, _sig = ticket.split(".")
+    assert auth.consume_stream_ticket(body + "." + base64.urlsafe_b64encode(b"x").decode()) is None
+    assert auth.consume_stream_ticket("not-a-ticket") is None
+    assert auth.consume_stream_ticket(auth.issue_stream_ticket("team_z", ttl=-1)) is None
+
+
+def test_stream_ticket_endpoint_requires_auth(tmp_path, monkeypatch):
+    """POST /api/stream/ticket:无 Bearer→401;带 Bearer→200 票据(绑定该 session 的 team)。"""
+    tok = _init(tmp_path, monkeypatch)  # team_a
+    transport = httpx.ASGITransport(app=app)
+
+    async def run():
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            assert (await c.post("/api/stream/ticket")).status_code == 401
+            r = await c.post("/api/stream/ticket", headers={"Authorization": f"Bearer {tok}"})
+            assert r.status_code == 200
+            assert auth.consume_stream_ticket(r.json()["ticket"]) == "team_a"
+
+    _run(run())
+
+
+def test_stream_accepts_ticket(tmp_path, monkeypatch):
+    """用票据(而非长期 token)连 /api/stream → 200 text/event-stream。"""
+    _init(tmp_path, monkeypatch)  # team_a
+    ticket = auth.issue_stream_ticket("team_a", ttl=60)
+
+    async def run():
+        scope = {
+            "type": "http", "method": "GET", "path": "/api/stream",
+            "raw_path": b"/api/stream",
+            "query_string": urlencode({"doc": "doc_x", "ticket": ticket}).encode(),
+            "headers": [], "server": ("t", 80), "client": ("c", 1),
+            "root_path": "", "scheme": "http", "http_version": "1.1",
+        }
+        captured: dict = {}
+
+        async def receive():
+            if not receive._sent:
+                receive._sent = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            return {"type": "http.disconnect"}
+
+        receive._sent = False
+
+        async def send(msg):
+            if msg["type"] == "http.response.start":
+                captured["status"] = msg["status"]
+
+        task = asyncio.create_task(app(scope, receive, send))
+        await asyncio.sleep(0.3)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        assert captured.get("status") == 200, f"status: {captured}"
+
+    _run(run())
+
+
+def test_stream_rejects_bad_ticket(tmp_path, monkeypatch):
+    """伪造/无效票据 → 401。"""
+    _init(tmp_path, monkeypatch)
+    transport = httpx.ASGITransport(app=app)
+
+    async def run():
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            r = await c.get("/api/stream", params={"doc": "doc_x", "ticket": "garbage.ticket"})
+            assert r.status_code == 401
 
     _run(run())

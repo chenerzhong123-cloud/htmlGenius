@@ -68,6 +68,8 @@ def server(tmp_path_factory):
     env["HTMLEDITOR_DB"] = str(db)
     # v0.5 鉴权:dev-login 旁路(不依赖飞书),page fixture 用它造 session token。
     env["HG_AUTH_ALLOW_DEV"] = "1"
+    # BE-3:dev-login 现需 HG_ENV∈dev/test 才启用,测试环境显式标 test。
+    env["HG_ENV"] = "test"
     env["HG_LARK_APP_ID"] = "cli_test"
     env["HG_LARK_APP_SECRET"] = "sec_test"
     env["HG_DEFAULT_TEAM"] = "team_test"

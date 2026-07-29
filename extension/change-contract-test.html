@@ -60,7 +60,9 @@
     var p = CC.renderPrompt(task);
     ok(p.indexOf("禁止修改任何未被本任务定位") !== -1, "T1 prompt 含强制「目标外不修改」语句");
     ok(p.indexOf("原文一") !== -1 && p.indexOf("前文") !== -1 && p.indexOf("后文") !== -1, "T1 prompt 含定位前/原/后文");
-    ok(p.indexOf("[李四] 同意,再温和点") !== -1, "T1 prompt 含回复 a2");
+    // SUP-11:回复正文以 <<<HG_USER_DATA>>>…<<<HG_USER_DATA_END>>> 包裹,逐段断言作者与正文
+    ok(p.indexOf("[李四]") !== -1 && p.indexOf("同意,再温和点") !== -1, "T1 prompt 含回复 a2");
+    ok(p.indexOf("<<<HG_USER_DATA>>>") !== -1, "T1 prompt 含 SUP-11 数据定界符");
   })();
 
   // T2 local_optimize:prompt 只承诺局部范围
@@ -105,7 +107,8 @@
     }, anns);
     eq(JSON.stringify(task.preserve), JSON.stringify(["公司名", "关键数据"]), "T4 preserve 拆分+trim+去空行");
     var p = CC.renderPrompt(task);
-    ok(p.indexOf("「公司名」") !== -1 && p.indexOf("「关键数据」") !== -1, "T4 prompt 含必须保留项");
+    // SUP-11:必须保留项正文被定界符包裹,断言正文存在
+    ok(p.indexOf("公司名") !== -1 && p.indexOf("关键数据") !== -1, "T4 prompt 含必须保留项");
   })();
 
   // T5 stale root / reply id / 不存在 id 不能作为 rootIds

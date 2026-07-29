@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { executeCodexCandidateRun } from '../codex-adapter.mjs';
+import { executeCodexCandidateRun, codexWorkspacePathFor } from '../codex-adapter.mjs';
 import { sha256File } from '../candidate-workspace.mjs';
 
 // 预制 schemaDir:含 verifySchema 要求的 token(initialize/thread·turn 方法 + workspaceWrite + approvalPolicy + cwd)
@@ -119,4 +119,30 @@ test('restructure → INVALID_MODE(codex candidate 不允许)', async () => {
   const { events, emit } = collect();
   await executeCodexCandidateRun(baseMsg(fix), { emit, client, ...OPTS(makeSchemaDir()) });
   assert.equal(events.find((e) => e.type === 'bridge_failed').code, 'INVALID_MODE');
+});
+
+// BR-1:codexWorkspacePathFor 白名单校验,防 logical_document_id 路径穿越
+// (与 claude 的 workspacePathFor 同款;regex ^[A-Za-z0-9_:-]{1,128}$)。审计 v2 第 40 行建议补的回归用例。
+test('BR-1: codexWorkspacePathFor 拒绝穿越/非法 logical_document_id → BAD_LOGICAL_ID', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-codex-ws-bad-'));
+  const src = path.join(dir, 'report.html');
+  fs.writeFileSync(src, '<!doctype html><html></html>');
+  const bad = ['../', '..', 'a/b', '../../etc/passwd', '', 'a'.repeat(129), 'with space', 'semi;colon'];
+  for (const id of bad) {
+    assert.throws(
+      () => codexWorkspacePathFor({ sourcePath: src, logicalDocumentId: id }),
+      (e) => e.code === 'BAD_LOGICAL_ID',
+      'expected BAD_LOGICAL_ID for: ' + JSON.stringify(id)
+    );
+  }
+});
+
+test('BR-1: codexWorkspacePathFor 接受合法 logical_document_id,返回 .htmlgenius-bridge/codex/<id>', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-codex-ws-ok-'));
+  const src = path.join(dir, 'report.html');
+  fs.writeFileSync(src, '<!doctype html><html></html>');
+  for (const id of ['ok_id', 'hgd_abc']) {
+    const p = codexWorkspacePathFor({ sourcePath: src, logicalDocumentId: id });
+    assert.equal(p, path.join(dir, '.htmlgenius-bridge', 'codex', id));
+  }
 });

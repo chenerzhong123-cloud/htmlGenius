@@ -1,8 +1,17 @@
 (function () {
   var language = localStorage.getItem('htmlgenius-demo-language') || 'zh';
   var labels = { zh: '中文', en: 'English' };
-  var logoPath = location.protocol === 'file:' ? '../../assets/html-genius-logo-deep-mint-128x128.png' : 'assets/html-genius-logo-deep-mint-128x128.png';
+  var logoPath = 'favicon.png'; // favicon.png 与品牌 logo 同源且位于部署根,http/file/扁平部署均可解析(原先指向 assets/... 在扁平部署会 404)
   document.documentElement.style.setProperty('--brand-logo', 'url("' + logoPath + '")');
+  // WEB-4: wrapper 切语言时同步 privacy.html 内嵌 policy.html iframe 的 lang 参数,避免切英文后 iframe 仍中文。
+  function syncPolicyFrame(lang) {
+    var frame = document.querySelector('.policy-frame');
+    if (!frame) return;
+    var src = frame.getAttribute('src') || '';
+    var updated = src.replace(/([?&]lang=)[^&]*/i, '$1' + lang);
+    if (updated !== src) frame.setAttribute('src', updated); // 仅在 lang 实际变化时改 src,避免无谓 reload
+  }
+  syncPolicyFrame(language); // 尽早把 iframe 切到已存语言,减少初始闪动
   function setLanguage(next) {
     language = next;
     document.documentElement.lang = next === 'zh' ? 'zh-CN' : 'en';
@@ -19,6 +28,7 @@
     document.querySelectorAll('[data-language]').forEach(function (el) { el.classList.toggle('is-active', el.dataset.language === next); });
     syncDemoHome();
     localStorage.setItem('htmlgenius-demo-language', next);
+    syncPolicyFrame(next);
   }
   function syncDemoHome() {
     if (!document.querySelector('main > .hero')) return;
@@ -132,7 +142,7 @@
     if (typeof renderTaskSelection === 'function') renderTaskSelection();
   }
   document.querySelectorAll('[data-language]').forEach(function (button) {
-    button.addEventListener('click', function () { setLanguage(button.dataset.language); document.querySelectorAll('.lang-menu').forEach(function(m){m.classList.remove('is-open');}); });
+    button.addEventListener('click', function () { setLanguage(button.dataset.language); document.querySelectorAll('.lang-menu,.mobile-menu').forEach(function(m){m.classList.remove('is-open');}); });
   });
   document.querySelectorAll('[data-language-toggle]').forEach(function (button) {
     if (!button.querySelector('.language-chevron')) button.insertAdjacentHTML('beforeend', '<span class="language-chevron" aria-hidden="true">⌄</span>');
@@ -170,7 +180,7 @@
   var agentGrid = document.querySelector('.two-col');
   if (agentGrid && document.title.indexOf('Agents') !== -1) {
     agentGrid.className = 'agent-grid';
-    agentGrid.insertAdjacentHTML('beforeend', '<article class="agent-card planned"><div class="card-label" data-zh="开发中 · 即将支持" data-en="IN DEVELOPMENT · COMING SOON">开发中 · 即将支持</div><h2>GitHub Copilot</h2><p class="agent-meta" data-zh="计划通过官方 Copilot SDK 与本机 Copilot CLI 接入" data-en="Planned through the official Copilot SDK and local Copilot CLI">计划通过官方 Copilot SDK 与本机 Copilot CLI 接入</p><div class="capability-list"><div><i>○</i><span data-zh="将作为同一个 Agent 入口出现，不让用户选择 SDK 或 CLI runtime。" data-en="Will appear as one Agent, without asking users to choose an SDK or CLI runtime.">将作为同一个 Agent 入口出现，不让用户选择 SDK 或 CLI runtime。</span></div><div><i>○</i><span data-zh="保持新任务、修改计划和候选版本的现有流程。" data-en="Will keep the existing new-task, change-plan, and candidate workflow.">保持新任务、修改计划和候选版本的现有流程。</span></div><div><i>○</i><span data-zh="当前仍在开发，尚未随扩展发布，暂时不能使用。" data-en="Still in development. It is not yet shipped in the extension and cannot be used today.">当前仍在开发，尚未随扩展发布，暂时不能使用。</span></div></div></article>');
+    agentGrid.insertAdjacentHTML('beforeend', '<article class="agent-card"><div class="card-label" data-zh="同样支持" data-en="ALSO SUPPORTED">同样支持</div><h2>GitHub Copilot</h2><p class="agent-meta" data-zh="通过本机已登录的 Copilot CLI 执行" data-en="Runs through your locally signed-in Copilot CLI">通过本机已登录的 Copilot CLI 执行</p><div class="capability-list"><div><i>✓</i><span data-zh="复用本机 Copilot 登录态，不读取或保存凭据" data-en="Reuses your local Copilot sign-in without reading or saving credentials">复用本机 Copilot 登录态，不读取或保存凭据</span></div><div><i>✓</i><span data-zh="受控工作区内只写候选版本" data-en="Writes only the candidate inside a controlled workspace">受控工作区内只写候选版本</span></div><div><i>✓</i><span data-zh="过程可见，随时可以终止任务" data-en="Progress stays visible and the task can be stopped anytime">过程可见，随时可以终止任务</span></div></div><a class="button ghost" href="https://docs.github.com/en/copilot" target="_blank" rel="noreferrer" data-zh="了解 Copilot ↗" data-en="About Copilot ↗">了解 Copilot ↗</a></article>');
     setLanguage(language);
   }
   var bridgeVersion = '0.9.4';
@@ -192,7 +202,7 @@
   var favicon = document.querySelector('link[rel="icon"]') || document.createElement('link');
   favicon.rel = 'icon';
   favicon.type = 'image/png';
-  favicon.href = logoPath; // v0.9.8:用与品牌 logo 同源的路径(http→assets/...,file→../../assets/...);原先写死 ../../assets/... 在部署到 /htmlgenius/ 后会 404 → 浏览器退回域名根 /favicon.ico(奶油色)
+  favicon.href = logoPath; // logoPath 已是 favicon.png(部署根),扁平部署可解析,避免回退到域名根 /favicon.ico
   if (!favicon.parentNode) document.head.appendChild(favicon);
   document.querySelectorAll('.setup-guide .command-card code').forEach(function (code) {
     code.textContent = code.textContent.replace('<你的扩展ID>', officialExtensionId);

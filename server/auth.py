@@ -79,3 +79,50 @@ def consume_state(state: str) -> bool:
         return (int(time.time()) - ts) <= _STATE_TTL
     except Exception:
         return False
+
+
+# === SUP-2: SSE 短时效流票据 ===
+# EventSource 不能设自定义头。旧方案把【长期】session token 拼进 ?token= → 落 nginx/代理
+# 访问日志即泄漏(且 token 滑动续期、活跃永不过期)。改为:先经鉴权 POST /api/stream/ticket
+# 换一张【短时效、仅绑定 team_id】的签名票据,SSE 用 ?ticket= 连接。票据即便进了日志,窗口短
+# (默认 60s)且只能开该 team 的只读事件流,不能调任何其它鉴权接口 —— 危害面大幅收窄。
+_STREAM_TICKET_TTL = int(os.environ.get("HG_STREAM_TICKET_TTL", "60"))
+
+
+def _stream_secret() -> bytes:
+    return (
+        os.environ.get("HG_STREAM_SECRET")
+        or os.environ.get("HG_LARK_APP_SECRET")
+        or "dev-insecure-stream-secret"
+    ).encode()
+
+
+def issue_stream_ticket(team_id: str, ttl: "int | None" = None) -> str:
+    """签发绑定 team_id 的短时效签名票据(base64(body).base64(sig)),含过期时间 + 随机数。"""
+    body = json.dumps(
+        {
+            "team_id": team_id,
+            "exp": int(time.time()) + (ttl if ttl is not None else _STREAM_TICKET_TTL),
+            "n": os.urandom(8).hex(),
+        },
+        separators=(",", ":"),
+    ).encode()
+    sig = hmac.new(_stream_secret(), body, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(body).decode() + "." + base64.urlsafe_b64encode(sig).decode()
+
+
+def consume_stream_ticket(ticket: str) -> "str | None":
+    """校验票据签名 + 未过期 → 返回 team_id;任何异常/过期/篡改 → None(不暴露原因)。"""
+    try:
+        body_b64, sig_b64 = ticket.split(".")
+        body = base64.urlsafe_b64decode(body_b64)
+        sig = base64.urlsafe_b64decode(sig_b64)
+        if not hmac.compare_digest(sig, hmac.new(_stream_secret(), body, hashlib.sha256).digest()):
+            return None
+        payload = json.loads(body)
+        if int(time.time()) > int(payload["exp"]):
+            return None
+        team_id = payload.get("team_id")
+        return team_id if isinstance(team_id, str) and team_id else None
+    except Exception:
+        return None

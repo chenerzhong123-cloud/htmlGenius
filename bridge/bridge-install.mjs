@@ -123,7 +123,9 @@ export function buildLauncherSource({ nodePath, hostPath, extraPathDirs = [], ho
     const r = resolveHomeDir(d, home);
     if (r && r !== "/" && !dirs.includes(r)) dirs.push(r);
   }
-  const safePath = dirs.filter((d) => !/['"$\n]/.test(d)).join(":");
+  // BR-6:safePath 插进 /bin/sh 双引号内,须过滤所有会触发 shell 元语义的字符:
+  // ' " $ ` \ 与换行(反引号/反斜杠在双引号内仍触发命令替换/转义,旧正则漏掉,补上)。当前输入源都安全,此处为防御。
+  const safePath = dirs.filter((d) => !/['"`$\\\n]/.test(d)).join(":");
   const marker = LAUNCHER_MARKER + (version ? " v" + version : "") + " protocol=" + PROTOCOL_VERSION;
   return "#!/bin/sh\n" + marker + "\nexport PATH=\"" + safePath + ":$PATH\"\nexec '" + nodePath + "' '" + hostPath + "' \"$@\"\n";
 }

@@ -2,6 +2,17 @@
 import { serializeDoc } from "./serialize.js";
 import { sanitizeHTML } from "./sanitize.js";
 
+// BE-2:版本接口需 Bearer session 鉴权。token 由 viewer.html / 测试 page fixture 写入
+// localStorage.hg_session(与 annotate.js 的 authHeaders 同源)。未登录则不带头 → 401。
+function authHeader(extra) {
+  const h = Object.assign({}, extra || {});
+  try {
+    const tok = localStorage.getItem("hg_session");
+    if (tok) h["Authorization"] = `Bearer ${tok}`;
+  } catch (e) {}
+  return h;
+}
+
 export class VersionManager {
   constructor(docId, iDoc, iWin, apiBase = "/api") {
     this.docId = docId;
@@ -39,7 +50,7 @@ export class VersionManager {
     try {
       await fetch(`${this.api}/documents/${encodeURIComponent(this.docId)}/versions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeader({ "Content-Type": "application/json" }),
         body: JSON.stringify({ html_content: html, source: "edit" }),
       });
     } catch (e) {
@@ -48,21 +59,32 @@ export class VersionManager {
   }
 
   flushSync() {
-    // beforeunload 不能等 async:用 sendBeacon
+    // beforeunload 不能等 async。改用 keepalive fetch(sendBeacon 无法带 Authorization 头,
+    // 版本接口现已需鉴权);keepalive 使请求在页面卸载后仍发出。
     if (!this.dirty) return;
     this.dirty = false;
     const html = serializeDoc(this.iDoc);
-    const blob = new Blob([JSON.stringify({ html_content: html, source: "edit" })], { type: "application/json" });
-    navigator.sendBeacon(`${this.api}/documents/${encodeURIComponent(this.docId)}/versions`, blob);
+    try {
+      fetch(`${this.api}/documents/${encodeURIComponent(this.docId)}/versions`, {
+        method: "POST",
+        keepalive: true,
+        headers: authHeader({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ html_content: html, source: "edit" }),
+      }).catch(() => {});
+    } catch (e) {}
   }
 
   async list() {
-    const r = await fetch(`${this.api}/documents/${encodeURIComponent(this.docId)}/versions`);
+    const r = await fetch(`${this.api}/documents/${encodeURIComponent(this.docId)}/versions`, {
+      headers: authHeader(),
+    });
     return (await r.json()).items || [];
   }
 
   async restore(version, onRestore) {
-    const r = await fetch(`${this.api}/documents/${encodeURIComponent(this.docId)}/versions/${version}`);
+    const r = await fetch(`${this.api}/documents/${encodeURIComponent(this.docId)}/versions/${version}`, {
+      headers: authHeader(),
+    });
     const raw = await r.text();
     const cleaned = sanitizeHTML(raw);
     this.iDoc.open();

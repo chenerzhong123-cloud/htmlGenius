@@ -43,6 +43,20 @@ export function isSha256Tagged(v) {
   return typeof v === "string" && /^sha256:[0-9a-f]{64}$/.test(v);
 }
 
+// —— 工作区包含校验(R-7):source 的 realpath 必须落在 workspaceRoot(realpath)内 ——
+// 与 copilot-runtime.mjs:isInsideWorkspace 同语义:两侧 realpath 后做前缀比对,防符号链接逃逸
+// (macOS /tmp→/private/tmp 这类别名靠 realpath 规范,词法比较会误杀/误放)。
+// source 已由 resolveSource*/realpathSync 规范化,此处只需再规范 workspaceRoot 并比对;根不存在即拒。
+// 未提供 workspaceRoot 时返回 true(向后兼容:仅靠 resolveSource* 内的软链/realpath 硬化兜底)。
+export function isInsideWorkspace(realSource, workspaceRoot) {
+  if (typeof workspaceRoot !== "string" || workspaceRoot.length === 0) return true;
+  if (typeof realSource !== "string" || realSource.length === 0 || realSource.includes("\0")) return false;
+  let realRoot;
+  try { realRoot = fs.realpathSync(workspaceRoot); }
+  catch (_) { return false; }
+  return realSource === realRoot || realSource.startsWith(realRoot + path.sep);
+}
+
 // canonical task JSON —— 与 ./vendor/change-contract.js(vendored 自 extension/)的 serialize 完全一致(同一真相源)。
 export function canonicalTaskJson(task) {
   return JSON.stringify(task, null, 2);
@@ -51,20 +65,36 @@ export function taskSha256(task) {
   return sha256Bytes(Buffer.from(canonicalTaskJson(task), "utf8"));
 }
 
-// —— source artifact 安全解析(§7 步骤2):必须 file:、存在、regular file、.html/.htm、≤10MiB ——
-export function resolveSourceArtifact(artifactUri) {
+// —— source artifact 安全解析(§7 步骤2;R-7 工作区包含 + 软链逃逸防御)——
+// 必须 file:、存在、regular file、非软链、.html/.htm、≤10MiB;且 realpath 落在显式 workspaceRoot 内(若提供)。
+// 与 candidate-workspace.resolveSourcePath 一致地「先 lstat 输入再 realpath 再 lstat」:statSync/realpathSync 会
+// 跟随软链,必须先 lstat 输入路径才能检出符号链接逃逸(否则被操控渲染端用软链把 artifact_uri 指向 victim 文件)。
+// 返回非 realpath 的解析路径(向后兼容:host 用它做 sha256File/dirname;软链已被拒绝,与 realpath 同 inode)。
+export function resolveSourceArtifact(artifactUri, { workspaceRoot } = {}) {
   if (typeof artifactUri !== "string" || !/^file:/i.test(artifactUri)) {
     fail("NOT_FILE_URI", "artifact_uri must be a file: URL");
   }
   let p;
   try { p = fileURLToPath(artifactUri); }
   catch (e) { fail("NOT_FILE_URI", "cannot parse artifact_uri as file URL"); }
-  let stat;
-  try { stat = fs.statSync(p); }
+  let lst0;
+  try { lst0 = fs.lstatSync(p); }
   catch (e) { fail("SOURCE_NOT_FOUND", "source file not found: " + p); }
-  if (!stat.isFile()) fail("SOURCE_NOT_FILE", "artifact_uri is not a regular file: " + p);
-  if (!/\.html?$/i.test(p)) fail("SOURCE_NOT_HTML", "source must be .html/.htm: " + p);
-  if (stat.size > MAX_ARTIFACT_BYTES) fail("SOURCE_TOO_LARGE", "source > 10 MiB: " + stat.size);
+  if (lst0.isSymbolicLink()) fail("SOURCE_SYMLINK", "artifact_uri must not be a symlink: " + p);
+  let real;
+  try { real = fs.realpathSync(p); }
+  catch (e) { fail("SOURCE_NOT_FOUND", "source file not found: " + p); }
+  let lst;
+  try { lst = fs.lstatSync(real); }
+  catch (e) { fail("SOURCE_NOT_FOUND", "source file not found: " + real); }
+  if (lst.isSymbolicLink()) fail("SOURCE_SYMLINK", "artifact_uri resolves to a symlink: " + real);
+  if (!lst.isFile()) fail("SOURCE_NOT_FILE", "artifact_uri is not a regular file: " + real);
+  if (!/\.html?$/i.test(real)) fail("SOURCE_NOT_HTML", "source must be .html/.htm: " + real);
+  if (lst.size > MAX_ARTIFACT_BYTES) fail("SOURCE_TOO_LARGE", "source > 10 MiB: " + lst.size);
+  // R-7:realpath 必须落在用户显式打开的 workspaceRoot 内(未提供则跳过,向后兼容)
+  if (workspaceRoot && !isInsideWorkspace(real, workspaceRoot)) {
+    fail("SOURCE_OUTSIDE_WORKSPACE", "artifact_uri resolves outside the workspace root");
+  }
   return { sourcePath: p };
 }
 

@@ -3,7 +3,7 @@
 // (UI 侧的裁剪在 background PlanValidate.sanitizeProbeResult 做;这里只产出分类 + 简短 version)。
 // 每 provider 独立 try/catch:一个失败不污染另一个(§5.1)。
 import { spawnSync } from 'node:child_process';
-import { CLAUDE_BIN, checkAuth } from './claude-cli.mjs';
+import { CLAUDE_BIN, checkAuth, sanitizedEnv } from './claude-cli.mjs';
 import {
   discoverAppRuntime, verifySchema, CodexAppServerClient,
   CODEX_APP_NOT_FOUND, CODEX_APP_UNTRUSTED, CODEX_INCOMPATIBLE, CODEX_AUTH_REQUIRED, CODEX_TIMED_OUT
@@ -25,7 +25,8 @@ export async function probeClaude({ claudeVersion, claudeAuthCheck } = {}) {
     ? claudeVersion()
     : (() => {
         try {
-          const r = spawnSync(CLAUDE_BIN, ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+          // BR-7:与 handoff 执行路径一致,只透传白名单 env(不继承完整 process.env),避免探测泄漏环境变量。
+          const r = spawnSync(CLAUDE_BIN, ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizedEnv() });
           if (r.error || r.status !== 0) return null;
           return String(r.stdout || '').trim() || null;
         } catch (e) { return null; }

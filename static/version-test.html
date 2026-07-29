@@ -8,7 +8,8 @@
     const doc = f.contentDocument;
     if (!doc || !doc.body || doc.readyState === "loading") { setTimeout(setup, 50); return; }
     await fetch("/api/documents", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + (localStorage.getItem("hg_session") || "") },
       body: JSON.stringify({ document_id: "doc_vt" }),
     });
     window.__vm = new VersionManager("doc_vt", doc, f.contentWindow);

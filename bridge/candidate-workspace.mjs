@@ -7,8 +7,14 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+// R-7:复用 task-bundle 的工作区包含判定与 source 大小上限(单一真相源,不重复造)。
+// task-bundle 不反向依赖本模块,无循环依赖。
+import { isInsideWorkspace, MAX_ARTIFACT_BYTES as MAX_SOURCE_BYTES } from "./task-bundle.mjs";
 
 export const MAX_CANDIDATE_BYTES = 10 * 1024 * 1024; // 10 MiB 硬上限
+// BR-4:比例放宽的下限。源很小时 10× 仍允许写出一个像样的 HTML 候选(1 MiB 足够),
+// 不至于因源只有几 KB 就把候选卡死到几十 KB;绝对 10 MiB 上限始终兜底。
+const MIN_CANDIDATE_BYTES = 1 * 1024 * 1024; // 1 MiB
 const HTML_HEAD_RE = /<!doctype\s+html|<html/i;     // 基本 HTML 形态(阻止 Markdown/纯文本,非质量判断)
 
 function fail(code, message, extra) {
@@ -26,8 +32,9 @@ export function assertSafeRunId(runId) {
   return runId;
 }
 
-// source canonical 路径 + 安全校验(spec §3.4.1/8):realpath、regular file、.html/.htm、拒 symlink
-export function resolveSourcePath(sourceUriOrPath) {
+// source canonical 路径 + 安全校验(spec §3.4.1/8;R-7 工作区包含 + R-21 大小上限):
+// realpath、regular file、.html/.htm、拒 symlink、≤10MiB,且(若提供 workspaceRoot)realpath 落在其内。
+export function resolveSourcePath(sourceUriOrPath, { workspaceRoot } = {}) {
   let p;
   if (typeof sourceUriOrPath === "string" && /^file:/i.test(sourceUriOrPath)) {
     try { p = fileURLToPath(sourceUriOrPath); }
@@ -51,6 +58,13 @@ export function resolveSourcePath(sourceUriOrPath) {
   if (lst.isSymbolicLink()) fail("SOURCE_SYMLINK", "source resolves to a symlink: " + real);
   if (!lst.isFile()) fail("SOURCE_NOT_FILE", "source must be a regular file: " + real);
   if (!/\.html?$/i.test(real)) fail("SOURCE_NOT_HTML", "source must be .html/.htm: " + real);
+  // R-21:source 大小上限(与 handoff 的 resolveSourceArtifact 一致),先 stat 判大小,
+  // 避免下游 sha256File/copyFileSync 的 readFileSync 整文件读入数 GB .html 导致 OOM。
+  if (lst.size > MAX_SOURCE_BYTES) fail("SOURCE_TOO_LARGE", "source > 10 MiB: " + lst.size);
+  // R-7:realpath 必须落在用户显式打开的 workspaceRoot 内(未提供则跳过,向后兼容)
+  if (workspaceRoot && !isInsideWorkspace(real, workspaceRoot)) {
+    fail("SOURCE_OUTSIDE_WORKSPACE", "source resolves outside the workspace root");
+  }
   return real;
 }
 
@@ -152,7 +166,9 @@ export function validateCandidate(candidatePath, sourceByteLength) {
   if (lst.isSymbolicLink()) fail("CANDIDATE_SYMLINK", "candidate.html must not be a symlink");
   if (!lst.isFile()) fail("CANDIDATE_NOT_FILE", "candidate.html not a regular file");
   if (lst.size === 0) fail("CANDIDATE_EMPTY", "candidate.html is empty");
-  const cap = Math.min(MAX_CANDIDATE_BYTES, Math.max(MAX_CANDIDATE_BYTES, (sourceByteLength || 0) * 10));
+  // BR-4:旧 Math.max(MAX, x*10) 内层恒 ≥ MAX → cap 恒为 MAX(死代码,10× 比例放宽失效)。
+  // 改为 [MIN, MAX] 夹紧的 10× 源大小:小源有 MIN 兜底,大源仍受绝对 10 MiB 硬上限约束。
+  const cap = Math.min(MAX_CANDIDATE_BYTES, Math.max(MIN_CANDIDATE_BYTES, (sourceByteLength || 0) * 10));
   if (lst.size > cap) fail("CANDIDATE_TOO_LARGE", "candidate.html too large: " + lst.size + " > " + cap);
   const buf = fs.readFileSync(candidatePath);
   let text;
