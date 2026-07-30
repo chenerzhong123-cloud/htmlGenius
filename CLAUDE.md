@@ -18,7 +18,7 @@
 **推送到 main 前必须同步更新用户向文档，不能只提交代码。** 每次发版（含安全 / 重构批次）都要：
 
 - **`RELEASE_NOTES.md`**：文件顶部加新版本条目，写**用户可见**的变化（不写内部实现 / 审计编号），最新版本在最上。
-- **`README.md`**：若有用户可见的能力 / 限制 / 权限变化，同步更新描述与「已知限制」段。README 是 evergreen 产品介绍，不做逐版本流水账，版本细节只链 `RELEASE_NOTES.md`。
+- **`README.md`**：① 若有用户可见的能力 / 限制 / 权限变化，同步更新描述与「已知限制」段；② **`## 最近更新` 段只保留最近 3 条版本条目**（最新一条标「当前版本」），发新版时：加新条目到顶、删掉第 4 条，并保持与 `RELEASE_NOTES.md` 一致；段尾保留「完整历史见 RELEASE_NOTES.md」链接。其余正文是 evergreen 产品介绍，不放逐版本流水账。
 - **`DEVELOPMENT.md` / `LOCAL_BRIDGE.md`**：架构、部署、bridge 用法、环境变量有变时同步（如新增 env、改了打包 / 部署口径）。
 - 版本号：扩展看 `extension/manifest.json`（0.x.x）；bridge 看 `bridge/package.json`（自 1.0.0 起独立编号，发 npm 时单独递增）。
 - `docs/` 已 gitignore：审计报告 / spec / 计划等本地工作文档不入库；README / DEVELOPMENT 只链根目录下的文档，docs/ 内容一律以「本地工作文档，不入库」说明，不留断链。

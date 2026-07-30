@@ -47,6 +47,19 @@
 
 > 仅支持 macOS + Chrome + Node 20.x / 22+（GitHub Copilot 另需 20.19+ / 22.12+）。详见 [连接配置文档](https://www.deuce.monster/htmlgenius/setup.html)、[Agent 说明](https://www.deuce.monster/htmlgenius/agents.html) 与 [`LOCAL_BRIDGE.md`](LOCAL_BRIDGE.md)。
 
+## 最近更新
+
+> 这里只保留最近 3 条；完整版本历史见 **[RELEASE_NOTES.md](RELEASE_NOTES.md)**。
+
+### v0.9.12（2026-07-30 · 当前版本）
+- 首次安装后切到「安装前已打开的标签」不再一直显示「正在连接」——会提示「刷新页面以启用 htmlGenius」并带一键刷新按钮，刷新即连上。
+
+### v0.9.11（2026-07-30）
+- 本地连接组件（bridge）安装指向更新到 1.0.1（路径穿越校验、解码器不再卡死、artifact 读取限定在工作区等）。
+
+### v0.9.10（2026-07-29）
+- 安全加固与稳定性提升；会话失效会提示重登；本地文件访问提示更准。⚠️ 本版新增「读取浏览活动」权限，更新后需在 `chrome://extensions` 重新启用一次。
+
 ## 已知限制
 
 - **回灌需手动粘贴**：复制指令后要自己粘进 AI 对话框（用本机 Agent 闭环则不用）。
