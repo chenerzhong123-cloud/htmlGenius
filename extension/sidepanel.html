@@ -45,6 +45,11 @@
     <button id="file-access-copy" class="file-access-copy" type="button" data-i18n="fileAccess.copy">复制设置地址</button>
     <span class="file-access-note" data-i18n="fileAccess.hint">复制后，请粘贴到浏览器顶部的地址栏。</span>
   </div>
+  <div id="refresh-needed-hint" class="file-access-hint" hidden>
+    <b data-i18n="refreshNeeded.title">刷新页面以启用 htmlGenius</b>
+    <span data-i18n="refreshNeeded.body">此页面在安装 htmlGenius 前就已打开，刷新一下即可连接。</span>
+    <button id="refresh-now-btn" class="file-access-copy" type="button" data-i18n="refreshNeeded.btn">刷新页面</button>
+  </div>
   <button id="edit-btn" hidden>切换编辑模式</button>
   <!-- v0.8: 编辑工具区。交互展示(弹层样式等)是侧边栏自己的;但所有改动都发消息给
        content-script 的 execEdit 唯一入口执行,与页面浮动工具栏的效果完全一致。 -->

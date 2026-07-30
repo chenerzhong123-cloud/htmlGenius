@@ -84,6 +84,7 @@
     catch (e) { csReady = false; /* content-script 未就绪,等 onUpdated(complete) 再试 */ }
     // file:// 页若 content script 未就绪,几乎必是「允许访问文件网址」toggle 关了(Chrome 对所有扩展默认关)。
     syncFileAccessHint(tab, csReady);
+    syncRefreshHint(tab, csReady);
     // #5: 建立长连接 —— 侧边栏关闭(页面销毁)→ Chrome 自动断开 port → content-script onDisconnect 失活
     try { _panelPort = chrome.tabs.connect(tab.id, { name: "hg-panel" }); } catch (e) {}
     if (oldPort && oldPort !== _panelPort) { try { oldPort.disconnect(); } catch (e) {} } // 切标签:最后再断旧 port
@@ -99,6 +100,20 @@
     const urlHidden = !!(tab && tab.id != null && !tab.url && tab.status === "complete");
     const isFileUrl = !!(tab && tab.url && /^file:/i.test(tab.url)) || urlHidden;
     el.hidden = !(isFileUrl && !csReady);
+  }
+  // 安装前已打开的标签:content-script 没注入 → activate 收不到回应,停在「正在连接」。
+  // 触发条件:CS 未就绪 + 页面已加载完(不会自己好)+ 非 file://(交给文件访问提示)+ 非浏览器内部页(刷新无意义)。
+  // 用户点「刷新页面」→ chrome.tabs.reload → onUpdated(complete) 重跑 activateActiveTab → CS 就绪 → 本提示自动隐藏。
+  function syncRefreshHint(tab, csReady) {
+    const el = document.getElementById("refresh-needed-hint");
+    if (!el) return;
+    if (csReady) { el.hidden = true; return; }                         // CS 已连上
+    if (!tab || tab.status !== "complete") { el.hidden = true; return; } // 还在加载,先等
+    const url = (tab && tab.url) || "";
+    const urlHidden = !url && tab.id != null;
+    if (/^file:/i.test(url) || urlHidden) { el.hidden = true; return; } // file:// 交给文件访问提示,不重复
+    if (/^(chrome|edge|about|chrome-extension|view-source):/i.test(url)) { el.hidden = true; return; } // 浏览器内部页,刷新无意义
+    el.hidden = false;                                                 // 已加载完 + 非 file + 非内部页 + CS 没来 = 安装前已打开
   }
   // #1: 心跳 —— 侧边栏在线时持续 ping 活动标签,content-script 超时未收到则自动失活(兜底)
   async function pingActiveTab() {
@@ -1618,6 +1633,11 @@
     sendToContent({ type: _editing ? "disable-edit" : "enable-edit" });
     _editing = !_editing;
     renderMode();
+  });
+  // 安装前已打开的标签:点「刷新页面」重载当前 tab → content-script 注入 → 自动连上(提示随之隐藏)
+  const refreshNowBtn = document.getElementById("refresh-now-btn");
+  if (refreshNowBtn) refreshNowBtn.addEventListener("click", () => {
+    getActiveTab().then((tab) => { if (tab && tab.id) { try { chrome.tabs.reload(tab.id, { bypassCache: true }); } catch (e) { /* 非关键 */ } } });
   });
   const artifactReloadBtn = document.getElementById("artifact-reload-btn");
   const artifactReloadConfirm = document.getElementById("artifact-reload-confirm");
