@@ -610,6 +610,13 @@
   const cbsCandidate = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-candidate");
   const cbsVersion = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-version");
   const cbsOpen = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-open");
+  // 方向3 确定性编辑预览
+  const patchPreview = document.getElementById("patch-preview");
+  const patchBadge = document.getElementById("patch-badge");
+  const patchEditList = document.getElementById("patch-edit-list");
+  const patchConfirmBtn = document.getElementById("patch-confirm");
+  const patchCancelBtn = document.getElementById("patch-cancel");
+  const patchApplyModeSel = document.getElementById("patch-apply-mode");
 
   let _contractStep = "closed"; // closed | compose | comment-scope | plan-running | plan-review | candidate-running
   let _selectedNodeIds = new Set(); // 本轮勾选的节点 id(root+reply;真相源)
@@ -624,6 +631,7 @@
   let _providerCacheAt = 0;         // probe 缓存时间戳(ms);30s 内不重探
   let _plan = null;                 // 已校验计划记录(bridge-plan-ready):{ plan_id, plan_sha256, plan_markdown, provider, source_artifact_uri, base_artifact_hash, task_sha256 }
   let _planStale = false;           // 计划后改 contract/artifact → true,阻止确认
+  let _patchPending = null;         // 方向3:待确认的精确编辑预览 { run_id, edits, compliance }
 
   function countReplies(rootId, allItems) {
     const kids = {};
@@ -1529,6 +1537,73 @@
     return dispatchBridgeRun("candidate", { plan: planPayload() });
   }
 
+  // === 方向3:确定性编辑预览(先预览后确认)。bridge-patch-preview 到达 → 渲染编辑清单 + 合规徽章 → 用户勾选确认 →
+  //     发 bridge-patch-apply(仅勾选的 ok 编辑)→ background 另起 host 落 candidate(复用 completeCandidate)。===
+  const PATCH_STATUS_KEY = { out_of_scope: "patch.outOfScope", not_found: "patch.notFound", ambiguous: "patch.ambiguous", conflict: "patch.conflict" };
+  function patchStatusText(st) { const k = PATCH_STATUS_KEY[st]; return k ? t(k) : String(st); }
+  function renderPatchPreview(edits, compliance) {
+    if (!patchEditList) return;
+    const items = (edits || []).slice().sort((a, b) => ((a.status === "ok" ? 0 : 1) - (b.status === "ok" ? 0 : 1)));
+    patchEditList.innerHTML = items.map((e) => {
+      const isOk = e.status === "ok";
+      const actionLabel = e.action === "set_style" ? t("patch.setStyle") : t("patch.replaceText");
+      const loc = esc((e.locator && e.locator.exact) || "");
+      const detail = e.action === "set_style"
+        ? '<span class="pp-loc">' + loc + '</span> → <span class="pp-new">' + esc((e.property || "") + ": " + (e.value || "")) + '</span>'
+        : '<span class="pp-old">' + loc + '</span> → <span class="pp-new">' + esc(e.replacement || "") + '</span>';
+      const badge = isOk ? "" : '<span class="pp-status pp-' + esc(e.status) + '">' + esc(patchStatusText(e.status)) + '</span>';
+      const checkbox = isOk
+        ? '<input type="checkbox" class="pp-check" data-id="' + esc(e.id) + '" checked>'
+        : '<input type="checkbox" class="pp-check" disabled>';
+      return '<div class="pp-item' + (isOk ? "" : " pp-problem") + '">' + checkbox +
+        '<div class="pp-body"><div class="pp-action">' + esc(actionLabel) + (e.comment_ref ? " · " + esc(String(e.comment_ref)) : "") + "</div>" +
+        '<div class="pp-detail">' + detail + "</div>" + badge + "</div></div>";
+    }).join("");
+    if (patchBadge && compliance) {
+      const skip = (compliance.total || 0) - (compliance.applicable || 0);
+      patchBadge.textContent = (compliance.applicable || 0) + " " + t("patch.willApply") + (skip > 0 ? " · " + skip + " " + t("patch.needAttention") : "");
+    }
+  }
+  function showPatchPreview(msg) {
+    _patchPending = { run_id: msg.run_id, edits: msg.edits || [], compliance: msg.compliance || {} };
+    renderPatchPreview(msg.edits, msg.compliance);
+    if (patchPreview) patchPreview.hidden = false;
+    setContractRunning(false); stopRunTimer();            // 等用户确认,停「运行中」转圈
+    setBridgeStatus(t("patch.previewTitle"), "running");
+    if (contractBridge) contractBridge.disabled = true;   // 预览期间禁发送(避免与 pending run 冲突)
+  }
+  function hidePatchPreview() {
+    _patchPending = null;
+    if (patchPreview) patchPreview.hidden = true;
+    if (contractBridge) contractBridge.disabled = _contractRunning; // 运行中仍保持禁用(发送键此时是「终止」)
+  }
+  function confirmPatch() {
+    if (!_patchPending) return;
+    const checked = Array.from(patchEditList.querySelectorAll(".pp-check:checked")).map((el) => el.getAttribute("data-id"));
+    const runId = _patchPending.run_id;
+    hidePatchPreview();
+    _contractRunId = runId; setContractRunning(true); startRunTimer();
+    setBridgeStatus(t("bridge.candidateRunning").replace("{agent}", providerLabel(_provider)), "running");
+    expandBridgeDetail(true);
+    chrome.runtime.sendMessage({ type: "bridge-patch-apply", tab_id: currentTabId, run_id: runId, confirmed_edit_ids: checked })
+      .then((resp) => { if (!resp || !resp.ok) { setContractRunning(false); stopRunTimer(); setBridgeStatus(tBridgeFailed(resp && resp.code, resp), bridgeFailClass(resp && resp.code)); } })
+      .catch(() => { setContractRunning(false); stopRunTimer(); setBridgeStatus(t("bridge.notInstalled"), "warn"); });
+  }
+  function cancelPatch() {
+    if (!_patchPending) return;
+    const runId = _patchPending.run_id;
+    hidePatchPreview();
+    chrome.runtime.sendMessage({ type: "bridge-cancel", tab_id: currentTabId, run_id: runId }).catch(() => {});
+    setBridgeStatus(t("patch.cancelled"), "warn");
+  }
+  // 设置持久化 + 按钮接线
+  if (patchApplyModeSel) {
+    try { chrome.storage.sync.get({ hgPatchApplyMode: "preview_confirm" }, (r) => { patchApplyModeSel.value = (r && r.hgPatchApplyMode) || "preview_confirm"; }); } catch (e) {}
+    patchApplyModeSel.addEventListener("change", () => { try { chrome.storage.sync.set({ hgPatchApplyMode: patchApplyModeSel.value }); } catch (e) {} });
+  }
+  if (patchConfirmBtn) patchConfirmBtn.addEventListener("click", confirmPatch);
+  if (patchCancelBtn) patchCancelBtn.addEventListener("click", cancelPatch);
+
   if (contractCloseBtn) contractCloseBtn.addEventListener("click", closeContract);
   // scope 卡 / brief / preserve 改动 → 刷新 UI + 计划失效检测(spec §3.E.9)
   document.querySelectorAll('input[name="contract-scope"]').forEach((r) => r.addEventListener("change", () => { refreshContractUI(); checkPlanStale(); }));
@@ -1943,6 +2018,15 @@
     // bridge:background 推送的 run 进度/完成/失败/计划就绪(仅当前 tab 且任务 sheet 打开时处理)
     if (_contractOpen && msg && msg.tab_id === currentTabId) {
       if (msg.type === "bridge-stream") { handleStream(msg); return; } // v0.8.1 Codex 实时流(delta/工具/文件)
+      if (msg.type === "bridge-patch-preview") { showPatchPreview(msg); return; } // 方向3:精确编辑预览(先预览后确认)
+      if (msg.type === "bridge-patch-fallback") { // 方向3:坏 JSON 回落完整候选 —— 切到新 run 继续跟进度,不弹错误
+        if (_patchPending && msg.old_run_id === _patchPending.run_id) hidePatchPreview();
+        if (msg.new_run_id) _contractRunId = msg.new_run_id;
+        setContractRunning(true); startRunTimer();
+        setBridgeStatus(t("patch.fallback"), "running");
+        pushProgress(t("patch.fallback"));
+        return;
+      }
       if (msg.type === "bridge-plan-ready") { onPlanReady(msg); } // v0.8.1 plan run 完成 → plan-review
       else if (msg.type === "bridge-progress" && _contractRunning) {
         const m = _contractRunKind === "plan" ? t("bridge.planRunning").replace("{agent}", providerLabel(_provider)) : t("bridge.candidateRunning");

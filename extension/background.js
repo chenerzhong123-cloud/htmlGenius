@@ -60,6 +60,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleBridgeStart(msg).then(sendResponse, (e) => sendResponse({ ok: false, code: "BG_ERROR", message: String(e && e.message || e) }));
     return true;
   }
+  if (msg.type === "bridge-patch-apply") {
+    // 方向3:用户确认预览后,复用 pending 的 patch run 落 candidate(新开 host 进程读盘上 edits.json)
+    handlePatchApply(msg).then(sendResponse, (e) => sendResponse({ ok: false, code: "BG_ERROR", message: String(e && e.message || e) }));
+    return true;
+  }
   if (msg.type === "bridge-query-providers") {
     // v0.8.1 §5.1:provider probe。只读检查;30s 缓存(成功与失败都缓存);不暴露 runtime 路径/TeamID/stderr/认证。
     handleQueryProviders().then(sendResponse, (e) => sendResponse({ ok: false, code: "BG_ERROR", providers: [], message: String(e && e.message || e) }));
@@ -133,7 +138,7 @@ async function handleQuerySession({ tab_id, provider }) {
   return { ok: true, has_session: !!sess, continuable, last_status: sess && sess.status };
 }
 
-async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, change_contract, plan }) {
+async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, change_contract, plan, _no_patch }) {
   if (!tab_id) return { ok: false, code: "NO_TAB" };
   if (!SUPPORTED_PROVIDERS.has(provider)) return { ok: false, code: "UNKNOWN_PROVIDER", message: "unsupported provider: " + provider };
   const runKind = run_kind || "handoff"; // Night Pack A: "candidate" 产受控 candidate;"plan" v0.8.1 产受控修改计划;缺省 "handoff"(v0.7.1 ack)
@@ -187,6 +192,12 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
     confirmedPlanRec = planRec;
   }
 
+  // 方向3 确定性编辑快车道:candidate + precise_patch + provider 支持 patch → 内部升级为 patch_preview。
+  // sidepanel 发送路径不变(仍发 candidate),升级在 background 透明完成;_no_patch 用于坏 JSON 回落 candidate 时防再次升级(死循环)。
+  if (runKind === "candidate" && task.mode === "precise_patch" && !_no_patch && ProviderMetadata.providerSupports(provider, "patch")) {
+    runKind = "patch_preview";
+  }
+
   // 4. tab lock:同一 tab 不允许并发 run
   const active = await Storage.getActiveBridgeRunForTab(tab_id);
   if (active) return { ok: false, code: "RUN_IN_PROGRESS", run_id: active.run_id };
@@ -221,6 +232,7 @@ async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, cha
     selected_annotation_ids: [],
     status: "starting",
     error_code: null, plan_id: null,
+    patch_change_contract: runKind === "patch_preview" ? task : null, // 方向3:坏 JSON 回落 candidate 时复用
     created_at: nowIso(), completed_at: null
   };
   await Storage.saveBridgeRun(run);
@@ -313,6 +325,11 @@ function onHostMessage(tab_id, runId, m, taskSha, logicalId, artifactUrl) {
     completeCandidate(tab_id, runId, m, taskSha, logicalId, artifactUrl);
     return;
   }
+  if (m.type === "patch-preview-ready") {
+    // 方向3:确定性编辑预览就绪 → 按设置(预览确认/直接应用)分流
+    onPatchPreviewReady(tab_id, runId, m, taskSha, logicalId, artifactUrl);
+    return;
+  }
   if (m.type === "plan-ready") {
     // v0.8.1 §5.3:host 受控 plan run 产物。逐字段校验(绝不跨侧比 hash)→ 建 bridge_plans(draft)→ 广播(不含路径/session)。
     completePlan(tab_id, runId, m, taskSha, logicalId, artifactUrl);
@@ -324,7 +341,14 @@ function onHostMessage(tab_id, runId, m, taskSha, logicalId, artifactUrl) {
     return;
   }
   if (m.type === "bridge_failed") {
-    failRun(tab_id, runId, m.code || "RUN_FAILED", m.message || "");
+    // 方向3:patch_preview 输出坏 JSON(PATCH_EDITS_INVALID)→ 静默回落 candidate(用回存契约重发);其余照常 failRun
+    Storage.getBridgeRun(runId).then((run) => {
+      if (run && run.run_kind === "patch_preview" && m.code === "PATCH_EDITS_INVALID" && run.patch_change_contract) {
+        patchFallbackToCandidate(tab_id, runId, run, m).catch(() => failRun(tab_id, runId, m.code || "RUN_FAILED", m.message || ""));
+        return;
+      }
+      failRun(tab_id, runId, m.code || "RUN_FAILED", m.message || "");
+    }).catch(() => failRun(tab_id, runId, m.code || "RUN_FAILED", m.message || ""));
     return;
   }
 }
@@ -483,6 +507,78 @@ async function completeRun(tab_id, runId, completion, taskSha, logicalId, artifa
     workspace_path: BridgeValidate.workspacePathForFileUrl(artifactUrl, logicalId),
     status: "completed"
   }).catch(() => {});
+}
+
+// —— 方向3 确定性编辑快车道:预览就绪分流(设置驱动:先预览后确认 / 直接应用)——
+// 存预览(状态 awaiting_confirm)→ 读设置 hgPatchApplyMode:
+//   apply_then_review → 自动以全部 ok 编辑发 patch_apply(直接产出 candidate,事后审阅);
+//   preview_confirm(默认)→ 断开 preview host(应用时另起进程),广播 bridge-patch-preview 供 sidepanel 确认。
+function _patchWorkspaceRoot(uri) {
+  if (!(uri && /^file:/i.test(uri))) return undefined;
+  try { const u = new URL(uri); u.pathname = u.pathname.replace(/[^/]*$/, ""); return u.href; } catch (e) { return undefined; }
+}
+async function onPatchPreviewReady(tab_id, runId, m, taskSha, logicalId, artifactUrl) {
+  await Storage.updateBridgeRun(runId, { status: "awaiting_confirm", patch_preview: { edits: m.edits, compliance: m.compliance } }).catch(() => {});
+  const mode = await new Promise((res) => {
+    try { chrome.storage.sync.get({ hgPatchApplyMode: "preview_confirm" }, (r) => res((r && r.hgPatchApplyMode) || "preview_confirm")); }
+    catch (e) { res("preview_confirm"); }
+  });
+  if (mode === "apply_then_review") {
+    const okIds = (m.edits || []).filter((e) => e && e.status === "ok").map((e) => e.id);
+    broadcast({ type: "bridge-progress", tab_id, run_id: runId, status: "running" });
+    handlePatchApply({ tab_id, run_id: runId, confirmed_edit_ids: okIds }).catch(() => {});
+    return;
+  }
+  // 预览确认:收尾 preview host(应用阶段另起进程读盘),保持 run 于 awaiting_confirm(tab 锁仍持有)
+  const entry = _runsByTab.get(tab_id);
+  if (entry && entry.run_id === runId) { entry.terminal = true; try { entry.port.disconnect(); } catch (_) {} }
+  broadcast({ type: "bridge-patch-preview", tab_id, run_id: runId, edits: m.edits, compliance: m.compliance, task_sha256: m.task_sha256 });
+}
+
+// —— 方向3:用户确认(或自动应用)后,复用 pending 的 patch run 落 candidate ——
+// 新开 host 进程读盘上 edits.json + source snapshot 应用(对 ServiceWorker 挂起健壮);candidate-ready 复用 completeCandidate。
+async function handlePatchApply({ tab_id, run_id, confirmed_edit_ids }) {
+  if (!tab_id || !run_id) return { ok: false, code: "BAD_REQUEST" };
+  if (!Array.isArray(confirmed_edit_ids)) return { ok: false, code: "BAD_REQUEST" };
+  const run = await Storage.getBridgeRun(run_id).catch(() => null);
+  if (!run || run.run_kind !== "patch_preview" || run.status !== "awaiting_confirm") return { ok: false, code: "NO_PENDING_PATCH" };
+  if (run.tab_id !== tab_id) return { ok: false, code: "TAB_MISMATCH" };
+  const prev = _runsByTab.get(tab_id);
+  if (prev) { prev.terminal = true; try { prev.port.disconnect(); } catch (_) {} }
+  let port;
+  try { port = chrome.runtime.connectNative(NATIVE_HOST); }
+  catch (e) { await Storage.updateBridgeRun(run_id, { status: "failed", error_code: "BRIDGE_NOT_INSTALLED", completed_at: nowIso() }); return { ok: false, code: "BRIDGE_NOT_INSTALLED" }; }
+  if (chrome.runtime.lastError || !port) {
+    await Storage.updateBridgeRun(run_id, { status: "failed", error_code: "BRIDGE_NOT_INSTALLED", completed_at: nowIso() });
+    return { ok: false, code: "BRIDGE_NOT_INSTALLED" };
+  }
+  await Storage.updateBridgeRun(run_id, { status: "running" }).catch(() => {});
+  _runsByTab.set(tab_id, { run_id, port, terminal: false });
+  port.onMessage.addListener((m) => onHostMessage(tab_id, run_id, m, run.task_sha256, run.logical_document_id, run.source_artifact_uri));
+  port.onDisconnect.addListener(() => onHostDisconnect(tab_id, run_id));
+  port.postMessage({
+    type: HANDOFF_START_TYPES[run.provider],
+    provider: run.provider,
+    run_id,
+    run_kind: "patch_apply",
+    source: { logical_document_id: run.logical_document_id, artifact_uri: run.source_artifact_uri, base_artifact_hash: run.base_artifact_hash, workspace_root_uri: _patchWorkspaceRoot(run.source_artifact_uri) },
+    confirmed_edit_ids
+  });
+  broadcast({ type: "bridge-progress", tab_id, run_id, status: "running" });
+  return { ok: true, run_id };
+}
+
+// —— 方向3:patch_preview 坏 JSON → 静默回落 candidate(用回存契约重发;_no_patch 防再次升级死循环)——
+async function patchFallbackToCandidate(tab_id, runId, run, m) {
+  const entry = _runsByTab.get(tab_id);
+  if (entry && entry.run_id === runId) { entry.terminal = true; try { entry.port.disconnect(); } catch (_) {} }
+  await Storage.updateBridgeRun(runId, { status: "failed", error_code: "PATCH_EDITS_INVALID", completed_at: nowIso() }).catch(() => {});
+  const res = await handleBridgeStart({ tab_id, provider: run.provider, session_mode: "new", run_kind: "candidate", change_contract: run.patch_change_contract, _no_patch: true });
+  if (res && res.ok) {
+    broadcast({ type: "bridge-patch-fallback", tab_id, old_run_id: runId, new_run_id: res.run_id });
+  } else {
+    broadcast({ type: "bridge-failed", tab_id, run_id: runId, code: "PATCH_EDITS_INVALID", message: (m && m.message) || "patch edits invalid; fallback failed" });
+  }
 }
 
 // —— Night Pack A spec §5.1:candidate-ready → 逐字段比对 → 受控 new_artifact(复用 v0.6.2 消费者)→ 打开 candidate + 重锚 ——

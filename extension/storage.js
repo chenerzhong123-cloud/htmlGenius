@@ -268,7 +268,9 @@ const LocalStore = {
   async getBridgeRun(runId) { return dbGet("bridge_runs", runId); },
   async getActiveBridgeRunForTab(tabId) {
     const runs = await dbGetAllByIndex("bridge_runs", "tab_id", tabId);
-    return runs.find((r) => r.status === "starting" || r.status === "running") || null;
+    // 方向3:awaiting_confirm(patch 预览待用户确认)也算 active —— 审阅期间保持 tab 锁,sidepanel 可感知 pending;
+    // 该状态可恢复(预览 edits 已存 run 记录、edits.json 在盘上),故不计入 listActiveBridgeRuns 的「重启即失败」对账。
+    return runs.find((r) => r.status === "starting" || r.status === "running" || r.status === "awaiting_confirm") || null;
   },
   // CORE-1:SW 重启对账用 —— 所有未终态(starting/running)的 run。status 索引已建(见 onupgradeneeded)。
   async listActiveBridgeRuns() {

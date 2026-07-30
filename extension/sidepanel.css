@@ -938,3 +938,37 @@ button {
 .conn-checking[hidden] { display: none; }
 .conn-checking-dots { display: inline-block; width: 1.4em; text-align: left; color: var(--brand); font-weight: 700; }
 .conn-checking-elapsed { margin-left: auto; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+
+/* === 方向3:确定性编辑预览(先预览后确认)=== */
+.patch-apply-mode {
+  width: 100%; margin-top: 6px; padding: 7px 9px; border-radius: var(--r-md);
+  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--line-default); font-size: 12.5px;
+}
+.patch-preview {
+  margin-top: 10px; border: 1px solid var(--line-default); border-radius: var(--r-lg);
+  background: var(--bg-surface-raised); overflow: hidden;
+}
+.patch-preview .pp-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 9px 12px; border-bottom: 1px solid var(--line-subtle);
+}
+.patch-preview .pp-title { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.patch-preview .pp-badge {
+  font-size: 11px; color: var(--text-secondary); background: var(--brand-soft);
+  padding: 2px 8px; border-radius: var(--r-pill); white-space: nowrap;
+}
+.patch-preview .pp-list { max-height: 240px; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.patch-preview .pp-item { display: flex; gap: 8px; align-items: flex-start; padding: 8px 9px; border-radius: var(--r-md); background: var(--bg-surface); border: 1px solid var(--line-subtle); }
+.patch-preview .pp-item.pp-problem { opacity: .82; border-color: var(--line-default); }
+.patch-preview .pp-check { margin-top: 2px; accent-color: var(--brand); }
+.patch-preview .pp-body { flex: 1; min-width: 0; }
+.patch-preview .pp-action { font-size: 11px; color: var(--text-muted); margin-bottom: 3px; }
+.patch-preview .pp-detail { font-size: 12.5px; line-height: 1.5; word-break: break-word; }
+.patch-preview .pp-old { color: var(--danger); text-decoration: line-through; }
+.patch-preview .pp-loc { color: var(--text-secondary); }
+.patch-preview .pp-new { color: var(--success); }
+.patch-preview .pp-status { display: inline-block; margin-top: 4px; font-size: 11px; padding: 1px 7px; border-radius: var(--r-pill); }
+.patch-preview .pp-status.pp-out_of_scope { color: var(--danger); background: rgba(255,154,165,.12); }
+.patch-preview .pp-status.pp-not_found, .patch-preview .pp-status.pp-ambiguous, .patch-preview .pp-status.pp-conflict { color: var(--warning); background: var(--warning-soft); }
+.patch-preview .pp-actions { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line-subtle); }
+.patch-preview .pp-actions #patch-confirm { flex: 1; }
