@@ -15,7 +15,7 @@
 
   var PROVIDERS = Object.freeze({
     claude_code_cli: freezeDesc({
-      id: "claude_code_cli", label_key: "provider.claude", capabilities: ["candidate", "plan"],
+      id: "claude_code_cli", label_key: "provider.claude", capabilities: ["candidate", "plan", "patch"],
       dispatch_type: "claude_handoff_start", probe: "claude", runtime_policy: "provider_default", supports_real_smoke: true
     }),
     codex_app_server: freezeDesc({

@@ -10,13 +10,23 @@ import { createRequire } from "node:module";
 import {
   canonicalTaskJson, taskSha256, sha256Bytes, sha256File, isSha256Tagged,
   resolveSourceArtifact, verifySourceHash, createWorkspace, workspacePathFor,
-  writeTaskBundle, assertTaskSchema, buildHandoffPrompt, rootAnnotationIdsOf
+  writeTaskBundle, assertTaskSchema, buildHandoffPrompt, rootAnnotationIdsOf, buildPatchPrompt
 } from "../task-bundle.mjs";
 
 const require = createRequire(import.meta.url);
 const ChangeContract = require("../../extension/change-contract.js");
 
 function mkTmp(prefix) { return fs.mkdtempSync(path.join(os.tmpdir(), prefix)); }
+
+test("buildPatchPrompt:指示只输出编辑 JSON、绝不写文件,含 schema 与契约围栏", () => {
+  const p = buildPatchPrompt({ runId: "hgr_abcdef0123456789", task: sampleTask() });
+  assert.ok(p.includes('"schema_version": 1'), "含 edits schema");
+  assert.ok(p.includes("replace_text") && p.includes("set_style"), "含两种 action 说明");
+  assert.ok(/Do NOT modify any file/i.test(p) && /candidate\.html/.test(p), "禁改文件/禁写 candidate");
+  assert.ok(p.includes("<<<HG_USER_DATA>>>"), "契约用户数据围栏保留");
+  assert.ok(p.includes("## Change Contract"), "拼接 renderPrompt 契约");
+  assert.ok(p.includes("comment_ref"), "要求 comment_ref 关联评论");
+});
 
 // 用真实 ChangeContract.buildTask 造 task(单一真相源)
 function sampleTask(overrides = {}) {

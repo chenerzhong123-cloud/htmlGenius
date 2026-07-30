@@ -9,7 +9,7 @@ export const PROVIDER_REGISTRY = Object.freeze({
   claude_code_cli: Object.freeze({
     id: "claude_code_cli",
     label_key: "provider.claude",
-    capabilities: cap(["candidate", "plan"]),
+    capabilities: cap(["candidate", "plan", "patch"]),
     dispatch_type: "claude_handoff_start",
     probe: "claude",
     runtime_policy: "provider_default",   // claude CLI 固定 argv 沙箱
@@ -51,7 +51,7 @@ export function providerSupports(id, capability) {
 }
 
 // 启动/测试期严格校验 descriptor 形状(新增 provider 写错结构时第一道硬门)。
-const VALID_CAPS = { candidate: 1, plan: 1 };
+const VALID_CAPS = { candidate: 1, plan: 1, patch: 1 };
 const VALID_POLICIES = { provider_default: 1, signed_app_only: 1, runtime_locked: 1 };
 const FORBIDDEN_KEYS = { path: 1, command: 1, argv: 1, token: 1, cookie: 1, session: 1, exec: 1, fn: 1, url: 1, env: 1 };
 

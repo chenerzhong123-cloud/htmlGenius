@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  buildHandoffArgv, isSessionUuid, parseHandoffResult,
+  buildHandoffArgv, buildClaudeArgv, isSessionUuid, parseHandoffResult, parsePatchResult,
   checkAuth, runHandoff, resumeHandoff
 } from "../claude-cli.mjs";
 
@@ -75,6 +75,25 @@ test("isSessionUuid / parseHandoffResult 校验", () => {
   assert.throws(() => parseHandoffResult("not json"), (e) => e.code === "CLAUDE_INVALID_RESULT");
   assert.throws(() => parseHandoffResult('{"session_id":"bad"}'), (e) => e.code === "CLAUDE_INVALID_RESULT");
   assert.throws(() => parseHandoffResult('[1,2]'), (e) => e.code === "CLAUDE_INVALID_RESULT");
+});
+
+test("buildClaudeArgv(patch):只读工具(禁 Write)+ maxTurns 8,prompt 末元素", () => {
+  const argv = buildClaudeArgv({ promptText: "PATCH_PROMPT", runKind: "patch" });
+  assert.equal(argv[argv.indexOf("--allowed-tools") + 1], "Read,Glob,Grep", "patch 不放行 Write");
+  const di = argv.indexOf("--disallowed-tools");
+  assert.ok(argv.slice(di + 1).includes("Write"), "patch disallowed 含 Write");
+  assert.equal(argv[argv.indexOf("--max-turns") + 1], "8");
+  assert.equal(argv[argv.length - 1], "PATCH_PROMPT");
+});
+
+test("parsePatchResult:取 session_id + result 文本;缺 result/坏 session 抛 CLAUDE_INVALID_RESULT", () => {
+  const ok = parsePatchResult('{"type":"result","session_id":"11111111-2222-3333-4444-555555555555","result":"{\\"schema_version\\":1,\\"edits\\":[]}","is_error":false}');
+  assert.equal(ok.sessionId, "11111111-2222-3333-4444-555555555555");
+  assert.equal(ok.resultText, '{"schema_version":1,"edits":[]}');
+  assert.equal(ok.isError, false);
+  assert.throws(() => parsePatchResult('{"session_id":"11111111-2222-3333-4444-555555555555"}'), (e) => e.code === "CLAUDE_INVALID_RESULT"); // 无 result 文本
+  assert.throws(() => parsePatchResult('{"session_id":"bad","result":"x"}'), (e) => e.code === "CLAUDE_INVALID_RESULT");
+  assert.throws(() => parsePatchResult("not json"), (e) => e.code === "CLAUDE_INVALID_RESULT");
 });
 
 // —— 真实 spawn 测试(fake claude 可执行文件)——
