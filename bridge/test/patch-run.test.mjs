@@ -105,7 +105,10 @@ test("patch apply: 成功发 candidate-ready,sibling = source + 且仅 + 确认�
   assert.ok(html.includes("New Title"), "确认编辑已应用");
   assert.ok(html.includes("keep me"), "未确认编辑未被应用");
   assert.ok(!html.includes("CHANGED"));
-  assert.deepEqual(ready.patch.applied, [{ id: "e1", action: "replace_text" }]);
+  assert.equal(ready.patch.applied.length, 1);
+  assert.equal(ready.patch.applied[0].id, "e1");
+  assert.equal(ready.patch.applied[0].action, "replace_text");
+  assert.equal(ready.patch.applied[0].locator.exact, "Old Title"); // 完整定位随 applied 回传(供 candidate 侧高亮)
   // 原文件未被改
   assert.equal(fs.readFileSync(p, "utf8"), SRC);
 });

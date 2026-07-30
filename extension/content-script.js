@@ -167,6 +167,7 @@
     }
     .hg-hl{ position:fixed; background:var(--hl); pointer-events:none; z-index:2147483646; border-radius:2px; }
     .hg-hl.flash{ background:var(--hl-flash); }
+    .hg-change-hl{ position:fixed; pointer-events:none; z-index:2147483646; border-radius:2px; background:rgba(143,231,178,.22); box-shadow:inset 0 0 0 1px rgba(143,231,178,.85); }
     .hg-inspect,.hg-select{ position:fixed; pointer-events:none; z-index:2147483645; border-radius:3px; }
     .hg-inspect{ background:rgba(136,230,209,.14); border:1px solid rgba(136,230,209,.7); }
     .hg-select{ background:rgba(136,230,209,.12); border:2px solid var(--hg-brand); }
@@ -1149,6 +1150,7 @@
 
   // === ② overlay:缓存 range,滚动时只更新 rect(不重 anchor) ===
   let overlayData = []; // [{ divs: [div...], range }]
+  let changeOverlayData = []; // 方向3:candidate 变更高亮 [{ divs: [div...], range }]
   async function loadAnnotations() {
     overlayData.forEach((o) => o.divs.forEach((d) => d.remove()));
     overlayData = [];
@@ -1213,10 +1215,72 @@
           }
         }
       }
+      for (const entry of changeOverlayData) {
+        const rects = entry.range.getClientRects();
+        if (rects.length !== entry.divs.length) {
+          entry.divs.forEach((d) => d.remove()); entry.divs = [];
+          for (const r of rects) {
+            const div = document.createElement("div");
+            div.className = "hg-change-hl";
+            div.style.left = r.left + "px"; div.style.top = r.top + "px";
+            div.style.width = r.width + "px"; div.style.height = r.height + "px";
+            document.body.appendChild(div); entry.divs.push(div);
+          }
+        } else {
+          for (let i = 0; i < rects.length; i++) {
+            entry.divs[i].style.left = rects[i].left + "px";
+            entry.divs[i].style.top = rects[i].top + "px";
+            entry.divs[i].style.width = rects[i].width + "px";
+            entry.divs[i].style.height = rects[i].height + "px";
+          }
+        }
+      }
     });
   }
   window.addEventListener("scroll", updatePositions, true);
   window.addEventListener("resize", updatePositions);
+
+  // === 方向3:candidate 变更高亮(确定性编辑快车道)—— 候选页加载后,按 background 存入 chrome.storage.local 的
+  //     applied 编辑清单重锚并高亮实际改动区域。replace_text 锚定【新文本】(上下文未变);set_style 锚定原文本(文字未变)。===
+  function clearChangeHighlights() { changeOverlayData.forEach((o) => o.divs.forEach((d) => d.remove())); changeOverlayData = []; }
+  function drawChangeRange(range) {
+    const entry = { divs: [], range };
+    for (const r of range.getClientRects()) {
+      const div = document.createElement("div");
+      div.className = "hg-change-hl";
+      div.style.left = r.left + "px"; div.style.top = r.top + "px";
+      div.style.width = r.width + "px"; div.style.height = r.height + "px";
+      document.body.appendChild(div);
+      entry.divs.push(div);
+    }
+    changeOverlayData.push(entry);
+  }
+  function renderPatchHighlights(appliedEdits) {
+    clearChangeHighlights();
+    for (const ed of (appliedEdits || [])) {
+      if (!ed || !ed.locator) continue;
+      let sel = null;
+      if (ed.action === "replace_text") {
+        if (typeof ed.replacement !== "string" || !ed.replacement) continue; // 删除型(空替换)无新文本可高亮
+        sel = { type: "TextQuoteSelector", exact: ed.replacement, prefix: ed.locator.prefix || "", suffix: ed.locator.suffix || "" };
+      } else if (ed.action === "set_style") {
+        sel = { type: "TextQuoteSelector", exact: ed.locator.exact || "", prefix: ed.locator.prefix || "", suffix: ed.locator.suffix || "" };
+      }
+      if (!sel || !sel.exact) continue;
+      const range = anchor(sel, document.body);
+      if (range) drawChangeRange(range);
+    }
+    updatePositions();
+  }
+  async function maybeRenderPatchHighlights() {
+    if (!isManagedArtifact || !_artifactUri) return;
+    try {
+      const key = "hg_patch_hl:" + _artifactUri;
+      const r = await new Promise((res) => chrome.storage.local.get([key], res));
+      const manifest = r && r[key];
+      if (manifest && Array.isArray(manifest.applied) && manifest.applied.length) renderPatchHighlights(manifest.applied);
+    } catch (e) { /* 非关键 */ }
+  }
 
   // v0.6 #8: 高级模式 inspect 预览框在滚动时跟随 —— 缓存鼠标坐标,滚动时按该坐标重新拾取元素并重定位。
   let _lastMX = 0, _lastMY = 0;
@@ -1484,6 +1548,7 @@
     await restoreIfFresh();
     if (autoEdit) { _activated = true; _refreshDialogShown = true; if (_pendingDraft) showDraftRestoreBanner(); } // 自激活:渲染高亮 + 跳过确认窗
     if (!_artifactVerificationError) await loadAnnotations();
+    await maybeRenderPatchHighlights(); // 方向3:若本页是 patch 产出的候选,高亮实际改动区域
     if (autoEdit) setEditing(true); // 直接进入编辑(广播 edit-state → 侧边栏同步「退出编辑」)
   })();
   console.log("htmlGenius v0.7.1 ready, mode:", isLocal ? "local" : "remote(editable, temporary)", "starts in view");

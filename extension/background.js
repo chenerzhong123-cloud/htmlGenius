@@ -655,6 +655,10 @@ async function completeCandidate(tab_id, runId, completion, taskSha, logicalId, 
     if (isCodex) sessionRec.thread_id = sessionId; else sessionRec.session_id = sessionId;
     await Storage.saveBridgeSession(sessionRec).catch(() => {});
   }
+  // 方向3:patch candidate → 存变更高亮清单(按候选 URI)到 chrome.storage.local;候选页 content-script 初始化时读取并高亮改动区域
+  if (completion.patch && Array.isArray(completion.patch.applied) && completion.patch.applied.length) {
+    try { chrome.storage.local.set({ ["hg_patch_hl:" + completion.candidate_uri]: { applied: completion.patch.applied, at: nowIso() } }); } catch (e) { /* 非关键 */ }
+  }
   // 自动打开候选页签(原 source 页签保持不动);同 URL 复用已开页签,避免重复开多个;失败由 sidepanel「打开候选版本」按钮兜底
   focusOrCreateCandidateTab(completion.candidate_uri);
   // v0.8.1 系统通知 + 提示音:提醒用户回来看新候选
