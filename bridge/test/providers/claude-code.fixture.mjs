@@ -3,7 +3,7 @@
 // 不 spawn 真实 claude、不触网络、不读 $HOME。
 import fs from "node:fs";
 import path from "node:path";
-import { executeCandidateRun, executePlanRun } from "../../host-runner.mjs";
+import { executeCandidateRun, executePlanRun, executePatchPreviewRun, executePatchApplyRun } from "../../host-runner.mjs";
 import { probeClaude } from "../../provider-probe.mjs";
 import { VALID_HTML, goodPlan, fakeSessionUuid } from "./provider-fixture-contract.mjs";
 
@@ -36,7 +36,13 @@ function cliFor(scenario, context) {
     case "plan_invalid":
       return { ...authed, runHandoff: async ({ cwd }) => { fs.mkdirSync(path.join(cwd, "output"), { recursive: true }); fs.writeFileSync(path.join(cwd, "output", "plan.json"), "{ not json"); return { sessionId: fakeSessionUuid() }; }, resumeHandoff: async () => ({ sessionId: fakeSessionUuid() }) };
     case "auth_required":
-      return { checkAuth: async () => { throw NOT_LOGGED_IN(); }, runHandoff: async () => { throw NOT_LOGGED_IN(); }, resumeHandoff: async () => { throw NOT_LOGGED_IN(); } };
+      return { checkAuth: async () => { throw NOT_LOGGED_IN(); }, runHandoff: async () => { throw NOT_LOGGED_IN(); }, resumeHandoff: async () => { throw NOT_LOGGED_IN(); }, runPatch: async () => { throw NOT_LOGGED_IN(); } };
+    case "patch_preview_success":
+    case "patch_apply_success":
+      // 方向3:Claude 只输出结构化编辑 JSON(把 "hello" 换成 "goodbye",关联评论 r1),不写文件
+      return { ...authed, runPatch: async () => ({ sessionId: fakeSessionUuid(), resultText: JSON.stringify({ schema_version: 1, edits: [{ id: "e1", comment_ref: "r1", action: "replace_text", locator: { exact: "hello" }, replacement: "goodbye" }] }) }), runHandoff: async () => { throw new Error("fixture: runHandoff not used in patch"); }, resumeHandoff: async () => { throw new Error("fixture: resume not used"); } };
+    case "patch_invalid_json":
+      return { ...authed, runPatch: async () => ({ sessionId: fakeSessionUuid(), resultText: "sorry, I cannot produce the edits" }), runHandoff: async () => { throw new Error("fixture: not used"); }, resumeHandoff: async () => { throw new Error("fixture: not used"); } };
     case "runtime_changed": // claude 非 runtime_locked;harness 不会调用,形状上提供拒绝实现
       return { checkAuth: async () => { throw new Error("not applicable"); }, runHandoff: async () => { throw new Error("not applicable"); }, resumeHandoff: async () => { throw new Error("not applicable"); } };
     default:
@@ -46,11 +52,12 @@ function cliFor(scenario, context) {
 
 export const fixture = {
   provider: "claude_code_cli",
-  capabilities: ["candidate", "plan"],
+  capabilities: ["candidate", "plan", "patch"],
   scenarios: [
     "ready", "not_installed", "auth_required", "incompatible", "probe_error",
     "candidate_success", "candidate_missing", "candidate_out_of_scope", "source_mutated",
-    "plan_success", "plan_invalid"
+    "plan_success", "plan_invalid",
+    "patch_preview_success", "patch_apply_success", "patch_invalid_json"
   ],
   // probe 期望状态(允许集合;provider 语义差异在 harness 记录)
   probeExpectations: {
@@ -71,7 +78,9 @@ export const fixture = {
     const cli = cliFor(name, context);
     return {
       invokeCandidate: ({ msg, emit }) => executeCandidateRun(msg, { emit, claude: cli }),
-      invokePlan: ({ msg, emit }) => executePlanRun(msg, { emit, claude: cli })
+      invokePlan: ({ msg, emit }) => executePlanRun(msg, { emit, claude: cli }),
+      invokePatchPreview: ({ msg, emit }) => executePatchPreviewRun(msg, { emit, claude: cli }),
+      invokePatchApply: ({ msg, emit }) => executePatchApplyRun(msg, { emit, claude: cli })
     };
   },
   cleanup() {},

@@ -11,6 +11,8 @@ import crypto from "node:crypto";
 export const REQUIRED_PROBE_SCENARIOS = Object.freeze(["ready", "not_installed", "auth_required", "incompatible", "probe_error"]);
 export const REQUIRED_CANDIDATE_SCENARIOS = Object.freeze(["candidate_success", "candidate_missing", "candidate_out_of_scope", "source_mutated"]);
 export const REQUIRED_PLAN_SCENARIOS = Object.freeze(["plan_success", "plan_invalid"]);
+// 方向3 确定性编辑快车道:patch 能力(provider 输出结构化编辑、host 确定性应用)的必需认证场景。
+export const REQUIRED_PATCH_SCENARIOS = Object.freeze(["patch_preview_success", "patch_apply_success", "patch_invalid_json"]);
 
 export const VALID_HTML = "<!doctype html><html><head><title>t</title></head><body><p>hello world</p></body></html>";
 export function goodPlan() {
@@ -107,6 +109,7 @@ export function assertFixtureShape(fixture, descriptor) {
   for (const s of REQUIRED_PROBE_SCENARIOS) if (!scenarios.has(s)) err("缺 probe 场景 " + s);
   if (caps.includes("candidate")) for (const s of REQUIRED_CANDIDATE_SCENARIOS) if (!scenarios.has(s)) err("缺 candidate 场景 " + s);
   if (caps.includes("plan")) for (const s of REQUIRED_PLAN_SCENARIOS) if (!scenarios.has(s)) err("缺 plan 场景 " + s);
+  if (caps.includes("patch")) for (const s of REQUIRED_PATCH_SCENARIOS) if (!scenarios.has(s)) err("缺 patch 场景 " + s);
   if (!caps.includes("plan") && scenarios.has("plan_success")) err("未声明 plan 却提供 plan_success");
   if (descriptor.runtime_policy === "runtime_locked" && !scenarios.has("runtime_changed")) err("runtime_locked provider 必须有 runtime_changed");
   if (typeof fixture.makeProbeScenario !== "function") err("缺 makeProbeScenario");

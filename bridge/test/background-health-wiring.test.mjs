@@ -8,11 +8,12 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const bg = fs.readFileSync(path.resolve(__dirname, "..", "..", "extension", "background.js"), "utf8");
 
-test("v0.9:版本单一来源 — 无 0.8.1 漂移,扩展版本取 getManifest", () => {
+test("v0.9:版本单一来源 — 无 0.8.1 漂移,扩展版本取 getManifest,TARGET_BRIDGE_VERSION 与 bridge/package.json 同版本", () => {
   assert.ok(!bg.includes('"0.8.1"'), "不得残留硬编码 0.8.1");
   assert.match(bg, /chrome\.runtime\.getManifest\(\)\.version/);
   assert.match(bg, /BRIDGE_PROTOCOL_VERSION = 1/);
-  assert.match(bg, /TARGET_BRIDGE_VERSION = "1\.0\.0"/);
+  const pkgVersion = JSON.parse(fs.readFileSync(path.resolve(__dirname, "..", "package.json"), "utf8")).version;
+  assert.ok(bg.includes('TARGET_BRIDGE_VERSION = "' + pkgVersion + '"'), "TARGET_BRIDGE_VERSION 须与 bridge/package.json 同版本(" + pkgVersion + ")");
 });
 
 test("v0.9:三条新消息入口(仅 background 发起 native 通信)", () => {

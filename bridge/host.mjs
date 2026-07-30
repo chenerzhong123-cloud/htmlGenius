@@ -7,7 +7,7 @@ import process from "node:process";
 import fs from "node:fs";
 import path from "node:path";
 import { NativeFrameDecoder, writeMessage } from "./native-protocol.mjs";
-import { executeHandoff, executeCandidateRun, executePlanRun } from "./host-runner.mjs";
+import { executeHandoff, executeCandidateRun, executePlanRun, executePatchPreviewRun, executePatchApplyRun } from "./host-runner.mjs";
 import { executeCodexCandidateRun, executeCodexPlanRun } from "./codex-adapter.mjs";
 import { executeCopilotCandidateRun, executeCopilotPlanRun } from "./copilot-adapter.mjs";
 import { probeProviders } from "./provider-probe.mjs";
@@ -152,10 +152,12 @@ function dispatch(msg) {
         } else {
           if (runKind === "plan") await executePlanRun(msg, { emit });
           else if (runKind === "candidate") await executeCandidateRun(msg, { emit });
+          else if (runKind === "patch_preview") await executePatchPreviewRun(msg, { emit });
+          else if (runKind === "patch_apply") await executePatchApplyRun(msg, { emit });
           else await executeHandoff(msg, { emit });
         }
       } catch (e) {
-        const label = isCodex ? (runKind === "plan" ? "codex-plan" : "codex") : (runKind === "plan" ? "plan" : runKind === "candidate" ? "candidate" : "handoff");
+        const label = isCodex ? (runKind === "plan" ? "codex-plan" : "codex") : (runKind === "plan" ? "plan" : runKind === "candidate" ? "candidate" : runKind === "patch_preview" ? "patch-preview" : runKind === "patch_apply" ? "patch-apply" : "handoff");
         log(label + " crashed:", (e && e.stack) || e);
         emit({ type: "bridge_failed", run_id: msg.run_id, code: "HOST_CRASH", message: (e && e.message) || "host crash" });
       }
