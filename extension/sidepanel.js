@@ -2031,7 +2031,7 @@
       }
       if (msg.type === "bridge-plan-ready") { onPlanReady(msg); } // v0.8.1 plan run 完成 → plan-review
       else if (msg.type === "bridge-progress" && _contractRunning) {
-        const m = _contractRunKind === "plan" ? t("bridge.planRunning").replace("{agent}", providerLabel(_provider)) : t("bridge.candidateRunning");
+        const m = (_contractRunKind === "plan" ? t("bridge.planRunning") : t("bridge.candidateRunning")).replace("{agent}", providerLabel(_provider));
         setBridgeStatus(m, "running");
         if (msg.summary) pushProgress(msg.summary);
       } else if (msg.type === "bridge-completed") {
