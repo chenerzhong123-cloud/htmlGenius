@@ -1517,9 +1517,11 @@
       || !isSha256(msg.base_artifact_hash) || !isSha256(msg.result_artifact_hash) || !msg.logical_document_id || !msg.result_artifact_uri) return { ok: false, code: "VALIDATION_ERROR" };
     if (!_logicalDocumentId || msg.logical_document_id !== _logicalDocumentId) return { ok: false, code: "VALIDATION_ERROR" };
     // bridge 的 base hash 由 host 从原始文件字节计算,content-script 从 DOM 序列化算 → 方法不同,
-    // 不做跨侧比对(host 内部已自校验前后哈希)。仅保留 _hasUnsavedLocalSnapshot 拦截(任何来源都适用)。
+    // 不做跨侧比对(host 内部已自校验前后哈希)。
     if (msg.source !== "bridge" && _loadedArtifactHash !== msg.base_artifact_hash) return { ok: false, code: "BASE_CONFLICT", current_hash: _loadedArtifactHash };
-    if (_hasUnsavedLocalSnapshot) return { ok: false, code: "BASE_CONFLICT", current_hash: _loadedArtifactHash };
+    // 未保存草稿拦截:仅对 overwrite(覆盖源正文,会丢草稿)保留;new_artifact(候选是独立新文件、不动源,草稿不受影响)放行,
+    // 否则源页面留有未保存草稿时,精准修补/候选落盘会被误拦 BASE_CONFLICT。
+    if (_hasUnsavedLocalSnapshot && msg.result_kind === "overwrite") return { ok: false, code: "BASE_CONFLICT", current_hash: _loadedArtifactHash };
     const resultUri = Storage.canonicalArtifactUri(msg.result_artifact_uri);
     if (msg.result_kind === "overwrite" && resultUri !== _artifactUri) return { ok: false, code: "VALIDATION_ERROR" };
     if (msg.result_kind === "new_artifact") await Storage.linkArtifactUri(_logicalDocumentId, resultUri);
