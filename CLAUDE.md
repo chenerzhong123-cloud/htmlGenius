@@ -13,6 +13,15 @@
   - 三道自检：安全（无 pem/db/client_secret）→ manifest 合规（无 key/update_url）→ 结构（关键文件在根）。任一不过即中止。
 - 发版顺序：`manifest.version` 递增 → `git add` 本次相关文件 → commit（中文，`feat(<版本>): …`）→ `push origin main` → `bash scripts/pack.sh`。`dist/` 整目录已 gitignore，不入库。
 
+## Feature branch 迭代约定（合并回 main 前）
+
+在 feature branch 上做迭代时（尚未合并回 main 成为主版本）：
+
+- **不打 dist 包**：`scripts/pack.sh` 只在合并回 main / 发布主版本时跑；branch 上的中间提交不打包。
+- **不反复递增版本号**：整个 branch 的开发**停在切入时的当前版本**（例如切入时是 0.9.13，就一直用 0.9.13），多次提交共用同一版本号，不要每个提交都 bump `manifest.version`。
+- **合并回 main 时统一收口**：成为主版本时才递增**一个**版本号 + 按上节同步用户向文档（README/RELEASE_NOTES 等）+ 打 dist。
+- 即：版本号的递增与 dist 打包是「回到主版本」的动作，不是 branch 内每次迭代的动作。
+
 ## 发版 / 推送 main 前必做：同步文档
 
 **推送到 main 前必须同步更新用户向文档，不能只提交代码。** 每次发版（含安全 / 重构批次）都要：
