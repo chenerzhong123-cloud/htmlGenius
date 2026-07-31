@@ -464,7 +464,7 @@ export async function executePlanRun(msg, { emit: rawEmit, claude } = {}) {
 // Claude 只读 source.html、以最终文本输出结构化编辑 JSON(不写任何文件);host 提取并 dry-run applyEdits
 // 得到每条编辑的状态(ok/not_found/ambiguous/conflict/out_of_scope),写 edits.json 供 apply 复用,
 // emit patch-preview-ready(编辑清单+状态+合规汇总)。坏 JSON → PATCH_EDITS_INVALID(供 background 回落 candidate)。
-const PATCH_TIMEOUT_MS = 5 * 60 * 1000; // 结构化输出比整页重写快,5 分钟留足复杂页余量
+const PATCH_TIMEOUT_MS = 8 * 60 * 1000; // 结构化输出通常比整页重写快,8 分钟给真实复杂页 + 模型繁忙留余量(用户可随时终止)
 const PATCH_FAIL_STATUS = {
   BAD_REQUEST: "bad_request",
   INVALID_MODE: "bad_request",

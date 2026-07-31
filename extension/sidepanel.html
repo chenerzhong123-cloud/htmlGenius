@@ -300,12 +300,12 @@
       <div id="contract-bridge-status" class="contract-bridge-status" hidden>
         <div class="cbs-main"><span class="cbs-text"></span><span class="cbs-timer"></span><span class="cbs-candidate" hidden><span class="cbs-version"></span><button class="cbs-open" type="button" data-i18n="candidate.openCandidate">打开候选版本</button></span><span class="cbs-chev" aria-hidden="true">▾</span></div>
         <div class="cbs-detail" hidden>
+          <div class="cbs-section-label" data-i18n="run.recent">最近 3 次</div>
+          <ul class="cbs-history"></ul>
           <div class="cbs-section-label" data-i18n="run.agentStream">Agent 实时输出</div>
           <div class="cbs-stream"></div>
           <div class="cbs-section-label" data-i18n="run.thisRun">本次进度</div>
           <ul class="cbs-progress"></ul>
-          <div class="cbs-section-label" data-i18n="run.recent">最近 3 次</div>
-          <ul class="cbs-history"></ul>
         </div>
       </div>
       <!-- 方向3:确定性编辑预览(先预览后确认模式)。bridge-patch-preview 到达时显示;确认后发 bridge-patch-apply。 -->

@@ -2010,6 +2010,45 @@
     } catch (e) { loginState.textContent = t("team.createFail"); }
   });
 
+  // === bridge 事件处理(抽成函数,供「实时分发」与「切 tab 后回放缓存的终态事件」复用)===
+  // 终态/预览事件发给非当前 tab 时先缓存,切回该 tab 时回放 —— 修「生成中切 tab 丢失结果/失败原因」。
+  const _pendingTabEvents = new Map(); // tabId -> 切 tab 期间到达的终态/预览事件
+  const PASS_THROUGH_EVENTS = new Set(["bridge-failed", "bridge-completed", "bridge-plan-ready", "bridge-patch-preview", "bridge-patch-fallback"]);
+  function handleBridgeEvent(msg) {
+    if (msg.type === "bridge-stream") { handleStream(msg); return; } // v0.8.1 Codex 实时流(delta/工具/文件)
+    if (msg.type === "bridge-patch-preview") { showPatchPreview(msg); return; } // 方向3:精确编辑预览(先预览后确认)
+    if (msg.type === "bridge-patch-fallback") { // 方向3:坏 JSON 回落完整候选 —— 切到新 run 继续跟进度,不弹错误
+      if (_patchPending && msg.old_run_id === _patchPending.run_id) hidePatchPreview();
+      if (msg.new_run_id) _contractRunId = msg.new_run_id;
+      setContractRunning(true); startRunTimer();
+      setBridgeStatus(t("patch.fallback"), "running");
+      pushProgress(t("patch.fallback"));
+      return;
+    }
+    if (msg.type === "bridge-plan-ready") { onPlanReady(msg); } // v0.8.1 plan run 完成 → plan-review
+    else if (msg.type === "bridge-progress" && _contractRunning) {
+      const m = (_contractRunKind === "plan" ? t("bridge.planRunning") : t("bridge.candidateRunning")).replace("{agent}", providerLabel(_provider));
+      setBridgeStatus(m, "running");
+      if (msg.summary) pushProgress(msg.summary);
+    } else if (msg.type === "bridge-completed") {
+      setContractRunning(false); stopRunTimer();
+      if (msg.candidate) showCandidateResult(msg); // 候选成功态(状态栏版本号 + 打开按钮;background 已自动新开候选页签)
+      const doneText = msg.candidate ? t("bridge.candidateCompleted") : t("bridge.completed");
+      setBridgeStatus(doneText, "ok");
+      pushProgress(doneText);
+      recordRun({ provider: _provider, run_kind: "candidate", status: "completed", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode() });
+      expandBridgeDetail(false); // 完成后收起进度窗(候选版本号 + 打开按钮仍在主行可见)
+    } else if (msg.type === "bridge-failed") {
+      setContractRunning(false); stopRunTimer();
+      if (_contractStep === "plan-running") setContractStep("compose");
+      const failText = tBridgeFailed(msg.code, msg);
+      setBridgeStatus(failText, bridgeFailClass(msg.code));
+      pushProgress(failText);
+      recordRun({ provider: _provider, run_kind: _contractRunKind, status: "failed", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode(), code: msg.code });
+      expandBridgeDetail(false);
+    }
+  }
+
   // join 链接页(/hg/join?code=)content-script 发来的码 → 预填 + 展开
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "join-code" && inviteInput) {
@@ -2017,41 +2056,13 @@
       if (teamSetup) teamSetup.hidden = false;
       loginState.textContent = t("team.invitePrefill");
     }
-    // bridge:background 推送的 run 进度/完成/失败/计划就绪(仅当前 tab 且任务 sheet 打开时处理)
-    if (_contractOpen && msg && msg.tab_id === currentTabId) {
-      if (msg.type === "bridge-stream") { handleStream(msg); return; } // v0.8.1 Codex 实时流(delta/工具/文件)
-      if (msg.type === "bridge-patch-preview") { showPatchPreview(msg); return; } // 方向3:精确编辑预览(先预览后确认)
-      if (msg.type === "bridge-patch-fallback") { // 方向3:坏 JSON 回落完整候选 —— 切到新 run 继续跟进度,不弹错误
-        if (_patchPending && msg.old_run_id === _patchPending.run_id) hidePatchPreview();
-        if (msg.new_run_id) _contractRunId = msg.new_run_id;
-        setContractRunning(true); startRunTimer();
-        setBridgeStatus(t("patch.fallback"), "running");
-        pushProgress(t("patch.fallback"));
-        return;
-      }
-      if (msg.type === "bridge-plan-ready") { onPlanReady(msg); } // v0.8.1 plan run 完成 → plan-review
-      else if (msg.type === "bridge-progress" && _contractRunning) {
-        const m = (_contractRunKind === "plan" ? t("bridge.planRunning") : t("bridge.candidateRunning")).replace("{agent}", providerLabel(_provider));
-        setBridgeStatus(m, "running");
-        if (msg.summary) pushProgress(msg.summary);
-      } else if (msg.type === "bridge-completed") {
-        setContractRunning(false); stopRunTimer();
-        if (msg.candidate) showCandidateResult(msg); // 候选成功态(状态栏版本号 + 打开按钮;background 已自动新开候选页签)
-        const doneText = msg.candidate ? t("bridge.candidateCompleted") : t("bridge.completed");
-        setBridgeStatus(doneText, "ok");
-        pushProgress(doneText);
-        recordRun({ provider: _provider, run_kind: "candidate", status: "completed", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode() });
-        expandBridgeDetail(false); // 完成后收起进度窗(候选版本号 + 打开按钮仍在主行可见)
-      } else if (msg.type === "bridge-failed") {
-        setContractRunning(false); stopRunTimer();
-        if (_contractStep === "plan-running") setContractStep("compose");
-        const failText = tBridgeFailed(msg.code, msg);
-        setBridgeStatus(failText, bridgeFailClass(msg.code));
-        pushProgress(failText);
-        recordRun({ provider: _provider, run_kind: _contractRunKind, status: "failed", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode(), code: msg.code });
-        expandBridgeDetail(false);
-      }
+    // bridge:终态/预览事件发给了非当前 tab → 缓存,切回该 tab 时回放(修「生成中切 tab 丢失结果/失败原因」)
+    if (msg && msg.tab_id && msg.tab_id !== currentTabId && PASS_THROUGH_EVENTS.has(msg.type)) {
+      _pendingTabEvents.set(msg.tab_id, msg);
+      if (_pendingTabEvents.size > 16) { const k = _pendingTabEvents.keys().next().value; if (k !== msg.tab_id) _pendingTabEvents.delete(k); }
+      return;
     }
+    if (_contractOpen && msg && msg.tab_id === currentTabId) handleBridgeEvent(msg);
   });
 
   // 静默重登:侧栏打开 → getAuthToken(非交互)→ 有团队直接 session;否则查已有 session
@@ -2275,6 +2286,9 @@
       contractSheet.classList.remove("show"); contractSheet.hidden = true;
       stopRunTimer();
     }
+    // 方向3/通用:回放切 tab 期间到达的终态/预览事件(修「生成中切 tab 丢失结果/失败原因」)
+    const pending = _pendingTabEvents.get(tabId);
+    if (pending) { _pendingTabEvents.delete(tabId); handleBridgeEvent(pending); }
   }
   // 切回某 tab 时,若 UI 还显示 running,但后台 run 已终结(完成/失败/取消),reconcile 到终态,避免永远转圈
   async function reconcileTabRun(tabId) {
