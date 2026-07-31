@@ -246,7 +246,14 @@
     document.documentElement.dataset.hgTheme = theme === "light" ? "light" : "dark";
   }
   try {
-    chrome.storage.local.get(["hg_theme"], (r) => applyHgTheme((r && r.hg_theme) || "dark"));
+    // 无手动主题偏好时跟随系统 prefers-color-scheme(与 Side Panel 一致),避免页内 popup 在浅色系统下恒为深色
+    chrome.storage.local.get(["hg_theme"], (r) => {
+      let theme = r && r.hg_theme;
+      if (theme !== "light" && theme !== "dark") {
+        theme = (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+      }
+      applyHgTheme(theme);
+    });
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === "local" && changes.hg_theme) applyHgTheme(changes.hg_theme.newValue);
     });

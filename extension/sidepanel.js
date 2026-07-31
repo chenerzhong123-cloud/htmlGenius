@@ -1614,6 +1614,8 @@
   if (contractBridge) contractBridge.addEventListener("click", () => { if (_contractRunning) cancelBridgeRun(); else startBridgeRun(); });
   // 状态栏点击:两态切换 收起 ↔ 半高(capped 限高,内部滚动)
   if (contractBridgeStatus) contractBridgeStatus.addEventListener("click", () => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return; // 正在选中文字(拖选复制报错文案)时不触发折叠切换
     const d = contractBridgeStatus.querySelector(".cbs-detail");
     if (!d) return;
     expandBridgeDetail(d.hidden);

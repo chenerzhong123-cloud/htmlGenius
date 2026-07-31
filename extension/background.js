@@ -141,7 +141,7 @@ async function handleQuerySession({ tab_id, provider }) {
 async function handleBridgeStart({ tab_id, provider, session_mode, run_kind, change_contract, plan, _no_patch }) {
   if (!tab_id) return { ok: false, code: "NO_TAB" };
   if (!SUPPORTED_PROVIDERS.has(provider)) return { ok: false, code: "UNKNOWN_PROVIDER", message: "unsupported provider: " + provider };
-  const runKind = run_kind || "handoff"; // Night Pack A: "candidate" 产受控 candidate;"plan" v0.8.1 产受控修改计划;缺省 "handoff"(v0.7.1 ack)
+  let runKind = run_kind || "handoff"; // Night Pack A: "candidate" 产受控 candidate;"plan" v0.8.1 产受控修改计划;缺省 "handoff"(v0.7.1 ack)。let:方向3 会在 precise_patch+支持 patch 时就地升级为 patch_preview
   if (!ALLOWED_RUN_KINDS.has(runKind)) return { ok: false, code: "BAD_RUN_KIND" };
   // v0.8.1 §5.2:candidate/plan 必须 session_mode==='new' —— continue → SESSION_MODE_NOT_ALLOWED。
   //   旧 bridge_sessions/resume 代码不删(handoff 仍允许 continue,兼容旧路径),但 V0.8.1 UI 不再调用。

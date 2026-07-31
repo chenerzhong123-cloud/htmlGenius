@@ -848,6 +848,9 @@ button {
 
 /* === v0.8.1 状态栏:计时器 + 可展开(本次进度时间线 + 最近 3 次)=== */
 .contract-bridge-status { cursor: pointer; user-select: none; }
+/* 报错文案 / 进度 / 实时输出 / 历史允许选中复制(整栏默认 none 防误选,文本节点单独放开) */
+.contract-bridge-status .cbs-text, .contract-bridge-status .cbs-stream,
+.contract-bridge-status .cbs-progress, .contract-bridge-status .cbs-history { user-select: text; cursor: text; }
 .contract-bridge-status .cbs-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .contract-bridge-status .cbs-text { flex: 1; min-width: 0; }
 .contract-bridge-status .cbs-timer { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--brand-hover); opacity: .92; }
