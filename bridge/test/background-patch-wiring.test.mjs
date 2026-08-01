@@ -73,3 +73,11 @@ test("sidepanel patch 预览:空编辑渲染说明(patch.noneNeeded);确认时 0
   assert.match(sp, /patch\.noneNeeded/, "空状态文案走 i18n");
   assert.match(sp, /if \(!checked\.length\)/, "0 勾选必须拦在发送前(改为取消)");
 });
+
+test("content-script: 候选(new_artifact)绝不 linkArtifactUri 到源文档(评论不跨文件共享,源评论不随应用丢失)", () => {
+  // 回归:候选曾被 link 进源逻辑文档 → 旧评论高亮跨 tab 继承到候选页;候选页「失效评论」一键清除
+  // 会删掉源文件仍有效的评论。候选必须是独立逻辑文档(版本血缘仍记 saveArtifactVersion,不受影响)。
+  const cs = fs.readFileSync(path.resolve(__dirname, "..", "..", "extension", "content-script.js"), "utf8");
+  assert.ok(!cs.includes("linkArtifactUri(_logicalDocumentId, resultUri)"), "new_artifact 不得再链接到源逻辑文档");
+  assert.match(cs, /await Storage\.saveArtifactVersion\(\{ logical_document_id: _logicalDocumentId, artifact_uri: resultUri/, "版本血缘记录保留");
+});

@@ -1524,7 +1524,10 @@
     if (_hasUnsavedLocalSnapshot && msg.result_kind === "overwrite") return { ok: false, code: "BASE_CONFLICT", current_hash: _loadedArtifactHash };
     const resultUri = Storage.canonicalArtifactUri(msg.result_artifact_uri);
     if (msg.result_kind === "overwrite" && resultUri !== _artifactUri) return { ok: false, code: "VALIDATION_ERROR" };
-    if (msg.result_kind === "new_artifact") await Storage.linkArtifactUri(_logicalDocumentId, resultUri);
+    // 候选文件是【独立逻辑文档】,绝不 linkArtifactUri 到源文档:
+    //  ① 共享批注集会让旧评论的高亮跨 tab「继承」到候选页(用户预期:新文件只展示在它上面新建的评论);
+    //  ② 候选页上锚定不到的旧评论会进「失效」区,一键清除将误删源文件仍有效的评论(源文件从不被修改,其评论不得随应用而丢失)。
+    //  候选页自带全新批注空间;patch 改动区高亮走 hg_patch_hl(按候选 URI 键控),不受影响。
     await Storage.saveArtifactVersion({ logical_document_id: _logicalDocumentId, artifact_uri: resultUri,
       artifact_hash: msg.result_artifact_hash, result_artifact_hash: msg.result_artifact_hash, parent_hash: msg.base_artifact_hash,
       source: "bridge", result_kind: msg.result_kind });
