@@ -1010,12 +1010,20 @@
       const id = btn.dataset.provider;
       const p = _providerStates[id];
       const ready = !!(p && p.status === "ready");
-      btn.classList.toggle("active", id === _provider);
+      const inUse = ready && id === _provider;
+      btn.classList.toggle("active", inUse);
       btn.disabled = !ready;
       const dot = btn.querySelector(".agent-dot");
-      if (dot) dot.className = "agent-dot" + (ready ? " ready" : (p && p.status === "auth_required" ? " warn" : ""));
+      if (dot) dot.className = "agent-dot" + (ready ? (inUse ? " ready in-use" : " ready") : (p && p.status === "auth_required" ? " warn" : ""));
       const note = btn.querySelector(".agent-note");
       if (note) note.textContent = providerStatusText(p);
+      // 右侧 chip:使用中(当前激活) / 切换(已连接未激活,提示整行可点切换) / 未连接不显示
+      const chip = btn.querySelector(".agent-chip");
+      if (chip) {
+        if (inUse) { chip.hidden = false; chip.className = "agent-chip in-use"; chip.textContent = t("provider.inUse"); }
+        else if (ready) { chip.hidden = false; chip.className = "agent-chip switch"; chip.textContent = t("provider.switch"); }
+        else { chip.hidden = true; chip.className = "agent-chip"; chip.textContent = ""; }
+      }
     });
     renderSendSetup();
   }

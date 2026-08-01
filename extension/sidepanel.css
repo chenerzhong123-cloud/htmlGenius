@@ -794,14 +794,27 @@ button {
 .send-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 3; width: min(285px, calc(100vw - 42px)); padding: 7px; border: 1px solid var(--line-default); border-radius: var(--r-lg); background: var(--bg-overlay); box-shadow: var(--shadow); }
 .send-menu:not(.show) { display: none; }
 .send-menu .menu-head { padding: 7px 8px 5px; color: var(--text-muted); font-size: 10px; }
-.agent { display: flex; width: 100%; gap: 8px; align-items: flex-start; padding: 9px; border: 0; border-radius: var(--r-md); text-align: left; color: var(--text-primary); background: transparent; font: inherit; cursor: pointer; }
-.agent:hover:not(:disabled), .agent.active { background: var(--bg-surface-raised); }
+.agent { display: flex; width: 100%; gap: 8px; align-items: flex-start; padding: 9px; border: 0; border-radius: var(--r-md); text-align: left; color: var(--text-primary); background: transparent; font: inherit; cursor: pointer; transition: background .15s, box-shadow .15s; }
+.agent:hover:not(:disabled) { background: var(--bg-surface-raised); }
+/* 使用中(当前激活):品牌色轻染 + 左侧标记条,与「已连接但未选中」明确区分 */
+.agent.active { background: var(--brand-soft); box-shadow: inset 2px 0 0 var(--brand); }
 .agent:disabled { cursor: not-allowed; opacity: .65; }
 .agent-dot { width: 7px; height: 7px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: var(--text-faint); }
 .agent-dot.ready { background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+/* 使用中:绿点呼吸光圈(进行中的活感),区别于静态「已连接」 */
+.agent-dot.in-use { animation: hg-agent-pulse 1.8s ease-out infinite; }
+@keyframes hg-agent-pulse {
+  0% { box-shadow: 0 0 0 3px var(--success-soft), 0 0 0 0 var(--success-soft); }
+  70% { box-shadow: 0 0 0 3px var(--success-soft), 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 3px var(--success-soft), 0 0 0 8px transparent; }
+}
 .agent-dot.warn { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-soft); }
 .agent b { display: block; font-size: 12px; font-weight: 700; }
 .agent-note, .agent small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10px; line-height: 1.35; }
+/* 右侧状态 chip:使用中(品牌实心) / 切换(描边,悬停点亮,提示整行可点切换) */
+.agent-chip { margin-left: auto; align-self: center; flex: none; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line-default); background: transparent; color: var(--text-muted); font-size: 10px; font-weight: 700; line-height: 1; letter-spacing: .3px; white-space: nowrap; transition: color .15s, border-color .15s, background .15s; }
+.agent-chip.in-use { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+.agent:hover:not(:disabled) .agent-chip.switch { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
 .send-menu .menu-link { display: block; margin-top: 6px; padding: 7px 9px; border-top: 1px solid var(--line-subtle); color: var(--brand-hover); font-size: 11px; font-weight: 600; text-decoration: none; }
 .send-menu .menu-link:hover { color: var(--brand); }
 /* v0.9.1:下箭头弹窗内嵌「未连接」教程(短指令直接内嵌;详情走 agents.html 链接) */
