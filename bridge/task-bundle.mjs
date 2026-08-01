@@ -213,6 +213,7 @@ export function buildCandidatePrompt({ runId, task }) {
     "You are executing a task inside HTML Genius's controlled candidate workspace.",
     "",
     "- Only read source.html and task-" + runId + ".md / task-" + runId + ".json in the current directory.",
+    "- The original document path in the Change Contract is reference-only and may be OUTSIDE your accessible workspace; do NOT open it. source.html in the current directory is the authoritative snapshot placed there for you.",
     "- Only write the final, complete, directly-openable HTML to candidate.html in the current directory.",
     "- Do not modify source.html, the task files, or any other file; do not use shell, network, MCP, or the browser.",
     "- Do not emit Markdown files, diffs, explanations, or multiple candidate files instead of candidate.html.",
@@ -230,9 +231,11 @@ export function buildPatchPrompt({ runId, task }) {
   const prelude = [
     "You are producing precise edits inside HTML Genius's controlled workspace.",
     "",
-    "- Read source.html and task-" + runId + ".md / task-" + runId + ".json in the current directory.",
+    "- Read source.html and task-" + runId + ".md / task-" + runId + ".json in the current directory. Read source.html exactly once; do not re-read files to double-check.",
+    "- The original document path in the Change Contract is reference-only and may be OUTSIDE your accessible workspace; do NOT open it. source.html in the current directory is the authoritative snapshot placed there for you.",
     "- Do NOT modify any file. Do NOT write candidate.html. Do not use shell, network, MCP, plugins, or the browser.",
     "- For each selected comment in the Change Contract, decide the minimal precise edit that satisfies it.",
+    "- If a comment's requested change is ALREADY satisfied in source.html (the target text already matches the comment's intent), do NOT emit a no-op edit whose replacement equals the located text — return an empty edits array instead.",
     "- Emit ONLY a single UTF-8 JSON object as your final response, matching the schema below. No Markdown, no prose, no code fences.",
     "- Only propose edits located at the commented targets. If a target cannot be uniquely located, omit that edit (do not guess).",
     "- Every edit must reference the comment it serves via comment_ref (the comment's id)."
@@ -269,6 +272,7 @@ export function buildCodexPrompt({ task }) {
     "你正在 HTML Genius 的受控候选工作区中执行任务。",
     "",
     "- 只读取当前目录中的 source.html 以及 task bundle。",
+    "- 更改契约里出现的原始文档路径仅供参考，可能在你的可访问工作区之外，禁止打开；当前目录的 source.html 才是我们放置的权威快照。",
     "- 只将最终、完整、可直接打开的 HTML 写入当前目录的 candidate.html。",
     "- 不要修改 source.html、task bundle、其它文件;不要使用网络、MCP、外部插件或其它工作目录。",
     "- 严格遵守 Change Contract。无法唯一定位目标时,保留该内容并在最终消息中说明。",
@@ -284,6 +288,7 @@ export function buildPlanPrompt({ runId, task }) {
   const prelude = [
     "You are preparing an HTML Genius change plan in a controlled workspace.",
     "- Read only source.html and the task bundle in the current directory.",
+    "- The original document path in the Change Contract is reference-only and may be OUTSIDE your accessible workspace; do NOT open it. source.html in the current directory is the authoritative snapshot placed there for you.",
     "- Do not modify source.html, task files, or any other input.",
     "- Do not create candidate.html or edit the original document.",
     "- Write exactly one UTF-8 JSON file to output/plan.json matching the required schema.",

@@ -114,3 +114,36 @@ test('§6.6: runPlan turn/start sandboxPolicy writableRoots=[cwd] 且 networkAcc
   assert.deepEqual(turn.sandboxPolicy.writableRoots, [ws], 'writableRoots 仅限 plan 目录(cwd)');
   assert.equal(turn.sandboxPolicy.networkAccess, false, '网络关闭');
 });
+
+// —— 方向3:patch 只读沙箱 + agent 消息捕获 ——
+test('runTask(readOnly): thread/start sandbox=read-only,turn/start sandboxPolicy=readOnly(OS 层禁写)', async () => {
+  const { ws, logFile } = setup();
+  const c = new CodexAppServerClient(FAKE, { env: { CODEX_FAKE_LOG: logFile } });
+  await c.runTask({ sessionMode: 'new', workspaceCwd: ws, prompt: 'patch task', timeoutMs: 6000, readOnly: true });
+  await c.close();
+  const thread = readLog(logFile).find((x) => x.method === 'thread/start');
+  assert.equal(thread && thread.sandbox, 'read-only', 'thread/start sandbox 必须 read-only');
+  const turn = readLog(logFile).find((x) => x.method === 'turn/start');
+  assert.equal(turn && turn.sandboxPolicy && turn.sandboxPolicy.type, 'readOnly', 'turn sandboxPolicy 必须 readOnly');
+  assert.equal(turn.sandboxPolicy.networkAccess, false, '网络关闭');
+  assert.ok(!Array.isArray(turn.sandboxPolicy.writableRoots), 'readOnly 不带 writableRoots');
+});
+
+test('runTask(默认): thread/start sandbox=workspace-write(candidate/plan 不受 patch 只读影响)', async () => {
+  const { ws, logFile } = setup();
+  const c = new CodexAppServerClient(FAKE, { env: { CODEX_FAKE_LOG: logFile } });
+  await c.runCandidate({ sessionMode: 'new', workspaceCwd: ws, prompt: 'x', timeoutMs: 6000 });
+  await c.close();
+  const thread = readLog(logFile).find((x) => x.method === 'thread/start');
+  assert.equal(thread && thread.sandbox, 'workspace-write', 'candidate 维持 workspace-write');
+});
+
+test('runTask: 完整捕获 agentMessage item/completed 文本(不截断,供 patch 提取 edits JSON)', async () => {
+  const { ws, logFile } = setup();
+  const longJson = JSON.stringify({ schema_version: 1, edits: [], pad: 'x'.repeat(1000) }); // >400 字符,验证不走 UI 截断路径
+  const messages = ['过程说明 prose', longJson];
+  const c = new CodexAppServerClient(FAKE, { env: { CODEX_FAKE_LOG: logFile, CODEX_FAKE_AGENT_MESSAGES: JSON.stringify(messages) } });
+  const r = await c.runTask({ sessionMode: 'new', workspaceCwd: ws, prompt: 'patch task', timeoutMs: 6000, readOnly: true });
+  await c.close();
+  assert.deepEqual(r.messages, messages, '按序完整返回 agent 消息');
+});

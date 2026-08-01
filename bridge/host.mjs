@@ -8,8 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { NativeFrameDecoder, writeMessage } from "./native-protocol.mjs";
 import { executeHandoff, executeCandidateRun, executePlanRun, executePatchPreviewRun, executePatchApplyRun } from "./host-runner.mjs";
-import { executeCodexCandidateRun, executeCodexPlanRun } from "./codex-adapter.mjs";
-import { executeCopilotCandidateRun, executeCopilotPlanRun } from "./copilot-adapter.mjs";
+import { executeCodexCandidateRun, executeCodexPlanRun, executeCodexPatchPreviewRun, executeCodexPatchApplyRun } from "./codex-adapter.mjs";
+import { executeCopilotCandidateRun, executeCopilotPlanRun, executeCopilotPatchPreviewRun, executeCopilotPatchApplyRun } from "./copilot-adapter.mjs";
 import { probeProviders } from "./provider-probe.mjs";
 import { listProviderIds } from "./provider-registry.mjs";
 import {
@@ -119,7 +119,7 @@ function dispatch(msg) {
     );
   }
   if (msg.type === "copilot_handoff_start") {
-    // v0.8.2 §6.1:GitHub Copilot 独立分支,绝不落到 claude 默认分支。run_kind 必须显式 plan|candidate。
+    // v0.8.2 §6.1:GitHub Copilot 独立分支,绝不落到 claude 默认分支。run_kind 必须显式 plan|candidate|patch_preview|patch_apply。
     const emit = (payload) => {
       try { writeMessage(process.stdout, payload); }
       catch (e) { log("emit failed:", e && e.message); }
@@ -129,7 +129,9 @@ function dispatch(msg) {
       try {
         if (runKind === "plan") await executeCopilotPlanRun(msg, { emit });
         else if (runKind === "candidate") await executeCopilotCandidateRun(msg, { emit });
-        else emit({ type: "bridge_failed", run_id: msg.run_id, code: "BAD_RUN_KIND", message: "copilot run_kind must be plan|candidate" });
+        else if (runKind === "patch_preview") await executeCopilotPatchPreviewRun(msg, { emit });
+        else if (runKind === "patch_apply") await executeCopilotPatchApplyRun(msg, { emit });
+        else emit({ type: "bridge_failed", run_id: msg.run_id, code: "BAD_RUN_KIND", message: "copilot run_kind must be plan|candidate|patch_preview|patch_apply" });
       } catch (e) {
         log("copilot-" + (runKind || "?") + " crashed:", (e && e.stack) || e);
         emit({ type: "bridge_failed", run_id: msg.run_id, code: "HOST_CRASH", message: (e && e.message) || "host crash" });
@@ -148,6 +150,8 @@ function dispatch(msg) {
       try {
         if (isCodex) {
           if (runKind === "plan") await executeCodexPlanRun(msg, { emit });
+          else if (runKind === "patch_preview") await executeCodexPatchPreviewRun(msg, { emit });
+          else if (runKind === "patch_apply") await executeCodexPatchApplyRun(msg, { emit });
           else await executeCodexCandidateRun(msg, { emit }); // candidate + 旧 handoff
         } else {
           if (runKind === "plan") await executePlanRun(msg, { emit });

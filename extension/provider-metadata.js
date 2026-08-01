@@ -19,10 +19,11 @@
       dispatch_type: "claude_handoff_start", probe: "claude", runtime_policy: "provider_default", supports_real_smoke: true
     }),
     codex_app_server: freezeDesc({
-      id: "codex_app_server", label_key: "provider.codex", capabilities: ["candidate", "plan"],
+      id: "codex_app_server", label_key: "provider.codex", capabilities: ["candidate", "plan", "patch"],
       dispatch_type: "codex_handoff_start", probe: "codex", runtime_policy: "signed_app_only", supports_real_smoke: true
     }),
     github_copilot: freezeDesc({
+      // patch 适配已实现并 fake 全测,真机验证通过后加回 "patch"(须与 bridge/provider-registry.mjs 同步)
       id: "github_copilot", label_key: "provider.copilot", capabilities: ["candidate", "plan"],
       dispatch_type: "copilot_handoff_start", probe: "copilot", runtime_policy: "runtime_locked", supports_real_smoke: true
     })

@@ -523,12 +523,14 @@ async function onPatchPreviewReady(tab_id, runId, m, taskSha, logicalId, artifac
     try { chrome.storage.sync.get({ hgPatchApplyMode: "apply_then_review" }, (r) => res((r && r.hgPatchApplyMode) || "apply_then_review")); }
     catch (e) { res("apply_then_review"); }
   });
-  if (mode === "apply_then_review") {
-    const okIds = (m.edits || []).filter((e) => e && e.status === "ok").map((e) => e.id);
+  const okIds = (m.edits || []).filter((e) => e && e.status === "ok").map((e) => e.id);
+  if (mode === "apply_then_review" && okIds.length > 0) {
     broadcast({ type: "bridge-progress", tab_id, run_id: runId, status: "running" });
     handlePatchApply({ tab_id, run_id: runId, confirmed_edit_ids: okIds }).catch(() => {});
     return;
   }
+  // okIds 为空(目标已满足/定位不到/全被跳过)→ 不自动应用零编辑(会产出与原文完全相同的无意义 candidate),
+  // 改走预览展示路径:sidepanel 渲染空状态说明,由用户取消收尾。
   // 预览确认:收尾 preview host(应用阶段另起进程读盘),保持 run 于 awaiting_confirm(tab 锁仍持有)
   const entry = _runsByTab.get(tab_id);
   if (entry && entry.run_id === runId) { entry.terminal = true; try { entry.port.disconnect(); } catch (_) {} }

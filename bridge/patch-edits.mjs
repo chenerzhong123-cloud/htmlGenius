@@ -42,6 +42,23 @@ function tryParseObject(s) {
   } catch (_) { return null; }
 }
 
+// —— 从多条 Agent 消息中提取 edits(倒序逐条尝试,首个成功者胜出)——
+// Codex/Copilot patch preview:最终消息可能有多条(过程说明 + 最终结果),edits JSON 通常在最后一条。
+// 逐条独立解析而非拼接后解析 —— 拼接会让 extractFirstObject 先命中过程消息里的非 edits JSON 而误失败。
+// 全部失败 → PATCH_EDITS_INVALID(附带最后一条的解析失败原因供排障)。
+export function extractEditsFromMessages(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  let lastErr = null;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const text = list[i] == null ? "" : String(list[i]);
+    if (!text.trim()) continue;
+    try { return parseEditsJson(text); } catch (e) { lastErr = e; }
+  }
+  fail("PATCH_EDITS_INVALID", lastErr
+    ? "no agent message contained a valid edits JSON: " + lastErr.message
+    : "no agent messages captured");
+}
+
 // 抓首个 { 到配平 }(尊重字符串字面量与转义),再 parse。
 function extractFirstObject(text) {
   const start = text.indexOf("{");

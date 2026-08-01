@@ -53,7 +53,7 @@ export function buildClaudeArgv({ promptText, resumeSessionId, runKind }) {
   const disallowed = canWrite
     ? ["Bash", "Edit", "WebFetch", "WebSearch", "mcp__*"]                           // candidate/plan 禁 in-place Edit/网/MCP
     : ["Bash", "Edit", "Write", "WebFetch", "WebSearch", "mcp__*"];                 // handoff 全只读
-  const maxTurns = runKind === "candidate" ? "24" : runKind === "plan" ? "16" : runKind === "patch" ? "8" : "4"; // candidate 编辑多轮;plan 写 JSON 中等;patch 读源+输出编辑 JSON;handoff 回执少轮
+  const maxTurns = runKind === "candidate" ? "24" : runKind === "plan" ? "16" : runKind === "patch" ? "12" : "4"; // candidate 编辑多轮;plan 写 JSON 中等;patch 读源+输出编辑 JSON(实测「无需修改」判定也会消耗 6+ 轮校验,8 太紧会耗尽,12 留余量);handoff 回执少轮
   const argv = [
     "-p",
     "--output-format", "json",
@@ -161,13 +161,31 @@ export function parseHandoffResult(stdout) {
   return { sessionId: String(sid).trim(), isError: obj.is_error === true };
 }
 
+// —— 非 0 退出归因(方向3 加固):Claude CLI 失败时仍会在 stdout 输出 result JSON(is_error:true + subtype),
+// stderr 常为空。旧逻辑只看 exit code + stderr → 用户只看到空消息「claude exited 1: 」无法排障。
+// 解析 stdout 识别已知失败 subtype:
+//   error_max_turns → CLAUDE_MAX_TURNS(轮次预算耗尽:任务目标模糊或模型反复校验,需重试/细化评论)
+// 其余非 0 → CLAUDE_RUN_FAILED(细节优先 stderr,stderr 为空时回退 stdout 摘录,再不济固定占位)。
+export function classifyClaudeFailure({ code, stdout, stderr }) {
+  if (code === 0) return null;
+  let obj = null;
+  try { obj = JSON.parse(String(stdout || "").trim()); } catch (_) {}
+  if (obj && typeof obj === "object" && obj.is_error === true && obj.subtype === "error_max_turns") {
+    return {
+      code: "CLAUDE_MAX_TURNS",
+      message: "Claude 耗尽轮次上限仍未产出最终结果;请重试,或把评论目标写得更具体后重发"
+    };
+  }
+  const detail = truncate(stderr) || truncate(stdout) || "(no stderr/stdout)";
+  return { code: "CLAUDE_RUN_FAILED", message: "claude exited " + code + ": " + detail };
+}
+
 // —— new handoff(spec §7 步骤6)——
 export async function runHandoff({ cwd, promptText, timeoutMs, runKind }) {
   const argv = buildClaudeArgv({ promptText, runKind });
   const { code, stdout, stderr } = await runClaude(argv, { cwd, timeoutMs });
-  if (code !== 0) {
-    fail("CLAUDE_RUN_FAILED", "claude exited " + code + ": " + truncate(stderr), { exitCode: code });
-  }
+  const cls = classifyClaudeFailure({ code, stdout, stderr });
+  if (cls) fail(cls.code, cls.message, { exitCode: code });
   return parseHandoffResult(stdout);
 }
 
@@ -195,9 +213,8 @@ export function parsePatchResult(stdout) {
 export async function runPatch({ cwd, promptText, timeoutMs }) {
   const argv = buildClaudeArgv({ promptText, runKind: "patch" });
   const { code, stdout, stderr } = await runClaude(argv, { cwd, timeoutMs });
-  if (code !== 0) {
-    fail("CLAUDE_RUN_FAILED", "claude exited " + code + ": " + truncate(stderr), { exitCode: code });
-  }
+  const cls = classifyClaudeFailure({ code, stdout, stderr });
+  if (cls) fail(cls.code, cls.message, { exitCode: code });
   return parsePatchResult(stdout);
 }
 

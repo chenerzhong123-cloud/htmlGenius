@@ -18,7 +18,7 @@ export const PROVIDER_REGISTRY = Object.freeze({
   codex_app_server: Object.freeze({
     id: "codex_app_server",
     label_key: "provider.codex",
-    capabilities: cap(["candidate", "plan"]),
+    capabilities: cap(["candidate", "plan", "patch"]),
     dispatch_type: "codex_handoff_start",
     probe: "codex",
     runtime_policy: "signed_app_only",    // 仅 com.openai.codex bundle + codesign TeamID
@@ -27,6 +27,9 @@ export const PROVIDER_REGISTRY = Object.freeze({
   github_copilot: Object.freeze({
     id: "github_copilot",
     label_key: "provider.copilot",
+    // patch 适配已实现并经 fake 全量测试(copilot-adapter / fixture / certify),但真机 runtime 尚未验证;
+    // 暂不声明 patch 能力(精准修补走完整候选旧路径)。真机验证通过后把 "patch" 加回本数组并同步
+    // extension/provider-metadata.js 即启用(host 路由/adapter/测试均已就位)。
     capabilities: cap(["candidate", "plan"]),
     dispatch_type: "copilot_handoff_start",
     probe: "copilot",

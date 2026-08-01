@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildHandoffArgv, buildClaudeArgv, isSessionUuid, parseHandoffResult, parsePatchResult,
-  checkAuth, runHandoff, resumeHandoff
+  checkAuth, runHandoff, resumeHandoff, classifyClaudeFailure
 } from "../claude-cli.mjs";
 
 const FAKE_BIN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fake-claude-bin");
@@ -77,12 +77,13 @@ test("isSessionUuid / parseHandoffResult 校验", () => {
   assert.throws(() => parseHandoffResult('[1,2]'), (e) => e.code === "CLAUDE_INVALID_RESULT");
 });
 
-test("buildClaudeArgv(patch):只读工具(禁 Write)+ maxTurns 8,prompt 末元素", () => {
+test("buildClaudeArgv(patch):只读工具(禁 Write)+ maxTurns 12,prompt 末元素", () => {
   const argv = buildClaudeArgv({ promptText: "PATCH_PROMPT", runKind: "patch" });
   assert.equal(argv[argv.indexOf("--allowed-tools") + 1], "Read,Glob,Grep", "patch 不放行 Write");
   const di = argv.indexOf("--disallowed-tools");
   assert.ok(argv.slice(di + 1).includes("Write"), "patch disallowed 含 Write");
-  assert.equal(argv[argv.indexOf("--max-turns") + 1], "8");
+  // 12(原 8 太紧:「无需修改」判定实测也耗 6+ 轮,耗尽 → exit 1 error_max_turns → 任务失败)
+  assert.equal(argv[argv.indexOf("--max-turns") + 1], "12");
   assert.equal(argv[argv.length - 1], "PATCH_PROMPT");
 });
 
@@ -94,6 +95,27 @@ test("parsePatchResult:取 session_id + result 文本;缺 result/坏 session 抛
   assert.throws(() => parsePatchResult('{"session_id":"11111111-2222-3333-4444-555555555555"}'), (e) => e.code === "CLAUDE_INVALID_RESULT"); // 无 result 文本
   assert.throws(() => parsePatchResult('{"session_id":"bad","result":"x"}'), (e) => e.code === "CLAUDE_INVALID_RESULT");
   assert.throws(() => parsePatchResult("not json"), (e) => e.code === "CLAUDE_INVALID_RESULT");
+});
+
+test("classifyClaudeFailure:exit 0 → null;error_max_turns → CLAUDE_MAX_TURNS;其余非 0 → CLAUDE_RUN_FAILED(带可读细节)", () => {
+  assert.equal(classifyClaudeFailure({ code: 0, stdout: "{}", stderr: "" }), null);
+  // 真实形态(实测复现):exit 1 + stdout is_error/subtype,stderr 为空
+  const mt = classifyClaudeFailure({
+    code: 1, stdout: '{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":9,"result":null}', stderr: ""
+  });
+  assert.equal(mt.code, "CLAUDE_MAX_TURNS");
+  assert.ok(mt.message.length > 10, "CLAUDE_MAX_TURNS 消息必须对用户可读,非空错误");
+  // 普通失败:stderr 有内容 → 消息带 stderr
+  const rf = classifyClaudeFailure({ code: 3, stdout: "", stderr: "claude: simulated failure" });
+  assert.equal(rf.code, "CLAUDE_RUN_FAILED");
+  assert.ok(rf.message.includes("simulated failure"), "细节优先取 stderr");
+  // 普通失败:stderr 为空 → 回退 stdout 摘录,绝不产出「claude exited 1: 」这种空消息
+  const rf2 = classifyClaudeFailure({ code: 1, stdout: "weird non-json output", stderr: "" });
+  assert.equal(rf2.code, "CLAUDE_RUN_FAILED");
+  assert.ok(rf2.message.includes("weird non-json output"), "stderr 为空时回退 stdout 摘录");
+  const rf3 = classifyClaudeFailure({ code: 1, stdout: "", stderr: "" });
+  assert.equal(rf3.code, "CLAUDE_RUN_FAILED");
+  assert.ok(rf3.message.includes("(no stderr/stdout)"), "两者皆空也要有占位,不留空消息");
 });
 
 // —— 真实 spawn 测试(fake claude 可执行文件)——
@@ -163,6 +185,15 @@ test("spawn: 非 0 退出 → CLAUDE_RUN_FAILED;resume 非 0 → CLAUDE_SESSION_
   await assert.rejects(() => runHandoff({ cwd, promptText: "p" }), (e) => e.code === "CLAUDE_RUN_FAILED");
   await assert.rejects(() => resumeHandoff({ cwd, promptText: "p", resumeSessionId: "11111111-2222-3333-4444-555555555555" }),
     (e) => e.code === "CLAUDE_SESSION_UNAVAILABLE");
+});
+
+test("spawn: 轮次耗尽(exit 1 + error_max_turns JSON)→ CLAUDE_MAX_TURNS(不再报空消息的 CLAUDE_RUN_FAILED)", async () => {
+  // 回归:14:22 真实失败 —— Claude 耗尽 max-turns 时 CLI exit 1、stderr 为空、stdout 是 error_max_turns result;
+  // 旧逻辑只报「claude exited 1: 」,用户无法排障。
+  process.env.PATH = FAKE_BIN_DIR + path.delimiter + process.env.PATH;
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "hg-cli-ws6b-"));
+  setFakeMode("max-turns");
+  await assert.rejects(() => runHandoff({ cwd, promptText: "p" }), (e) => e.code === "CLAUDE_MAX_TURNS" && e.message.length > 10);
 });
 
 test("spawn: timeout → CLAUDE_TIMEOUT(fake sleep 30s,超时 500ms)", async () => {

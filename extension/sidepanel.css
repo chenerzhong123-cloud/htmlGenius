@@ -794,14 +794,30 @@ button {
 .send-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 3; width: min(285px, calc(100vw - 42px)); padding: 7px; border: 1px solid var(--line-default); border-radius: var(--r-lg); background: var(--bg-overlay); box-shadow: var(--shadow); }
 .send-menu:not(.show) { display: none; }
 .send-menu .menu-head { padding: 7px 8px 5px; color: var(--text-muted); font-size: 10px; }
-.agent { display: flex; width: 100%; gap: 8px; align-items: flex-start; padding: 9px; border: 0; border-radius: var(--r-md); text-align: left; color: var(--text-primary); background: transparent; font: inherit; cursor: pointer; }
-.agent:hover:not(:disabled), .agent.active { background: var(--bg-surface-raised); }
+.agent { display: flex; width: 100%; gap: 8px; align-items: flex-start; padding: 9px; border: 0; border-radius: var(--r-md); text-align: left; color: var(--text-primary); background: transparent; font: inherit; cursor: pointer; transition: background .15s, box-shadow .15s; }
+/* 文本包裹必须是块/列容器:inline 包裹块级 b/small 时不计入按钮绘制盒高度 → 高亮只裹名称行、
+   且与上一行「已连接」重叠。改 flex 列后整行(名称+状态)同属一个盒,悬停高亮完整覆盖、不再错位。 */
+.agent > i.agent-dot + span { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+/* 悬停高亮对一切可用行生效(含使用中行);「使用中」不再有常驻背景高亮 —— 默认不亮,悬停才亮,
+   悬停其它行时使用中行不亮(高亮严格跟随光标)。在用什么由 chip「使用中」+ 呼吸绿点表达。 */
+.agent:hover:not(:disabled) { background: var(--bg-surface-raised); }
 .agent:disabled { cursor: not-allowed; opacity: .65; }
 .agent-dot { width: 7px; height: 7px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: var(--text-faint); }
 .agent-dot.ready { background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+/* 使用中:绿点呼吸光圈(进行中的活感),区别于静态「已连接」 */
+.agent-dot.in-use { animation: hg-agent-pulse 1.8s ease-out infinite; }
+@keyframes hg-agent-pulse {
+  0% { box-shadow: 0 0 0 3px var(--success-soft), 0 0 0 0 var(--success-soft); }
+  70% { box-shadow: 0 0 0 3px var(--success-soft), 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 3px var(--success-soft), 0 0 0 8px transparent; }
+}
 .agent-dot.warn { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-soft); }
 .agent b { display: block; font-size: 12px; font-weight: 700; }
 .agent-note, .agent small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10px; line-height: 1.35; }
+/* 右侧状态 chip:使用中(品牌实心) / 切换(描边,悬停点亮,提示整行可点切换) */
+.agent-chip { margin-left: auto; align-self: center; flex: none; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line-default); background: transparent; color: var(--text-muted); font-size: 10px; font-weight: 700; line-height: 1; letter-spacing: .3px; white-space: nowrap; transition: color .15s, border-color .15s, background .15s; }
+.agent-chip.in-use { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+.agent:hover:not(:disabled) .agent-chip.switch { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
 .send-menu .menu-link { display: block; margin-top: 6px; padding: 7px 9px; border-top: 1px solid var(--line-subtle); color: var(--brand-hover); font-size: 11px; font-weight: 600; text-decoration: none; }
 .send-menu .menu-link:hover { color: var(--brand); }
 /* v0.9.1:下箭头弹窗内嵌「未连接」教程(短指令直接内嵌;详情走 agents.html 链接) */
@@ -969,6 +985,7 @@ button {
 .patch-preview .pp-list { max-height: 240px; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
 .patch-preview .pp-item { display: flex; gap: 8px; align-items: flex-start; padding: 8px 9px; border-radius: var(--r-md); background: var(--bg-surface); border: 1px solid var(--line-subtle); }
 .patch-preview .pp-item.pp-problem { opacity: .82; border-color: var(--line-default); }
+.patch-preview .pp-empty { padding: 14px 10px; border-radius: var(--r-md); border: 1px dashed var(--line-default); color: var(--text-muted); font-size: 12.5px; line-height: 1.6; text-align: center; }
 .patch-preview .pp-check { margin-top: 2px; accent-color: var(--brand); }
 .patch-preview .pp-body { flex: 1; min-width: 0; }
 .patch-preview .pp-action { font-size: 11px; color: var(--text-muted); margin-bottom: 3px; }

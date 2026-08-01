@@ -7,7 +7,7 @@
 #   mode 文件:$TMPDIR/fake-claude.mode.$PPID(PPID=测试进程 pid,天然隔离并行测试文件)
 #   argv 日志:$TMPDIR/fake-claude.argv.$PPID —— NUL 分隔各 argv 元素,调用之间以 "END\0" 结尾。
 #   (用 NUL 而非换行:注入测试的 prompt 含真实换行,换行分隔会撕裂记录;NUL 不会出现在 argv 里)
-# mode: ok(默认) | auth-fail | bad-json | no-uuid | fail | slow
+# mode: ok(默认) | auth-fail | bad-json | no-uuid | fail | max-turns | slow
 base="${TMPDIR:-/tmp}"
 cfg="$base/fake-claude.mode.$PPID"
 log="$base/fake-claude.argv.$PPID"
@@ -28,6 +28,7 @@ case "$mode" in
   bad-json) echo "this is definitely not json"; exit 0 ;;
   no-uuid)  echo '{"type":"result","subtype":"success","session_id":"not-a-uuid"}'; exit 0 ;;
   fail)     echo "claude: simulated failure" >&2; exit 3 ;;
+  max-turns) echo '{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":9,"result":null}'; exit 1 ;;
   slow)     sleep 30; exit 0 ;;
 esac
 echo '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"session_id":"11111111-2222-3333-4444-555555555555","result":"acknowledged"}'

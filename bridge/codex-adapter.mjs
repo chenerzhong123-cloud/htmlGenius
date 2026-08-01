@@ -13,12 +13,13 @@ import {
   resolveSourcePath, prepareCandidateRun, writeManifest, validateCandidate,
   publishSiblingCandidate, quarantineCandidate, writeApprovedPlan, nextCandidateVersionLabel
 } from './candidate-workspace.mjs';
-import { createWorkspace, writeTaskBundle, buildCodexPrompt, buildPlanPrompt, approvedPlanPreamble, isSha256Tagged, sha256File } from './task-bundle.mjs';
+import { createWorkspace, writeTaskBundle, buildCodexPrompt, buildPlanPrompt, buildPatchPrompt, approvedPlanPreamble, isSha256Tagged, sha256File } from './task-bundle.mjs';
 import {
   discoverAppRuntime, verifySchema, CodexAppServerClient, DEFAULT_TURN_TIMEOUT_MS,
   CODEX_APP_NOT_FOUND, CODEX_APP_UNTRUSTED, CODEX_INCOMPATIBLE, CODEX_AUTH_REQUIRED,
   CODEX_SESSION_UNAVAILABLE, CODEX_TURN_FAILED, CODEX_TIMED_OUT
 } from './codex-app-server-client.mjs';
+import { persistPatchPreview, executePatchApplyRun } from './host-runner.mjs';
 import {
   preparePlanRun, verifyTaskBundleUnchanged, validatePlanJson, writePlanManifest, quarantinePlan
 } from './plan-workspace.mjs';
@@ -67,7 +68,10 @@ const CODEX_FAIL_STATUS = {
   [CODEX_TURN_FAILED]: 'codex_turn_failed',
   [CODEX_TIMED_OUT]: 'codex_timed_out',
   SOURCE_MUTATED_DURING_CANDIDATE: 'source_changed_during_run',
+  SOURCE_MUTATED_DURING_PATCH: 'source_changed_during_run',
   SOURCE_CHANGED_BEFORE_START: 'source_changed_before_start',
+  PATCH_EDITS_INVALID: 'patch_edits_invalid',
+  PATCH_RUN_NOT_FOUND: 'patch_run_not_found',
   CANDIDATE_MISSING: 'candidate_missing',
   CANDIDATE_INVALID_HTML: 'candidate_invalid_html',
   CANDIDATE_SYMLINK: 'candidate_invalid_html',
@@ -378,5 +382,143 @@ export async function executeCodexPlanRun(msg, { emit, runtime, client, schemaDi
     plan_sha256: planResult.planSha256,
     plan: { schema_version: p.schema_version, summary: p.summary, plan_markdown: p.plan_markdown, out_of_scope: Array.isArray(p.out_of_scope) ? p.out_of_scope.slice() : [] },
     manifest_path: manifestPath
+  });
+}
+
+// ———————————————————————— Patch(方向3 确定性编辑快车道)————————————————————————
+// 与 claude host-runner.executePatchPreviewRun / executePatchApplyRun 同型:Codex 以只读沙箱读 source.html,
+// 最终 agent message 输出结构化编辑 JSON(不写任何文件;read-only sandbox OS 层禁写)→ host 提取并确定性应用。
+// 复用 patch-edits / persistPatchPreview / executePatchApplyRun,不重建第二套解析与应用链。
+const CODEX_PATCH_TIMEOUT_MS = 8 * 60 * 1000; // 结构化输出比整页重写快,与 claude patch 同口径;用户可随时终止
+
+export async function executeCodexPatchPreviewRun(msg, { emit, runtime, client, schemaDir, generateSchema } = {}) {
+  if (typeof emit !== 'function') throw new Error('emit is required');
+  const runId = msg && msg.run_id;
+  const status = (s) => emit({ type: 'bridge_status', run_id: runId, status: s });
+  const failed = (code, message, runsDir, ctx) => {
+    if (runsDir) {
+      try {
+        writeManifest({
+          runsDir, runId,
+          logicalDocumentId: (ctx && ctx.logicalDocumentId) || (msg && msg.source && msg.source.logical_document_id) || null,
+          provider: 'codex_app_server',
+          sourcePath: (ctx && ctx.sourcePath) || null,
+          sourceSha256Before: (ctx && ctx.sourceSha256Before) || null,
+          changeContractSha256: (ctx && ctx.taskSha256) || null,
+          sessionId: (ctx && ctx.threadId) || null,
+          status: CODEX_FAIL_STATUS[code] || 'codex_turn_failed'
+        });
+      } catch (_) {}
+    }
+    emit({ type: 'bridge_failed', run_id: runId, code, message: truncateMsg(message) });
+  };
+
+  // 1. 字段校验
+  if (!msg || typeof msg !== 'object') { emit({ type: 'bridge_failed', code: 'BAD_REQUEST', message: 'missing message' }); return; }
+  if (typeof runId !== 'string' || !runId) { emit({ type: 'bridge_failed', code: 'BAD_REQUEST', message: 'missing run_id' }); return; }
+  const source = msg.source || {};
+  const session = msg.session || {};
+  const task = msg.task;
+  if (typeof source.logical_document_id !== 'string' || !source.logical_document_id) { failed('BAD_REQUEST', 'missing source.logical_document_id'); return; }
+  if (typeof source.artifact_uri !== 'string' || !source.artifact_uri) { failed('BAD_REQUEST', 'missing source.artifact_uri'); return; }
+  if (!isSha256Tagged(source.base_artifact_hash)) { failed('BAD_REQUEST', 'source.base_artifact_hash must be sha256:<64hex>'); return; }
+  if (session.mode !== 'new' && session.mode !== 'continue') { failed('BAD_REQUEST', 'session.mode must be new|continue'); return; }
+  if (session.mode === 'continue') { failed(CODEX_SESSION_UNAVAILABLE, 'codex patch preview 不支持续发(每次新 thread)'); return; }
+  if (!task || task.mode !== 'precise_patch') { failed('INVALID_MODE', 'patch run_kind requires task.mode precise_patch'); return; }
+
+  status('checking');
+
+  // 2. source 解析 + workspace + task bundle
+  let sourcePath, workspace, bundle;
+  try {
+    sourcePath = resolveSourcePath(source.artifact_uri);
+    const hostHash = sha256File(sourcePath);
+    workspace = codexWorkspacePathFor({ sourcePath, logicalDocumentId: source.logical_document_id });
+    fs.mkdirSync(workspace, { recursive: true });
+    try { fs.chmodSync(workspace, 0o700); } catch (_) {}
+    bundle = writeTaskBundle({ workspace, runId, task, sourcePath, baseArtifactHash: hostHash });
+  } catch (e) { failed(e.code || 'PREPARE_FAILED', e.message, null, { logicalDocumentId: source.logical_document_id }); return; }
+
+  // 3. run 工作区:snapshot(0400)+ task 复制进 runs/<runId>(与 apply 共享同一 run 目录)
+  let prep;
+  try {
+    prep = prepareCandidateRun({ sourcePath, workspaceRoot: workspace, logicalDocumentId: source.logical_document_id, runId, taskJsonPath: bundle.jsonPath, taskMdPath: bundle.mdPath });
+  } catch (e) { failed(e.code || 'PREPARE_FAILED', e.message, null, { logicalDocumentId: source.logical_document_id, sourcePath }); return; }
+  const ctxBase = { logicalDocumentId: source.logical_document_id, sourcePath, sourceSha256Before: prep.sourceSha256Before, taskSha256: bundle.taskSha256 };
+
+  // 4. App runtime 发现与信任
+  let rt = runtime;
+  if (!rt) { try { rt = discoverAppRuntime(); } catch (e) { failed(e.code || CODEX_APP_NOT_FOUND, e.message, prep.runsDir, ctxBase); return; } }
+
+  // 5. schema 兼容
+  let sd = schemaDir;
+  if (!sd) {
+    sd = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-schema-'));
+    try { await (generateSchema || spawnGenerateSchema)(rt.runtimePath, sd); }
+    catch (e) { failed(e.code || CODEX_INCOMPATIBLE, e.message, prep.runsDir, ctxBase); return; }
+  }
+  try { verifySchema({ schemaDir: sd }); }
+  catch (e) { failed(CODEX_INCOMPATIBLE, e.message, prep.runsDir, ctxBase); return; }
+
+  // 6. 只读沙箱执行:Codex 读 source.html,最终 agent message 输出编辑 JSON(read-only → OS 层禁写)
+  status('running');
+  const c = client || new CodexAppServerClient(rt.runtimePath);
+  let result = null;
+  try {
+    result = await c.runTask({
+      sessionMode: 'new', storedThreadId: null,
+      workspaceCwd: prep.runsDir,
+      prompt: buildPatchPrompt({ runId, task }),
+      timeoutMs: CODEX_PATCH_TIMEOUT_MS,
+      onStream: null,   // patch 预览不流式(与 claude patch 同;UI 只看 bridge_status + 预览面板)
+      readOnly: true
+    });
+  } catch (e) {
+    failed(e.code || CODEX_TURN_FAILED, e.message, prep.runsDir, { ...ctxBase, threadId: result && result.threadId });
+    try { await c.close(); } catch (_) {} return;
+  }
+  try { await c.close(); } catch (_) {}
+
+  // 7. 提取/校验编辑清单 → dry-run 状态标注 → 落 edits.json(与 claude 共享 persistPatchPreview)
+  let annotated, compliance;
+  try {
+    const snapshotHtml = fs.readFileSync(prep.snapshotPath, 'utf8');
+    const r = persistPatchPreview({
+      runsDir: prep.runsDir, runId, snapshotHtml, task, taskSha256: bundle.taskSha256,
+      messages: (result && result.messages) || []
+    });
+    annotated = r.edits; compliance = r.compliance;
+  } catch (e) { failed(e.code || 'PATCH_EDITS_INVALID', e.message, prep.runsDir, ctxBase); return; }
+
+  // 8. 重读 source:运行期被改 → 预览作废
+  let sourceSha256After;
+  try { sourceSha256After = sha256File(sourcePath); }
+  catch (e) { failed('SOURCE_MUTATED_DURING_PATCH', '无法重读 source', prep.runsDir, ctxBase); return; }
+  if (sourceSha256After !== prep.sourceSha256Before) {
+    failed('SOURCE_MUTATED_DURING_PATCH', 'source 在 codex patch preview 期间变化,预览作废', prep.runsDir, { ...ctxBase, sourceSha256After });
+    return;
+  }
+
+  // 9. patch-preview-ready(与 claude 同型;附 provider 供 UI/诊断)
+  emit({
+    type: 'patch-preview-ready',
+    provider: 'codex_app_server',
+    run_id: runId,
+    task_sha256: bundle.taskSha256,
+    logical_document_id: source.logical_document_id,
+    source_uri: pathToFileURL(sourcePath).href,
+    source_sha256_before: prep.sourceSha256Before,
+    edits: annotated,
+    compliance
+  });
+}
+
+// codex patch apply:确定性应用与 provider 无关(不调 Agent CLI),复用 host-runner 的 apply 编排,
+// 仅注入 codex 的 workspace 解析(provider 子目录)与 manifest 署名。
+export function executeCodexPatchApplyRun(msg, opts = {}) {
+  return executePatchApplyRun(msg, {
+    ...opts,
+    workspaceFor: ({ sourcePath, logicalDocumentId }) => codexWorkspacePathFor({ sourcePath, logicalDocumentId }),
+    provider: 'codex_app_server'
   });
 }

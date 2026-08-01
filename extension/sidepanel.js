@@ -1010,12 +1010,20 @@
       const id = btn.dataset.provider;
       const p = _providerStates[id];
       const ready = !!(p && p.status === "ready");
-      btn.classList.toggle("active", id === _provider);
+      const inUse = ready && id === _provider;
+      btn.classList.toggle("active", inUse);
       btn.disabled = !ready;
       const dot = btn.querySelector(".agent-dot");
-      if (dot) dot.className = "agent-dot" + (ready ? " ready" : (p && p.status === "auth_required" ? " warn" : ""));
+      if (dot) dot.className = "agent-dot" + (ready ? (inUse ? " ready in-use" : " ready") : (p && p.status === "auth_required" ? " warn" : ""));
       const note = btn.querySelector(".agent-note");
       if (note) note.textContent = providerStatusText(p);
+      // 右侧 chip:使用中(当前激活) / 切换(已连接未激活,提示整行可点切换) / 未连接不显示
+      const chip = btn.querySelector(".agent-chip");
+      if (chip) {
+        if (inUse) { chip.hidden = false; chip.className = "agent-chip in-use"; chip.textContent = t("provider.inUse"); }
+        else if (ready) { chip.hidden = false; chip.className = "agent-chip switch"; chip.textContent = t("provider.switch"); }
+        else { chip.hidden = true; chip.className = "agent-chip"; chip.textContent = ""; }
+      }
     });
     renderSendSetup();
   }
@@ -1559,6 +1567,10 @@
   function renderPatchPreview(edits, compliance) {
     if (!patchEditList) return;
     const items = (edits || []).slice().sort((a, b) => ((a.status === "ok" ? 0 : 1) - (b.status === "ok" ? 0 : 1)));
+    if (items.length === 0) {
+      // 空编辑:Agent 判定无需修改(目标已满足评论要求,或无法唯一定位)。给明确说明,避免用户以为坏掉。
+      patchEditList.innerHTML = '<div class="pp-empty">' + esc(t("patch.noneNeeded")) + "</div>";
+    } else {
     patchEditList.innerHTML = items.map((e) => {
       const isOk = e.status === "ok";
       const actionLabel = e.action === "set_style" ? t("patch.setStyle") : t("patch.replaceText");
@@ -1574,6 +1586,7 @@
         '<div class="pp-body"><div class="pp-action">' + esc(actionLabel) + (e.comment_ref ? " · " + esc(String(e.comment_ref)) : "") + "</div>" +
         '<div class="pp-detail">' + detail + "</div>" + badge + "</div></div>";
     }).join("");
+    }
     if (patchBadge && compliance) {
       const skip = (compliance.total || 0) - (compliance.applicable || 0);
       patchBadge.textContent = (compliance.applicable || 0) + " " + t("patch.willApply") + (skip > 0 ? " · " + skip + " " + t("patch.needAttention") : "");
@@ -1595,6 +1608,12 @@
   function confirmPatch() {
     if (!_patchPending) return;
     const checked = Array.from(patchEditList.querySelectorAll(".pp-check:checked")).map((el) => el.getAttribute("data-id"));
+    if (!checked.length) {
+      // 没有勾选任何可应用编辑 → 等同取消(绝不发空清单去产出与原文相同的无意义 candidate)
+      cancelPatch();
+      setBridgeStatus(t("patch.nothingToApply"), "warn");
+      return;
+    }
     const runId = _patchPending.run_id;
     hidePatchPreview();
     _contractRunId = runId; setContractRunning(true); startRunTimer();

@@ -1248,7 +1248,10 @@
   window.addEventListener("resize", updatePositions);
 
   // === 方向3:candidate 变更高亮(确定性编辑快车道)—— 候选页加载后,按 background 存入 chrome.storage.local 的
-  //     applied 编辑清单重锚并高亮实际改动区域。replace_text 锚定【新文本】(上下文未变);set_style 锚定原文本(文字未变)。===
+  //     applied 编辑清单重锚并高亮实际改动区域。
+  //     设计原则:精确【文字】修改(replace_text)应沿用原样式自然呈现,不画变更框(否则改过的字会带一个
+  //     与正文不同的绿框,不符合「精确修改结果即成品文档」的预期);只有【非文字内容】修改才标框——
+  //     set_style(改字号/颜色等,文字未变但外观变了)与未来的结构性改动。replace_text 因此跳过绘制。===
   function clearChangeHighlights() { changeOverlayData.forEach((o) => o.divs.forEach((d) => d.remove())); changeOverlayData = []; }
   function drawChangeRange(range) {
     const entry = { divs: [], range };
@@ -1268,9 +1271,10 @@
       if (!ed || !ed.locator) continue;
       let sel = null;
       if (ed.action === "replace_text") {
-        if (typeof ed.replacement !== "string" || !ed.replacement) continue; // 删除型(空替换)无新文本可高亮
-        sel = { type: "TextQuoteSelector", exact: ed.replacement, prefix: ed.locator.prefix || "", suffix: ed.locator.suffix || "" };
+        // 文字修改不画框:新文本应继承所在元素的原样式,与正文浑然一体(用户预期)。
+        continue;
       } else if (ed.action === "set_style") {
+        // 非文字内容修改(外观变了、文字没变)才标框,便于事后审阅定位。
         sel = { type: "TextQuoteSelector", exact: ed.locator.exact || "", prefix: ed.locator.prefix || "", suffix: ed.locator.suffix || "" };
       }
       if (!sel || !sel.exact) continue;
@@ -1524,7 +1528,10 @@
     if (_hasUnsavedLocalSnapshot && msg.result_kind === "overwrite") return { ok: false, code: "BASE_CONFLICT", current_hash: _loadedArtifactHash };
     const resultUri = Storage.canonicalArtifactUri(msg.result_artifact_uri);
     if (msg.result_kind === "overwrite" && resultUri !== _artifactUri) return { ok: false, code: "VALIDATION_ERROR" };
-    if (msg.result_kind === "new_artifact") await Storage.linkArtifactUri(_logicalDocumentId, resultUri);
+    // 候选文件是【独立逻辑文档】,绝不 linkArtifactUri 到源文档:
+    //  ① 共享批注集会让旧评论的高亮跨 tab「继承」到候选页(用户预期:新文件只展示在它上面新建的评论);
+    //  ② 候选页上锚定不到的旧评论会进「失效」区,一键清除将误删源文件仍有效的评论(源文件从不被修改,其评论不得随应用而丢失)。
+    //  候选页自带全新批注空间;patch 改动区高亮走 hg_patch_hl(按候选 URI 键控),不受影响。
     await Storage.saveArtifactVersion({ logical_document_id: _logicalDocumentId, artifact_uri: resultUri,
       artifact_hash: msg.result_artifact_hash, result_artifact_hash: msg.result_artifact_hash, parent_hash: msg.base_artifact_hash,
       source: "bridge", result_kind: msg.result_kind });
