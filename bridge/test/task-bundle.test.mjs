@@ -10,7 +10,8 @@ import { createRequire } from "node:module";
 import {
   canonicalTaskJson, taskSha256, sha256Bytes, sha256File, isSha256Tagged,
   resolveSourceArtifact, verifySourceHash, createWorkspace, workspacePathFor,
-  writeTaskBundle, assertTaskSchema, buildHandoffPrompt, rootAnnotationIdsOf, buildPatchPrompt
+  writeTaskBundle, assertTaskSchema, buildHandoffPrompt, rootAnnotationIdsOf, buildPatchPrompt,
+  buildCandidatePrompt, buildPlanPrompt, buildCodexPrompt
 } from "../task-bundle.mjs";
 
 const require = createRequire(import.meta.url);
@@ -26,6 +27,19 @@ test("buildPatchPrompt:指示只输出编辑 JSON、绝不写文件,含 schema �
   assert.ok(p.includes("<<<HG_USER_DATA>>>"), "契约用户数据围栏保留");
   assert.ok(p.includes("## Change Contract"), "拼接 renderPrompt 契约");
   assert.ok(p.includes("comment_ref"), "要求 comment_ref 关联评论");
+});
+
+test("四个执行 prompt 均告诫:原始路径可能在沙箱外、禁止打开,只读 cwd 快照(防沙箱 agent 读不可达路径)", () => {
+  const patch = buildPatchPrompt({ runId: "hgr_abcdef0123456789", task: sampleTask() });
+  const cand = buildCandidatePrompt({ runId: "hgr_abcdef0123456789", task: sampleTask() });
+  const plan = buildPlanPrompt({ runId: "hgr_abcdef0123456789", task: sampleTask() });
+  const codex = buildCodexPrompt({ task: sampleTask() });
+  // claude/patch/candidate/plan 用英文告诚;codex 用中文告诚
+  for (const p of [patch, cand, plan]) {
+    assert.ok(/OUTSIDE your accessible workspace/i.test(p) && /do NOT open it/i.test(p), "英文 prompt 须含禁开原始路径告诚");
+    assert.ok(/authoritative snapshot/i.test(p), "英文 prompt 须指明 cwd 快照为权威来源");
+  }
+  assert.ok(/禁止打开/.test(codex) && /权威快照/.test(codex), "codex 中文 prompt 须含禁开原始路径告诚");
 });
 
 // 用真实 ChangeContract.buildTask 造 task(单一真相源)

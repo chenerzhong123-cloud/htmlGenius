@@ -1248,7 +1248,10 @@
   window.addEventListener("resize", updatePositions);
 
   // === 方向3:candidate 变更高亮(确定性编辑快车道)—— 候选页加载后,按 background 存入 chrome.storage.local 的
-  //     applied 编辑清单重锚并高亮实际改动区域。replace_text 锚定【新文本】(上下文未变);set_style 锚定原文本(文字未变)。===
+  //     applied 编辑清单重锚并高亮实际改动区域。
+  //     设计原则:精确【文字】修改(replace_text)应沿用原样式自然呈现,不画变更框(否则改过的字会带一个
+  //     与正文不同的绿框,不符合「精确修改结果即成品文档」的预期);只有【非文字内容】修改才标框——
+  //     set_style(改字号/颜色等,文字未变但外观变了)与未来的结构性改动。replace_text 因此跳过绘制。===
   function clearChangeHighlights() { changeOverlayData.forEach((o) => o.divs.forEach((d) => d.remove())); changeOverlayData = []; }
   function drawChangeRange(range) {
     const entry = { divs: [], range };
@@ -1268,9 +1271,10 @@
       if (!ed || !ed.locator) continue;
       let sel = null;
       if (ed.action === "replace_text") {
-        if (typeof ed.replacement !== "string" || !ed.replacement) continue; // 删除型(空替换)无新文本可高亮
-        sel = { type: "TextQuoteSelector", exact: ed.replacement, prefix: ed.locator.prefix || "", suffix: ed.locator.suffix || "" };
+        // 文字修改不画框:新文本应继承所在元素的原样式,与正文浑然一体(用户预期)。
+        continue;
       } else if (ed.action === "set_style") {
+        // 非文字内容修改(外观变了、文字没变)才标框,便于事后审阅定位。
         sel = { type: "TextQuoteSelector", exact: ed.locator.exact || "", prefix: ed.locator.prefix || "", suffix: ed.locator.suffix || "" };
       }
       if (!sel || !sel.exact) continue;

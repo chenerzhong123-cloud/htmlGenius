@@ -795,9 +795,12 @@ button {
 .send-menu:not(.show) { display: none; }
 .send-menu .menu-head { padding: 7px 8px 5px; color: var(--text-muted); font-size: 10px; }
 .agent { display: flex; width: 100%; gap: 8px; align-items: flex-start; padding: 9px; border: 0; border-radius: var(--r-md); text-align: left; color: var(--text-primary); background: transparent; font: inherit; cursor: pointer; transition: background .15s, box-shadow .15s; }
+/* 文本包裹必须是块/列容器:inline 包裹块级 b/small 时不计入按钮绘制盒高度 → 高亮只裹名称行、
+   且与上一行「已连接」重叠。改 flex 列后整行(名称+状态)同属一个盒,悬停高亮完整覆盖、不再错位。 */
+.agent > i.agent-dot + span { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+/* 悬停高亮对一切可用行生效(含使用中行);「使用中」不再有常驻背景高亮 —— 默认不亮,悬停才亮,
+   悬停其它行时使用中行不亮(高亮严格跟随光标)。在用什么由 chip「使用中」+ 呼吸绿点表达。 */
 .agent:hover:not(:disabled) { background: var(--bg-surface-raised); }
-/* 使用中(当前激活):品牌色轻染 + 左侧标记条,与「已连接但未选中」明确区分 */
-.agent.active { background: var(--brand-soft); box-shadow: inset 2px 0 0 var(--brand); }
 .agent:disabled { cursor: not-allowed; opacity: .65; }
 .agent-dot { width: 7px; height: 7px; flex: 0 0 auto; margin-top: 5px; border-radius: 50%; background: var(--text-faint); }
 .agent-dot.ready { background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
