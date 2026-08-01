@@ -23,7 +23,8 @@
       dispatch_type: "codex_handoff_start", probe: "codex", runtime_policy: "signed_app_only", supports_real_smoke: true
     }),
     github_copilot: freezeDesc({
-      id: "github_copilot", label_key: "provider.copilot", capabilities: ["candidate", "plan", "patch"],
+      // patch 适配已实现并 fake 全测,真机验证通过后加回 "patch"(须与 bridge/provider-registry.mjs 同步)
+      id: "github_copilot", label_key: "provider.copilot", capabilities: ["candidate", "plan"],
       dispatch_type: "copilot_handoff_start", probe: "copilot", runtime_policy: "runtime_locked", supports_real_smoke: true
     })
   });

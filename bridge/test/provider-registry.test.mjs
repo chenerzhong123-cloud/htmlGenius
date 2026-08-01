@@ -28,10 +28,11 @@ test("registry:三家 provider + descriptor 严格合法 + API 行为", () => {
   assert.equal(providerSupports("github_copilot", "candidate"), true);
   assert.equal(providerSupports("github_copilot", "handoff"), false);
   assert.equal(providerSupports("rogue", "candidate"), false);
-  // 方向3:patch 能力三家 provider 全支持(claude 禁 Write argv / codex read-only sandbox / copilot 空 writableFiles)
+  // 方向3:patch 能力 claude(禁 Write argv)+ codex(read-only sandbox,真机验证通过)启用;
+  // copilot 适配已实现并 fake 全测,真机验证前暂不声明
   assert.equal(providerSupports("claude_code_cli", "patch"), true);
   assert.equal(providerSupports("codex_app_server", "patch"), true);
-  assert.equal(providerSupports("github_copilot", "patch"), true);
+  assert.equal(providerSupports("github_copilot", "patch"), false);
   // 不可变
   assert.throws(() => { PROVIDER_REGISTRY.rogue = {}; }, TypeError);
 });

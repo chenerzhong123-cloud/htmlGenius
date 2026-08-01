@@ -73,7 +73,8 @@ function sdkFor(scenario, context) {
 
 export const fixture = {
   provider: "github_copilot",
-  capabilities: ["candidate", "plan", "patch"],
+  // 与 registry 同步:patch 真机验证暂未做,能力暂不声明;patch 场景与 invoke 保留,验证通过即启用。
+  capabilities: ["candidate", "plan"],
   scenarios: [
     "ready", "not_installed", "auth_required", "incompatible", "probe_error",
     "candidate_success", "candidate_missing", "candidate_out_of_scope", "source_mutated",

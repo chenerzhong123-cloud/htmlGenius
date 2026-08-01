@@ -27,7 +27,10 @@ export const PROVIDER_REGISTRY = Object.freeze({
   github_copilot: Object.freeze({
     id: "github_copilot",
     label_key: "provider.copilot",
-    capabilities: cap(["candidate", "plan", "patch"]),
+    // patch 适配已实现并经 fake 全量测试(copilot-adapter / fixture / certify),但真机 runtime 尚未验证;
+    // 暂不声明 patch 能力(精准修补走完整候选旧路径)。真机验证通过后把 "patch" 加回本数组并同步
+    // extension/provider-metadata.js 即启用(host 路由/adapter/测试均已就位)。
+    capabilities: cap(["candidate", "plan"]),
     dispatch_type: "copilot_handoff_start",
     probe: "copilot",
     runtime_policy: "runtime_locked",     // Plan→Candidate 锁定同一 runtime(local_cli / bundled_sdk_cli)
