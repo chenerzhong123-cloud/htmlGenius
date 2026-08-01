@@ -1263,7 +1263,9 @@
   });
   // file:// 访问提示:Chrome 禁止扩展直接打开 chrome:// 页面(安全限制),只能复制 URL 让用户粘贴到地址栏。
   const fileAccessCopy = document.getElementById("file-access-copy");
-  if (fileAccessCopy) fileAccessCopy.addEventListener("click", () => connCopy("chrome://extensions", "fileAccess.copied", fileAccessCopy));
+  // 复制带扩展 ID 的深链:用户粘贴到地址栏回车后,Chrome 直达 htmlGenius 扩展详情页(省去找扩展+点详情两步)。
+  // 注:Chrome 禁止扩展编程打开 chrome:// 页面(tabs.create 报 Cannot access a chrome:// URL),故只能复制由用户粘贴。
+  if (fileAccessCopy) fileAccessCopy.addEventListener("click", () => connCopy("chrome://extensions/?id=" + chrome.runtime.id, "fileAccess.copied", fileAccessCopy));
   if (connRepairCancel) connRepairCancel.addEventListener("click", () => { if (connRepairConfirm) connRepairConfirm.hidden = true; });
   if (connRepairOk) connRepairOk.addEventListener("click", async () => {
     connRepairOk.disabled = true;
