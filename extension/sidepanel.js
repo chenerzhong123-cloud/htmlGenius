@@ -1265,7 +1265,10 @@
   const fileAccessCopy = document.getElementById("file-access-copy");
   // 复制带扩展 ID 的深链:用户粘贴到地址栏回车后,Chrome 直达 htmlGenius 扩展详情页(省去找扩展+点详情两步)。
   // 注:Chrome 禁止扩展编程打开 chrome:// 页面(tabs.create 报 Cannot access a chrome:// URL),故只能复制由用户粘贴。
-  if (fileAccessCopy) fileAccessCopy.addEventListener("click", () => connCopy("chrome://extensions/?id=" + chrome.runtime.id, "fileAccess.copied", fileAccessCopy));
+  // 用 Chrome Web Store 官方扩展 ID(非 chrome.runtime.id):商店版用户装的即此 ID;本地 unpacked 版的 runtime.id 是
+  // manifest key 派生的开发 ID,与商店 ID 不同,故写死官方 ID 保证复制链接恒指向官方扩展详情页。
+  const OFFICIAL_EXTENSION_ID = "fcapmgclnpiljjlcaficmjjclkaepaon";
+  if (fileAccessCopy) fileAccessCopy.addEventListener("click", () => connCopy("chrome://extensions/?id=" + OFFICIAL_EXTENSION_ID, "fileAccess.copied", fileAccessCopy));
   if (connRepairCancel) connRepairCancel.addEventListener("click", () => { if (connRepairConfirm) connRepairConfirm.hidden = true; });
   if (connRepairOk) connRepairOk.addEventListener("click", async () => {
     connRepairOk.disabled = true;
