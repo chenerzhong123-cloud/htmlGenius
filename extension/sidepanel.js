@@ -1559,6 +1559,10 @@
   function renderPatchPreview(edits, compliance) {
     if (!patchEditList) return;
     const items = (edits || []).slice().sort((a, b) => ((a.status === "ok" ? 0 : 1) - (b.status === "ok" ? 0 : 1)));
+    if (items.length === 0) {
+      // 空编辑:Agent 判定无需修改(目标已满足评论要求,或无法唯一定位)。给明确说明,避免用户以为坏掉。
+      patchEditList.innerHTML = '<div class="pp-empty">' + esc(t("patch.noneNeeded")) + "</div>";
+    } else {
     patchEditList.innerHTML = items.map((e) => {
       const isOk = e.status === "ok";
       const actionLabel = e.action === "set_style" ? t("patch.setStyle") : t("patch.replaceText");
@@ -1574,6 +1578,7 @@
         '<div class="pp-body"><div class="pp-action">' + esc(actionLabel) + (e.comment_ref ? " · " + esc(String(e.comment_ref)) : "") + "</div>" +
         '<div class="pp-detail">' + detail + "</div>" + badge + "</div></div>";
     }).join("");
+    }
     if (patchBadge && compliance) {
       const skip = (compliance.total || 0) - (compliance.applicable || 0);
       patchBadge.textContent = (compliance.applicable || 0) + " " + t("patch.willApply") + (skip > 0 ? " · " + skip + " " + t("patch.needAttention") : "");
@@ -1595,6 +1600,12 @@
   function confirmPatch() {
     if (!_patchPending) return;
     const checked = Array.from(patchEditList.querySelectorAll(".pp-check:checked")).map((el) => el.getAttribute("data-id"));
+    if (!checked.length) {
+      // 没有勾选任何可应用编辑 → 等同取消(绝不发空清单去产出与原文相同的无意义 candidate)
+      cancelPatch();
+      setBridgeStatus(t("patch.nothingToApply"), "warn");
+      return;
+    }
     const runId = _patchPending.run_id;
     hidePatchPreview();
     _contractRunId = runId; setContractRunning(true); startRunTimer();

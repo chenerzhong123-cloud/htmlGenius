@@ -182,6 +182,7 @@ const CANDIDATE_FAIL_STATUS = {
   CANDIDATE_NOT_UTF8: "candidate_invalid_html",
   CLAUDE_RUN_FAILED: "claude_failed",
   CLAUDE_INVALID_RESULT: "claude_failed",
+  CLAUDE_MAX_TURNS: "max_turns_reached",
   CLAUDE_TIMEOUT: "timed_out"
 };
 
@@ -473,6 +474,7 @@ const PATCH_FAIL_STATUS = {
   PATCH_RUN_NOT_FOUND: "patch_run_not_found",
   CLAUDE_RUN_FAILED: "claude_failed",
   CLAUDE_INVALID_RESULT: "claude_failed",
+  CLAUDE_MAX_TURNS: "max_turns_reached",
   CLAUDE_TIMEOUT: "timed_out"
 };
 

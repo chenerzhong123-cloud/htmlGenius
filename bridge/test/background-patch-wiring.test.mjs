@@ -60,3 +60,16 @@ test("storage getActiveBridgeRunForTab 含 awaiting_confirm(patch 预览待确�
   const m = storage.match(/async listActiveBridgeRuns\(\)[\s\S]{0,200}/);
   assert.ok(m && !/awaiting_confirm/.test(m[0]), "listActiveBridgeRuns 不得纳入 awaiting_confirm(该态可恢复)");
 });
+
+test("background onPatchPreviewReady:可应用编辑为空(okIds.length===0)不得自动应用(会产出与原文相同的无意义 candidate)", () => {
+  // 回归:目标已满足时 Agent 返回空/全跳过编辑;旧逻辑仍自动 patch_apply 空清单 → 生成零变化候选 + 版本号,误导用户重试
+  assert.match(bg, /mode === "apply_then_review" && okIds\.length > 0/, "自动应用必须以 okIds 非空为前提");
+  assert.doesNotMatch(bg, /if \(mode === "apply_then_review"\) \{\s*\n\s*const okIds/, "不得回退为无条件自动应用");
+});
+
+test("sidepanel patch 预览:空编辑渲染说明(patch.noneNeeded);确认时 0 勾选不发空清单", () => {
+  const sp = fs.readFileSync(path.resolve(__dirname, "..", "..", "extension", "sidepanel.js"), "utf8");
+  assert.match(sp, /pp-empty/, "空编辑列表需有专用空状态");
+  assert.match(sp, /patch\.noneNeeded/, "空状态文案走 i18n");
+  assert.match(sp, /if \(!checked\.length\)/, "0 勾选必须拦在发送前(改为取消)");
+});

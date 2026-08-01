@@ -230,9 +230,10 @@ export function buildPatchPrompt({ runId, task }) {
   const prelude = [
     "You are producing precise edits inside HTML Genius's controlled workspace.",
     "",
-    "- Read source.html and task-" + runId + ".md / task-" + runId + ".json in the current directory.",
+    "- Read source.html and task-" + runId + ".md / task-" + runId + ".json in the current directory. Read source.html exactly once; do not re-read files to double-check.",
     "- Do NOT modify any file. Do NOT write candidate.html. Do not use shell, network, MCP, plugins, or the browser.",
     "- For each selected comment in the Change Contract, decide the minimal precise edit that satisfies it.",
+    "- If a comment's requested change is ALREADY satisfied in source.html (the target text already matches the comment's intent), do NOT emit a no-op edit whose replacement equals the located text — return an empty edits array instead.",
     "- Emit ONLY a single UTF-8 JSON object as your final response, matching the schema below. No Markdown, no prose, no code fences.",
     "- Only propose edits located at the commented targets. If a target cannot be uniquely located, omit that edit (do not guess).",
     "- Every edit must reference the comment it serves via comment_ref (the comment's id)."
