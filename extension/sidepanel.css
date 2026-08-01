@@ -943,10 +943,16 @@ button {
 .conn-checking-elapsed { margin-left: auto; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 
 /* === 方向3:确定性编辑预览(先预览后确认)=== */
+/* 精确修改应用方式:两个 radio 选项卡(选中态描边+品牌软底,沿用设计 token) */
+.patch-apply-modes { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .patch-apply-mode {
-  width: 100%; margin-top: 6px; padding: 7px 9px; border-radius: var(--r-md);
-  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--line-default); font-size: 12.5px;
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: var(--r-md);
+  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--line-default);
+  font-size: 12.5px; cursor: pointer; transition: border-color .15s, background .15s;
 }
+.patch-apply-mode:hover { border-color: var(--brand); }
+.patch-apply-mode input { accent-color: var(--brand); margin: 0; flex: none; }
+.patch-apply-mode:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
 .patch-preview {
   margin-top: 10px; border: 1px solid var(--line-default); border-radius: var(--r-lg);
   background: var(--bg-surface-raised); overflow: hidden;

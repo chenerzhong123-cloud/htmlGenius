@@ -236,10 +236,10 @@
         <div class="advanced-field">
           <label class="advanced-label" data-i18n="patch.modeLabel">精确修改的应用方式</label>
           <p class="field-hint" data-i18n="patch.modeHint">仅对「精准修补」且已连接 Claude Code 生效；其余情况仍生成完整候选。</p>
-          <select id="patch-apply-mode" class="patch-apply-mode">
-            <option value="preview_confirm" data-i18n="patch.modePreview">先预览，确认后再应用（推荐）</option>
-            <option value="apply_then_review" data-i18n="patch.modeApply">直接应用，事后在候选页审阅</option>
-          </select>
+          <div class="patch-apply-modes">
+            <label class="patch-apply-mode"><input type="radio" name="patch-apply-mode" value="preview_confirm"><span data-i18n="patch.modePreview">先预览，确认后再应用</span></label>
+            <label class="patch-apply-mode"><input type="radio" name="patch-apply-mode" value="apply_then_review" checked><span data-i18n="patch.modeApply">直接应用，事后审阅</span></label>
+          </div>
         </div>
       </details>
 

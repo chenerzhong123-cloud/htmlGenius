@@ -616,7 +616,7 @@
   const patchEditList = document.getElementById("patch-edit-list");
   const patchConfirmBtn = document.getElementById("patch-confirm");
   const patchCancelBtn = document.getElementById("patch-cancel");
-  const patchApplyModeSel = document.getElementById("patch-apply-mode");
+  const patchApplyModeRadios = document.querySelectorAll('input[name="patch-apply-mode"]');
 
   let _contractStep = "closed"; // closed | compose | comment-scope | plan-running | plan-review | candidate-running
   let _selectedNodeIds = new Set(); // 本轮勾选的节点 id(root+reply;真相源)
@@ -1331,11 +1331,16 @@
   }
   function resetRunEvents() { _runEvents = []; _streamText = ""; renderProgress(); renderStreamText(); }
   function recordRun(entry) {
-    try { chrome.storage.local.get([RUN_LOG_KEY], (res) => {
-      const list = (res && Array.isArray(res[RUN_LOG_KEY])) ? res[RUN_LOG_KEY] : [];
-      list.unshift(entry); const trimmed = list.slice(0, 3);
-      chrome.storage.local.set({ [RUN_LOG_KEY]: trimmed }, () => renderHistoryFromList(trimmed));
-    }); } catch (e) {}
+    try {
+      entry.ts = Date.now(); // 数值时间戳,供「最近 N 次」严格按时间排序
+      chrome.storage.local.get([RUN_LOG_KEY], (res) => {
+        const list = (res && Array.isArray(res[RUN_LOG_KEY])) ? res[RUN_LOG_KEY] : [];
+        list.push(entry);
+        list.sort((a, b) => (b.ts || 0) - (a.ts || 0)); // 新→旧排序后取前 3 = 最近 3 条
+        const trimmed = list.slice(0, 3);
+        chrome.storage.local.set({ [RUN_LOG_KEY]: trimmed }, () => renderHistoryFromList(trimmed));
+      });
+    } catch (e) {}
   }
   function loadRunHistory() {
     try { chrome.storage.local.get([RUN_LOG_KEY], (res) => renderHistoryFromList((res && res[RUN_LOG_KEY]) || [])); } catch (e) {}
@@ -1344,7 +1349,12 @@
     const ul = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-history");
     if (!ul) return;
     if (!list || !list.length) { ul.innerHTML = '<li class="cbs-empty">' + esc(t("run.noHistory")) + "</li>"; return; }
-    ul.innerHTML = list.map((r) => {
+    // 按时间顺序排列(旧→新,最新在最下);旧记录无数值 ts 时按 started_at 字符串兜底
+    const ordered = list.slice().sort((a, b) => {
+      const ta = a.ts != null ? a.ts : 0, tb = b.ts != null ? b.ts : 0;
+      return (ta - tb) || String(a.started_at || "").localeCompare(String(b.started_at || ""));
+    });
+    ul.innerHTML = ordered.map((r) => {
       const tag = (r.run_kind === "plan" ? t("run.kindPlan") : t("run.kindCandidate"));
       const st = r.status === "completed" ? t("run.ok") : (r.status === "plan-ready" ? t("run.planOk") : t("run.fail"));
       return '<li><span class="cbs-ts">' + esc(r.started_at || "") + "</span> " + esc(providerLabel(r.provider) || "?") + " · " + esc(tag) + " · " + esc(st) + (r.duration_s != null ? " · " + r.duration_s + "s" : "") + "</li>";
@@ -1599,9 +1609,12 @@
     setBridgeStatus(t("patch.cancelled"), "warn");
   }
   // 设置持久化 + 按钮接线
-  if (patchApplyModeSel) {
-    try { chrome.storage.sync.get({ hgPatchApplyMode: "preview_confirm" }, (r) => { patchApplyModeSel.value = (r && r.hgPatchApplyMode) || "preview_confirm"; }); } catch (e) {}
-    patchApplyModeSel.addEventListener("change", () => { try { chrome.storage.sync.set({ hgPatchApplyMode: patchApplyModeSel.value }); } catch (e) {} });
+  if (patchApplyModeRadios.length) {
+    try { chrome.storage.sync.get({ hgPatchApplyMode: "apply_then_review" }, (r) => {
+      const mode = (r && r.hgPatchApplyMode) || "apply_then_review"; // 默认:直接应用,事后审阅
+      patchApplyModeRadios.forEach((rd) => { rd.checked = (rd.value === mode); });
+    }); } catch (e) {}
+    patchApplyModeRadios.forEach((rd) => rd.addEventListener("change", () => { if (rd.checked) { try { chrome.storage.sync.set({ hgPatchApplyMode: rd.value }); } catch (e) {} } }));
   }
   if (patchConfirmBtn) patchConfirmBtn.addEventListener("click", confirmPatch);
   if (patchCancelBtn) patchCancelBtn.addEventListener("click", cancelPatch);

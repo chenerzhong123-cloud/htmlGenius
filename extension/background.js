@@ -511,8 +511,8 @@ async function completeRun(tab_id, runId, completion, taskSha, logicalId, artifa
 
 // —— 方向3 确定性编辑快车道:预览就绪分流(设置驱动:先预览后确认 / 直接应用)——
 // 存预览(状态 awaiting_confirm)→ 读设置 hgPatchApplyMode:
-//   apply_then_review → 自动以全部 ok 编辑发 patch_apply(直接产出 candidate,事后审阅);
-//   preview_confirm(默认)→ 断开 preview host(应用时另起进程),广播 bridge-patch-preview 供 sidepanel 确认。
+//   apply_then_review(默认)→ 自动以全部 ok 编辑发 patch_apply(直接产出 candidate,事后审阅);
+//   preview_confirm → 断开 preview host(应用时另起进程),广播 bridge-patch-preview 供 sidepanel 确认。
 function _patchWorkspaceRoot(uri) {
   if (!(uri && /^file:/i.test(uri))) return undefined;
   try { const u = new URL(uri); u.pathname = u.pathname.replace(/[^/]*$/, ""); return u.href; } catch (e) { return undefined; }
@@ -520,8 +520,8 @@ function _patchWorkspaceRoot(uri) {
 async function onPatchPreviewReady(tab_id, runId, m, taskSha, logicalId, artifactUrl) {
   await Storage.updateBridgeRun(runId, { status: "awaiting_confirm", patch_preview: { edits: m.edits, compliance: m.compliance } }).catch(() => {});
   const mode = await new Promise((res) => {
-    try { chrome.storage.sync.get({ hgPatchApplyMode: "preview_confirm" }, (r) => res((r && r.hgPatchApplyMode) || "preview_confirm")); }
-    catch (e) { res("preview_confirm"); }
+    try { chrome.storage.sync.get({ hgPatchApplyMode: "apply_then_review" }, (r) => res((r && r.hgPatchApplyMode) || "apply_then_review")); }
+    catch (e) { res("apply_then_review"); }
   });
   if (mode === "apply_then_review") {
     const okIds = (m.edits || []).filter((e) => e && e.status === "ok").map((e) => e.id);
