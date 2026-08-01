@@ -167,7 +167,6 @@
     }
     .hg-hl{ position:fixed; background:var(--hl); pointer-events:none; z-index:2147483646; border-radius:2px; }
     .hg-hl.flash{ background:var(--hl-flash); }
-    .hg-change-hl{ position:fixed; pointer-events:none; z-index:2147483646; border-radius:2px; background:rgba(143,231,178,.22); box-shadow:inset 0 0 0 1px rgba(143,231,178,.85); }
     .hg-inspect,.hg-select{ position:fixed; pointer-events:none; z-index:2147483645; border-radius:3px; }
     .hg-inspect{ background:rgba(136,230,209,.14); border:1px solid rgba(136,230,209,.7); }
     .hg-select{ background:rgba(136,230,209,.12); border:2px solid var(--hg-brand); }
@@ -1157,7 +1156,6 @@
 
   // === ② overlay:缓存 range,滚动时只更新 rect(不重 anchor) ===
   let overlayData = []; // [{ divs: [div...], range }]
-  let changeOverlayData = []; // 方向3:candidate 变更高亮 [{ divs: [div...], range }]
   async function loadAnnotations() {
     overlayData.forEach((o) => o.divs.forEach((d) => d.remove()));
     overlayData = [];
@@ -1222,76 +1220,14 @@
           }
         }
       }
-      for (const entry of changeOverlayData) {
-        const rects = entry.range.getClientRects();
-        if (rects.length !== entry.divs.length) {
-          entry.divs.forEach((d) => d.remove()); entry.divs = [];
-          for (const r of rects) {
-            const div = document.createElement("div");
-            div.className = "hg-change-hl";
-            div.style.left = r.left + "px"; div.style.top = r.top + "px";
-            div.style.width = r.width + "px"; div.style.height = r.height + "px";
-            document.body.appendChild(div); entry.divs.push(div);
-          }
-        } else {
-          for (let i = 0; i < rects.length; i++) {
-            entry.divs[i].style.left = rects[i].left + "px";
-            entry.divs[i].style.top = rects[i].top + "px";
-            entry.divs[i].style.width = rects[i].width + "px";
-            entry.divs[i].style.height = rects[i].height + "px";
-          }
-        }
-      }
     });
   }
   window.addEventListener("scroll", updatePositions, true);
   window.addEventListener("resize", updatePositions);
 
-  // === 方向3:candidate 变更高亮(确定性编辑快车道)—— 候选页加载后,按 background 存入 chrome.storage.local 的
-  //     applied 编辑清单重锚并高亮实际改动区域。
-  //     设计原则:精确【文字】修改(replace_text)应沿用原样式自然呈现,不画变更框(否则改过的字会带一个
-  //     与正文不同的绿框,不符合「精确修改结果即成品文档」的预期);只有【非文字内容】修改才标框——
-  //     set_style(改字号/颜色等,文字未变但外观变了)与未来的结构性改动。replace_text 因此跳过绘制。===
-  function clearChangeHighlights() { changeOverlayData.forEach((o) => o.divs.forEach((d) => d.remove())); changeOverlayData = []; }
-  function drawChangeRange(range) {
-    const entry = { divs: [], range };
-    for (const r of range.getClientRects()) {
-      const div = document.createElement("div");
-      div.className = "hg-change-hl";
-      div.style.left = r.left + "px"; div.style.top = r.top + "px";
-      div.style.width = r.width + "px"; div.style.height = r.height + "px";
-      document.body.appendChild(div);
-      entry.divs.push(div);
-    }
-    changeOverlayData.push(entry);
-  }
-  function renderPatchHighlights(appliedEdits) {
-    clearChangeHighlights();
-    for (const ed of (appliedEdits || [])) {
-      if (!ed || !ed.locator) continue;
-      let sel = null;
-      if (ed.action === "replace_text") {
-        // 文字修改不画框:新文本应继承所在元素的原样式,与正文浑然一体(用户预期)。
-        continue;
-      } else if (ed.action === "set_style") {
-        // 非文字内容修改(外观变了、文字没变)才标框,便于事后审阅定位。
-        sel = { type: "TextQuoteSelector", exact: ed.locator.exact || "", prefix: ed.locator.prefix || "", suffix: ed.locator.suffix || "" };
-      }
-      if (!sel || !sel.exact) continue;
-      const range = anchor(sel, document.body);
-      if (range) drawChangeRange(range);
-    }
-    updatePositions();
-  }
-  async function maybeRenderPatchHighlights() {
-    if (!isManagedArtifact || !_artifactUri) return;
-    try {
-      const key = "hg_patch_hl:" + _artifactUri;
-      const r = await new Promise((res) => chrome.storage.local.get([key], res));
-      const manifest = r && r[key];
-      if (manifest && Array.isArray(manifest.applied) && manifest.applied.length) renderPatchHighlights(manifest.applied);
-    } catch (e) { /* 非关键 */ }
-  }
+  // 注:曾在此为 patch 候选画「改动区高亮」覆盖框(薄荷绿描边 overlay)。已彻底移除 —— 用户明确要求:
+  // 任何情况下新文件都不得留下不可更改的私自样式变更,所有视觉变化必须源于用户发起的修改;精确编辑
+  // 结果应是成品文档,改动沿用原样式自然呈现。故候选页不再注入任何变更标记 overlay / 样式。
 
   // v0.6 #8: 高级模式 inspect 预览框在滚动时跟随 —— 缓存鼠标坐标,滚动时按该坐标重新拾取元素并重定位。
   let _lastMX = 0, _lastMY = 0;
@@ -1531,7 +1467,7 @@
     // 候选文件是【独立逻辑文档】,绝不 linkArtifactUri 到源文档:
     //  ① 共享批注集会让旧评论的高亮跨 tab「继承」到候选页(用户预期:新文件只展示在它上面新建的评论);
     //  ② 候选页上锚定不到的旧评论会进「失效」区,一键清除将误删源文件仍有效的评论(源文件从不被修改,其评论不得随应用而丢失)。
-    //  候选页自带全新批注空间;patch 改动区高亮走 hg_patch_hl(按候选 URI 键控),不受影响。
+    //  候选页自带全新批注空间;且不画任何改动区高亮覆盖框(禁止私自样式变更,精确编辑结果即成品文档)。
     await Storage.saveArtifactVersion({ logical_document_id: _logicalDocumentId, artifact_uri: resultUri,
       artifact_hash: msg.result_artifact_hash, result_artifact_hash: msg.result_artifact_hash, parent_hash: msg.base_artifact_hash,
       source: "bridge", result_kind: msg.result_kind });
@@ -1564,7 +1500,6 @@
     await restoreIfFresh();
     if (autoEdit) { _activated = true; _refreshDialogShown = true; if (_pendingDraft) showDraftRestoreBanner(); } // 自激活:渲染高亮 + 跳过确认窗
     if (!_artifactVerificationError) await loadAnnotations();
-    await maybeRenderPatchHighlights(); // 方向3:若本页是 patch 产出的候选,高亮实际改动区域
     if (autoEdit) setEditing(true); // 直接进入编辑(广播 edit-state → 侧边栏同步「退出编辑」)
   })();
   console.log("htmlGenius v0.7.1 ready, mode:", isLocal ? "local" : "remote(editable, temporary)", "starts in view");

@@ -721,10 +721,8 @@ export async function executePatchApplyRun(msg, { emit: rawEmit, workspaceFor, p
     });
   } catch (e) { failed("MANIFEST_FAILED", e.message, runsDir, ctxBase); return; }
 
-  // 9. candidate-ready(复用现有终态;附带 patch.applied/skipped 供 UI 展示与 candidate 侧变更高亮)
-  //    applied 携带完整编辑对象(含定位),content-script 据此在候选页重锚并高亮改动区域。
-  const appliedIds = new Set(result.applied.map((a) => a.id));
-  const appliedFull = confirmedEdits.filter((ed) => ed && appliedIds.has(String(ed.id)));
+  // 9. candidate-ready(复用现有终态)。不再附带 patch.applied/skipped —— 候选页不画任何改动标记
+  //    (禁止私自样式变更;精确编辑结果即成品文档,改动沿用原样式)。applyEdits 的 applied/skipped 仅用于本地确定性应用,不上报。
   emit({
     type: "candidate-ready",
     run_id: runId,
@@ -735,7 +733,6 @@ export async function executePatchApplyRun(msg, { emit: rawEmit, workspaceFor, p
     candidate_uri: pathToFileURL(resultPath).href,
     candidate_sha256: cand.sha256,
     version_label: versionLabel,
-    manifest_path: manifestPath,
-    patch: { applied: appliedFull, skipped: result.skipped }
+    manifest_path: manifestPath
   });
 }
