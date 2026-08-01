@@ -60,6 +60,10 @@ test("makeRunScenario 对每个声明场景返回可调用的 invoke(接口一�
       const run = fixture.makeRunScenario(name, ctx);
       assert.equal(typeof run.invokeCandidate, "function", id + "/" + name + " 缺 invokeCandidate");
       assert.equal(typeof run.invokePlan, "function", id + "/" + name + " 缺 invokePlan");
+      if (fixture.capabilities.includes("patch")) {
+        assert.equal(typeof run.invokePatchPreview, "function", id + "/" + name + " 缺 invokePatchPreview");
+        assert.equal(typeof run.invokePatchApply, "function", id + "/" + name + " 缺 invokePatchApply");
+      }
     }
     fixture.cleanup(ctx);
   }

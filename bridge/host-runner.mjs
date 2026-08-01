@@ -19,7 +19,7 @@ import {
 import {
   preparePlanRun, verifyTaskBundleUnchanged, validatePlanJson, writePlanManifest, quarantinePlan
 } from "./plan-workspace.mjs";
-import { parseEditsJson, applyEdits } from "./patch-edits.mjs";
+import { parseEditsJson, applyEdits, extractEditsFromMessages } from "./patch-edits.mjs";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
@@ -482,6 +482,37 @@ function readTaskJson(runsDir, runId) {
   return JSON.parse(fs.readFileSync(path.join(runsDir, "task-" + runId + ".json"), "utf8"));
 }
 
+// —— 共享:Agent 结果 → 结构化编辑提取 → dry-run 状态标注 → 落 edits.json(0600)——
+// claude(单条 resultText)/ codex·copilot(多条 messages)的 patch preview 共用同一条解析与校验链,
+// 状态语义永远一致;坏 JSON 抛 PATCH_EDITS_INVALID(供 background 回落 candidate),写盘失败抛 PREPARE_FAILED。
+export function persistPatchPreview({ runsDir, runId, snapshotHtml, task, taskSha256, resultText, messages }) {
+  const edits = (messages != null ? extractEditsFromMessages(messages) : parseEditsJson(resultText)).edits;
+  const dry = applyEdits(snapshotHtml, edits, task);
+  const skipById = new Map(dry.skipped.map((s) => [s.id, s]));
+  const annotated = edits.map((ed) => {
+    const sk = skipById.get(ed.id);
+    return Object.assign({}, ed, { status: sk ? sk.status : "ok", message: sk ? sk.message : "" });
+  });
+  const compliance = {
+    total: edits.length,
+    applicable: dry.applied.length,
+    out_of_scope: dry.skipped.filter((s) => s.status === "out_of_scope").length,
+    not_found: dry.skipped.filter((s) => s.status === "not_found").length,
+    ambiguous: dry.skipped.filter((s) => s.status === "ambiguous").length,
+    conflict: dry.skipped.filter((s) => s.status === "conflict").length
+  };
+  try {
+    const ep = path.join(runsDir, "edits.json");
+    fs.writeFileSync(ep, JSON.stringify({ schema_version: 1, run_id: runId, task_sha256: taskSha256, edits }, null, 2), { mode: 0o600 });
+    try { fs.chmodSync(ep, 0o600); } catch (_) {}
+  } catch (e) {
+    const err = new Error("cannot write edits.json: " + (e && e.message));
+    err.code = "PREPARE_FAILED";
+    throw err;
+  }
+  return { edits: annotated, compliance };
+}
+
 export async function executePatchPreviewRun(msg, { emit: rawEmit, claude } = {}) {
   if (typeof rawEmit !== "function") throw new Error("emit is required");
   const cli = claude || realClaude;
@@ -547,34 +578,13 @@ export async function executePatchPreviewRun(msg, { emit: rawEmit, claude } = {}
     resultText = r.resultText;
   } catch (e) { failed(e.code || "CLAUDE_RUN_FAILED", e.message, prep.runsDir, ctxBase); return; }
 
-  // 6. 提取并校验编辑清单(坏 → PATCH_EDITS_INVALID,background 据此回落 candidate)
-  let edits;
-  try { edits = parseEditsJson(resultText).edits; }
-  catch (e) { failed("PATCH_EDITS_INVALID", e.message, prep.runsDir, ctxBase); return; }
-
-  // 7. dry-run applyEdits 得每条状态(preview 与 apply 共用同一解析,状态永远一致)
-  const snapshotHtml = fs.readFileSync(prep.snapshotPath, "utf8");
-  const dry = applyEdits(snapshotHtml, edits, task);
-  const skipById = new Map(dry.skipped.map((s) => [s.id, s]));
-  const annotated = edits.map((ed) => {
-    const sk = skipById.get(ed.id);
-    return Object.assign({}, ed, { status: sk ? sk.status : "ok", message: sk ? sk.message : "" });
-  });
-  const compliance = {
-    total: edits.length,
-    applicable: dry.applied.length,
-    out_of_scope: dry.skipped.filter((s) => s.status === "out_of_scope").length,
-    not_found: dry.skipped.filter((s) => s.status === "not_found").length,
-    ambiguous: dry.skipped.filter((s) => s.status === "ambiguous").length,
-    conflict: dry.skipped.filter((s) => s.status === "conflict").length
-  };
-
-  // 8. 落 edits.json(0600)供 apply run 复用(同一 run 目录)
+  // 6-8. 提取/校验编辑清单 → dry-run 状态标注 → 落 edits.json(共享 persistPatchPreview,与 codex/copilot 同链)
+  let annotated, compliance;
   try {
-    const ep = path.join(prep.runsDir, "edits.json");
-    fs.writeFileSync(ep, JSON.stringify({ schema_version: 1, run_id: runId, task_sha256: bundle.taskSha256, edits }, null, 2), { mode: 0o600 });
-    try { fs.chmodSync(ep, 0o600); } catch (_) {}
-  } catch (e) { failed("PREPARE_FAILED", "cannot write edits.json: " + (e && e.message), prep.runsDir, ctxBase); return; }
+    const snapshotHtml = fs.readFileSync(prep.snapshotPath, "utf8");
+    const r = persistPatchPreview({ runsDir: prep.runsDir, runId, snapshotHtml, task, taskSha256: bundle.taskSha256, resultText });
+    annotated = r.edits; compliance = r.compliance;
+  } catch (e) { failed(e.code || "PATCH_EDITS_INVALID", e.message, prep.runsDir, ctxBase); return; }
 
   // 9. 重读 source:运行期被改 → 预览作废
   let sourceSha256After;
@@ -602,9 +612,13 @@ export async function executePatchPreviewRun(msg, { emit: rawEmit, claude } = {}
 // 读回 preview 落盘的 edits.json + source snapshot,应用 confirmed_edit_ids 子集 → candidate.html,
 // 经现有 validate/publish/manifest 发 candidate-ready(附带 applied/skipped)。
 // 安全:candidate = snapshot + 且仅 + 确认编辑;真实 source 已偏离 snapshot(preview 后被改)→ SOURCE_MUTATED_DURING_PATCH 拒绝。
-export async function executePatchApplyRun(msg, { emit: rawEmit, claude } = {}) {
+// provider-neutral:应用本身是确定性的(不调任何 Agent CLI),claude/codex/copilot 共用;
+// workspaceFor({sourcePath,logicalDocumentId}) 决定 run 目录落在哪个 provider 子目录(默认 claude),
+// provider 只影响 manifest 署名。codex-adapter / copilot-adapter 以薄封装注入各自参数复用本函数。
+export async function executePatchApplyRun(msg, { emit: rawEmit, workspaceFor, provider } = {}) {
   if (typeof rawEmit !== "function") throw new Error("emit is required");
   const runId = msg && msg.run_id;
+  const manifestProvider = provider || "claude_code_cli";
   const emit = wrapEmit(rawEmit, { runId, allowStream: false });
   const status = (s) => emit({ type: "bridge_status", run_id: runId, status: s });
   const failed = (code, message, runsDir, ctx) => {
@@ -613,7 +627,7 @@ export async function executePatchApplyRun(msg, { emit: rawEmit, claude } = {}) 
         writeManifest({
           runsDir, runId,
           logicalDocumentId: (ctx && ctx.logicalDocumentId) || (msg && msg.source && msg.source.logical_document_id) || null,
-          provider: "claude_code_cli",
+          provider: manifestProvider,
           sourcePath: (ctx && ctx.sourcePath) || null,
           sourceSha256Before: (ctx && ctx.sourceSha256Before) || null,
           changeContractSha256: (ctx && ctx.taskSha256) || null,
@@ -635,12 +649,14 @@ export async function executePatchApplyRun(msg, { emit: rawEmit, claude } = {}) 
 
   status("checking");
 
-  // 2. 定位 preview 留下的 run 目录(workspace 由 source+logicalId 稳定派生)
+  // 2. 定位 preview 留下的 run 目录(workspace 由 source+logicalId 稳定派生;provider 子目录由 workspaceFor 决定)
   const workspaceRoot = sourceWorkspaceRoot(source);
   let sourcePath, workspace;
   try {
     sourcePath = resolveSourcePath(source.artifact_uri, { workspaceRoot });
-    workspace = createWorkspace({ sourcePath, logicalDocumentId: source.logical_document_id });
+    workspace = workspaceFor
+      ? workspaceFor({ sourcePath, logicalDocumentId: source.logical_document_id })
+      : createWorkspace({ sourcePath, logicalDocumentId: source.logical_document_id });
   } catch (e) { failed(e.code || "PREPARE_FAILED", e.message, null, { logicalDocumentId: source.logical_document_id }); return; }
   const runsDir = path.join(workspace, "runs", runId);
   const snapshotPath = path.join(runsDir, "source.html");
@@ -697,7 +713,7 @@ export async function executePatchApplyRun(msg, { emit: rawEmit, claude } = {}) 
   let manifestPath;
   try {
     manifestPath = writeManifest({
-      runsDir, runId, logicalDocumentId: source.logical_document_id, provider: "claude_code_cli",
+      runsDir, runId, logicalDocumentId: source.logical_document_id, provider: manifestProvider,
       sourcePath, sourceSha256Before: snapshotSha, sourceSha256After: realSourceSha,
       candidateResultPath: resultPath, candidateWorkspacePath: candidatePath,
       candidateSha256: cand.sha256, candidateByteLength: cand.byteLength,

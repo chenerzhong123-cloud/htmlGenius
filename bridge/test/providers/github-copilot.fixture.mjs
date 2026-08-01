@@ -3,7 +3,7 @@
 // 复用 fake-copilot-sdk;不启动真实 SDK runtime、不触网络、不读 $HOME。
 import fs from "node:fs";
 import path from "node:path";
-import { executeCopilotCandidateRun, executeCopilotPlanRun } from "../../copilot-adapter.mjs";
+import { executeCopilotCandidateRun, executeCopilotPlanRun, executeCopilotPatchPreviewRun, executeCopilotPatchApplyRun } from "../../copilot-adapter.mjs";
 import { probeCopilot } from "../../copilot-runtime.mjs";
 import { COPILOT_RUNTIMES, COPILOT_ERRORS } from "../../copilot-runtime.mjs";
 import { makeFakeSdk, makeMissingSdkLoader } from "../fake-copilot-sdk.mjs";
@@ -59,6 +59,13 @@ function sdkFor(scenario, context) {
       return makeFakeSdk({ session: { writer: ({ cwd }) => { fs.mkdirSync(path.join(cwd, "output"), { recursive: true }); fs.writeFileSync(path.join(cwd, "output", "plan.json"), "{ bad"); } } });
     case "auth_required":
       return makeFakeSdk({ bundled: { auth: { isAuthenticated: false } } });
+    case "patch_preview_success":
+    case "patch_apply_success":
+      // 方向3:Copilot 完全只读 session(writableFiles=[]),最终 reply 输出编辑 JSON(hello→goodbye,关联评论 r1)。
+      // reply 带围栏 prose,验证 parseEditsJson 的稳健提取;writer 故意不设(禁写,不产任何文件)。
+      return makeFakeSdk({ session: { reply: "已完成分析。\n```json\n" + JSON.stringify({ schema_version: 1, edits: [{ id: "e1", comment_ref: "r1", action: "replace_text", locator: { exact: "hello" }, replacement: "goodbye" }] }) + "\n```" } });
+    case "patch_invalid_json":
+      return makeFakeSdk({ session: { reply: "抱歉,我无法生成编辑。" } });
     default:
       throw new Error("copilot fixture: unknown run scenario " + scenario);
   }
@@ -66,11 +73,12 @@ function sdkFor(scenario, context) {
 
 export const fixture = {
   provider: "github_copilot",
-  capabilities: ["candidate", "plan"],
+  capabilities: ["candidate", "plan", "patch"],
   scenarios: [
     "ready", "not_installed", "auth_required", "incompatible", "probe_error",
     "candidate_success", "candidate_missing", "candidate_out_of_scope", "source_mutated",
-    "plan_success", "plan_invalid", "runtime_changed"
+    "plan_success", "plan_invalid", "runtime_changed",
+    "patch_preview_success", "patch_apply_success", "patch_invalid_json"
   ],
   probeExpectations: {
     ready: ["ready"], not_installed: ["not_installed"], auth_required: ["auth_required"],
@@ -106,14 +114,18 @@ export const fixture = {
       };
       return {
         invokeCandidate: ({ msg, emit }) => executeCopilotCandidateRun(msg, { emit, selectRuntime: selector }),
-        invokePlan: ({ msg, emit }) => executeCopilotPlanRun(msg, { emit, selectRuntime: selector })
+        invokePlan: ({ msg, emit }) => executeCopilotPlanRun(msg, { emit, selectRuntime: selector }),
+        invokePatchPreview: ({ msg, emit }) => executeCopilotPatchPreviewRun(msg, { emit, selectRuntime: selector }),
+        invokePatchApply: ({ msg, emit }) => executeCopilotPatchApplyRun(msg, { emit })
       };
     }
     const sdk = sdkFor(name, context);
     const selector = async () => ({ sdk, runtime: COPILOT_RUNTIMES.BUNDLED_SDK_CLI, cliPath: null, version: "1.0.7-fake" });
     return {
       invokeCandidate: ({ msg, emit }) => executeCopilotCandidateRun(msg, { emit, selectRuntime: selector }),
-      invokePlan: ({ msg, emit }) => executeCopilotPlanRun(msg, { emit, selectRuntime: selector })
+      invokePlan: ({ msg, emit }) => executeCopilotPlanRun(msg, { emit, selectRuntime: selector }),
+      invokePatchPreview: ({ msg, emit }) => executeCopilotPatchPreviewRun(msg, { emit, selectRuntime: selector }),
+      invokePatchApply: ({ msg, emit }) => executeCopilotPatchApplyRun(msg, { emit })
     };
   },
   cleanup() {},

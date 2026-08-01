@@ -18,7 +18,7 @@ export const PROVIDER_REGISTRY = Object.freeze({
   codex_app_server: Object.freeze({
     id: "codex_app_server",
     label_key: "provider.codex",
-    capabilities: cap(["candidate", "plan"]),
+    capabilities: cap(["candidate", "plan", "patch"]),
     dispatch_type: "codex_handoff_start",
     probe: "codex",
     runtime_policy: "signed_app_only",    // 仅 com.openai.codex bundle + codesign TeamID
@@ -27,7 +27,7 @@ export const PROVIDER_REGISTRY = Object.freeze({
   github_copilot: Object.freeze({
     id: "github_copilot",
     label_key: "provider.copilot",
-    capabilities: cap(["candidate", "plan"]),
+    capabilities: cap(["candidate", "plan", "patch"]),
     dispatch_type: "copilot_handoff_start",
     probe: "copilot",
     runtime_policy: "runtime_locked",     // Plan→Candidate 锁定同一 runtime(local_cli / bundled_sdk_cli)

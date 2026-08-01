@@ -16,7 +16,7 @@ import {
   publishSiblingCandidate, quarantineCandidate, writeApprovedPlan, nextCandidateVersionLabel
 } from './candidate-workspace.mjs';
 import {
-  createWorkspace, writeTaskBundle, buildCandidatePrompt, buildPlanPrompt, approvedPlanPreamble,
+  createWorkspace, writeTaskBundle, buildCandidatePrompt, buildPlanPrompt, buildPatchPrompt, approvedPlanPreamble,
   isSha256Tagged, sha256File
 } from './task-bundle.mjs';
 import {
@@ -27,6 +27,7 @@ import {
   PLAN_TIMEOUT_MS, CANDIDATE_TIMEOUT_MS,
   selectCopilotRuntime, runCopilotSession
 } from './copilot-runtime.mjs';
+import { persistPatchPreview, executePatchApplyRun } from './host-runner.mjs';
 
 const BRIDGE_DIR_NAME = '.htmlgenius-bridge';
 const PROVIDER_DIR_NAME = 'copilot';
@@ -65,7 +66,10 @@ const COPILOT_FAIL_STATUS = {
   SOURCE_MUTATED_DURING_CANDIDATE: 'source_changed_during_run',
   SOURCE_CHANGED_BEFORE_START: 'source_changed_before_start',
   SOURCE_MUTATED_DURING_PLAN: 'source_changed_during_run',
+  SOURCE_MUTATED_DURING_PATCH: 'source_changed_during_run',
   TASK_MUTATED_DURING_PLAN: 'task_changed_during_run',
+  PATCH_EDITS_INVALID: 'patch_edits_invalid',
+  PATCH_RUN_NOT_FOUND: 'patch_run_not_found',
   CANDIDATE_MISSING: 'candidate_missing',
   CANDIDATE_INVALID_HTML: 'candidate_invalid_html',
   CANDIDATE_SYMLINK: 'candidate_invalid_html',
@@ -359,5 +363,154 @@ export async function executeCopilotPlanRun(msg, { emit, selectRuntime, sdkLoade
     plan_sha256: planResult.planSha256,
     plan: { schema_version: p.schema_version, summary: p.summary, plan_markdown: p.plan_markdown, out_of_scope: Array.isArray(p.out_of_scope) ? p.out_of_scope.slice() : [] },
     manifest_path: manifestPath
+  });
+}
+
+// ———————————————————————— Patch(方向3 确定性编辑快车道)————————————————————————
+// 与 claude/codex 同型:Copilot 在完全只读(writableFiles=[] → onPreToolUse 拒绝一切写)的受控 session 中
+// 读 source.html,最终 reply 文本输出结构化编辑 JSON → host 提取并确定性应用(复用 persistPatchPreview /
+// executePatchApplyRun,不重建第二套解析与应用链)。不采信 reply 为「结果」之外的任何副作用(没有副作用可言:禁写)。
+
+const COPILOT_PATCH_TIMEOUT_MS = 8 * 60 * 1000; // 结构化输出比整页重写快,与 claude patch 同口径;用户可随时终止
+
+// sendAndWait 的 reply 形态跨 SDK 版本不稳:string | {data:{content}} | {content} | parts 数组;
+// 统一归一为纯文本再交 patch-edits 稳健提取(容忍围栏/prose)。
+function copilotReplyText(reply) {
+  if (reply == null) return "";
+  if (typeof reply === "string") return reply;
+  if (typeof reply.content === "string") return reply.content;
+  if (reply.data && typeof reply.data.content === "string") return reply.data.content;
+  if (Array.isArray(reply.content)) {
+    return reply.content.map((p) => (p && typeof p.text === "string") ? p.text : "").join("");
+  }
+  try { return JSON.stringify(reply); } catch (_) { return ""; }
+}
+
+export async function executeCopilotPatchPreviewRun(msg, { emit, selectRuntime, sdkLoader, execFileImpl, env, fsImpl } = {}) {
+  if (typeof emit !== 'function') throw new Error('emit is required');
+  const runId = msg && msg.run_id;
+  const status = (s) => emit({ type: 'bridge_status', run_id: runId, status: s });
+  const failed = (code, message, runsDir, ctx) => {
+    if (runsDir) {
+      try {
+        writeManifest({
+          runsDir, runId,
+          logicalDocumentId: (ctx && ctx.logicalDocumentId) || (msg && msg.source && msg.source.logical_document_id) || null,
+          provider: COPILOT_PROVIDER,
+          sourcePath: (ctx && ctx.sourcePath) || null,
+          sourceSha256Before: (ctx && ctx.sourceSha256Before) || null,
+          changeContractSha256: (ctx && ctx.taskSha256) || null,
+          sessionId: null, // §7.5:Copilot session ID 永不读取/持久化
+          status: COPILOT_FAIL_STATUS[code] || 'copilot_run_failed'
+        });
+      } catch (_) {}
+    }
+    emit({ type: 'bridge_failed', run_id: runId, code, message: truncateMsg(message) });
+  };
+
+  // 1. 字段校验
+  if (!msg || typeof msg !== 'object') { emit({ type: 'bridge_failed', code: 'BAD_REQUEST', message: 'missing message' }); return; }
+  if (typeof runId !== 'string' || !runId) { emit({ type: 'bridge_failed', code: 'BAD_REQUEST', message: 'missing run_id' }); return; }
+  const source = msg.source || {};
+  const session = msg.session || {};
+  const task = msg.task;
+  if (typeof source.logical_document_id !== 'string' || !source.logical_document_id) { failed('BAD_REQUEST', 'missing source.logical_document_id'); return; }
+  if (typeof source.artifact_uri !== 'string' || !source.artifact_uri) { failed('BAD_REQUEST', 'missing source.artifact_uri'); return; }
+  if (!isSha256Tagged(source.base_artifact_hash)) { failed('BAD_REQUEST', 'source.base_artifact_hash must be sha256:<64hex>'); return; }
+  if (session.mode !== 'new') { failed('SESSION_MODE_NOT_ALLOWED', 'copilot patch requires session.mode=new'); return; }
+  if (!task || task.mode !== 'precise_patch') { failed('INVALID_MODE', 'patch run_kind requires task.mode precise_patch'); return; }
+
+  status('checking');
+
+  // 2. source 解析 + workspace + task bundle
+  let sourcePath, workspace, bundle;
+  try {
+    sourcePath = resolveSourcePath(source.artifact_uri);
+    const hostHash = sha256File(sourcePath);
+    workspace = copilotWorkspacePathFor({ sourcePath, logicalDocumentId: source.logical_document_id });
+    fs.mkdirSync(workspace, { recursive: true });
+    try { fs.chmodSync(workspace, 0o700); } catch (_) {}
+    bundle = writeTaskBundle({ workspace, runId, task, sourcePath, baseArtifactHash: hostHash });
+  } catch (e) { failed(e.code || 'PREPARE_FAILED', e.message, null, { logicalDocumentId: source.logical_document_id }); return; }
+
+  // 3. run 工作区:snapshot(0400)+ task 复制进 runs/<runId>(与 apply 共享同一 run 目录)
+  let prep;
+  try {
+    prep = prepareCandidateRun({ sourcePath, workspaceRoot: workspace, logicalDocumentId: source.logical_document_id, runId, taskJsonPath: bundle.jsonPath, taskMdPath: bundle.mdPath });
+  } catch (e) { failed(e.code || 'PREPARE_FAILED', e.message, null, { logicalDocumentId: source.logical_document_id, sourcePath }); return; }
+  const ctxBase = { logicalDocumentId: source.logical_document_id, sourcePath, sourceSha256Before: prep.sourceSha256Before, taskSha256: bundle.taskSha256 };
+
+  // 4. 执行前 runtime 选择(patch 无 required runtime;local→bundled fallback 允许)
+  let sel;
+  try {
+    const selector = selectRuntime || selectCopilotRuntime;
+    sel = await selector({ requiredRuntime: null, sdkLoader, execFileImpl, env, fsImpl });
+  } catch (e) { failed(e.code || COPILOT_ERRORS.SDK_NOT_INSTALLED, e.message, prep.runsDir, ctxBase); return; }
+
+  // 5. 完全只读 session:writableFiles=[] → onPreToolUse 拒绝一切写工具(与 claude 禁 Write argv 同语义)
+  status('running');
+  const home = copilotHomeFor(workspace, runId, 'candidate');
+  try { fs.mkdirSync(home, { recursive: true }); try { fs.chmodSync(home, 0o700); } catch (_) {} } catch (_) {}
+  let run;
+  try {
+    run = await runCopilotSession({
+      sdk: sel.sdk, runtime: sel.runtime, cliPath: sel.cliPath,
+      cwd: prep.runsDir, baseDirectory: home,
+      prompt: buildPatchPrompt({ runId, task }),
+      timeoutMs: COPILOT_PATCH_TIMEOUT_MS,
+      writableFiles: [],          // 空允许写清单 → 任何写工具都被拒(patch 只读 source,输出在 reply 文本)
+      runKind: 'patch',
+      onEvent: null,              // patch 预览不流式(与 claude patch 同口径)
+      fsImpl
+    });
+  } catch (e) { failed(e.code || COPILOT_ERRORS.RUN_FAILED, e.message, prep.runsDir, ctxBase); return; }
+
+  // 6. 提取/校验编辑清单 → dry-run 状态标注 → 落 edits.json(与 claude/codex 共享 persistPatchPreview)
+  let annotated, compliance;
+  try {
+    const snapshotHtml = fs.readFileSync(prep.snapshotPath, 'utf8');
+    const r = persistPatchPreview({
+      runsDir: prep.runsDir, runId, snapshotHtml, task, taskSha256: bundle.taskSha256,
+      resultText: copilotReplyText(run && run.reply)
+    });
+    annotated = r.edits; compliance = r.compliance;
+  } catch (e) {
+    // 有越权写被拒且无有效编辑输出 → 归因 PERMISSION_DENIED(与 candidate/plan 同归因口径)
+    const code = (e.code && e.code !== 'PATCH_EDITS_INVALID') ? e.code
+      : (run && run.denialCount > 0) ? COPILOT_ERRORS.PERMISSION_DENIED : 'PATCH_EDITS_INVALID';
+    failed(code, e.message, prep.runsDir, ctxBase); return;
+  }
+
+  // 7. 重读 source:运行期被改 → 预览作废
+  let sourceSha256After;
+  try { sourceSha256After = sha256File(sourcePath); }
+  catch (e) { failed('SOURCE_MUTATED_DURING_PATCH', '无法重读 source', prep.runsDir, ctxBase); return; }
+  if (sourceSha256After !== prep.sourceSha256Before) {
+    failed('SOURCE_MUTATED_DURING_PATCH', 'source 在 copilot patch preview 期间变化,预览作废', prep.runsDir, { ...ctxBase, sourceSha256After });
+    return;
+  }
+
+  // 8. patch-preview-ready(与 claude/codex 同型;带 provider_runtime 供诊断)
+  emit({
+    type: 'patch-preview-ready',
+    provider: COPILOT_PROVIDER,
+    provider_runtime: sel.runtime,
+    run_id: runId,
+    task_sha256: bundle.taskSha256,
+    logical_document_id: source.logical_document_id,
+    source_uri: pathToFileURL(sourcePath).href,
+    source_sha256_before: prep.sourceSha256Before,
+    edits: annotated,
+    compliance
+  });
+}
+
+// copilot patch apply:确定性应用与 provider 无关(不调 Agent SDK),复用 host-runner 的 apply 编排,
+// 仅注入 copilot 的 workspace 解析(provider 子目录)与 manifest 署名。
+export function executeCopilotPatchApplyRun(msg, opts = {}) {
+  return executePatchApplyRun(msg, {
+    ...opts,
+    workspaceFor: ({ sourcePath, logicalDocumentId }) => copilotWorkspacePathFor({ sourcePath, logicalDocumentId }),
+    provider: COPILOT_PROVIDER
   });
 }

@@ -28,10 +28,10 @@ test("registry:三家 provider + descriptor 严格合法 + API 行为", () => {
   assert.equal(providerSupports("github_copilot", "candidate"), true);
   assert.equal(providerSupports("github_copilot", "handoff"), false);
   assert.equal(providerSupports("rogue", "candidate"), false);
-  // 方向3:patch 能力 v1 仅 claude
+  // 方向3:patch 能力三家 provider 全支持(claude 禁 Write argv / codex read-only sandbox / copilot 空 writableFiles)
   assert.equal(providerSupports("claude_code_cli", "patch"), true);
-  assert.equal(providerSupports("codex_app_server", "patch"), false);
-  assert.equal(providerSupports("github_copilot", "patch"), false);
+  assert.equal(providerSupports("codex_app_server", "patch"), true);
+  assert.equal(providerSupports("github_copilot", "patch"), true);
   // 不可变
   assert.throws(() => { PROVIDER_REGISTRY.rogue = {}; }, TypeError);
 });
@@ -58,6 +58,18 @@ test("一致性:host.mjs 对每个 registry dispatch_type 有分发分支,probe 
   assert.match(host, /listProviderIds\(\)/, "host provider_probe 默认应走 registry");
   const probe = fs.readFileSync(path.resolve(__dirname, "..", "provider-probe.mjs"), "utf8");
   assert.match(probe, /probeProviders\(providers = listProviderIds\(\)/);
+  // 方向3:声明 patch 能力的 provider 必须在 host.mjs 有 patch_preview/patch_apply 执行器接线
+  const PATCH_EXECUTORS = {
+    claude_code_cli: ["executePatchPreviewRun", "executePatchApplyRun"],
+    codex_app_server: ["executeCodexPatchPreviewRun", "executeCodexPatchApplyRun"],
+    github_copilot: ["executeCopilotPatchPreviewRun", "executeCopilotPatchApplyRun"]
+  };
+  for (const id of listProviderIds()) {
+    if (!getProviderDescriptor(id).capabilities.includes("patch")) continue;
+    for (const fn of PATCH_EXECUTORS[id]) {
+      assert.ok(host.includes(fn), "host.mjs 缺 " + id + " 的 patch 接线: " + fn);
+    }
+  }
 });
 
 test("一致性:i18n 三语言含每个 provider 的 label_key(无 fallback 空串)", () => {

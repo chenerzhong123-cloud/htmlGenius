@@ -254,8 +254,13 @@ export class CodexAppServerClient {
 
   // —— runTask(spec §6.1 唯一允许序列,§6.6 抽出的共用执行):handshake → thread/start|resume → turn/start → 等 turn/completed ——
   // 不接受任意 method;序列写死,杜绝 forbidden method。runCandidate / runPlan 都是它的薄封装。
-  async runTask({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs, onStream }) {
+  // readOnly(patch preview):thread sandbox='read-only' + turn sandboxPolicy={type:'readOnly'}(OS 层禁写,
+  //   与 claude patch 禁 Write、copilot patch 空 writableFiles 同语义);candidate/plan 维持 workspace-write。
+  // 返回 { threadId, terminal, messages }:messages = turn 期间 agentMessage item/completed 的【完整】文本序列
+  //   (onStream 仍只转发截断版给 UI;patch preview 从完整文本提取 edits JSON)。
+  async runTask({ sessionMode, storedThreadId, workspaceCwd, prompt, timeoutMs, onStream, readOnly }) {
     const turnTimeout = timeoutMs || DEFAULT_TURN_TIMEOUT_MS;
+    const sandboxMode = readOnly ? 'read-only' : 'workspace-write';
     await this.initialize(HANDSHAKE_TIMEOUT_MS);
 
     let threadId;
@@ -263,7 +268,7 @@ export class CodexAppServerClient {
       if (!storedThreadId) fail(CODEX_SESSION_UNAVAILABLE, 'continue 需要 storedThreadId');
       try {
         const r = await this._request('thread/resume',
-          { threadId: storedThreadId, cwd: workspaceCwd, approvalPolicy: 'never', sandbox: 'workspace-write' }, turnTimeout);
+          { threadId: storedThreadId, cwd: workspaceCwd, approvalPolicy: 'never', sandbox: sandboxMode }, turnTimeout);
         threadId = extractThreadId(r) || storedThreadId;
       } catch (e) {
         if (e && e.code === CODEX_TIMED_OUT) throw e;
@@ -271,7 +276,7 @@ export class CodexAppServerClient {
       }
     } else {
       const r = await this._request('thread/start',
-        { cwd: workspaceCwd, approvalPolicy: 'never', sandbox: 'workspace-write' }, turnTimeout);
+        { cwd: workspaceCwd, approvalPolicy: 'never', sandbox: sandboxMode }, turnTimeout);
       threadId = extractThreadId(r);
       if (!threadId) fail(CODEX_TURN_FAILED, 'thread/start 未返回 threadId(result.thread.id):' + JSON.stringify(r).slice(0, 200));
     }
@@ -279,6 +284,7 @@ export class CodexAppServerClient {
     // 等终态:turn/completed(notification);期间 error 视为 turn 失败(spec §6.1/§9)。
     // 同时把中途 notification 转发为 stream 事件(onStream),给 UI 实时进度。
     let terminal = null;
+    const agentMessages = []; // agentMessage 完整文本(patch preview 提取 edits JSON;不进 UI 事件流)
     const done = new Promise((resolve, reject) => {
       let settled = false;
       let receivedAny = false; // 诊断:turn 期间是否收到过任意 notification(区分「慢」vs「挂起」)
@@ -288,27 +294,35 @@ export class CodexAppServerClient {
       this._onNotification = (msg) => {
         receivedAny = true;
         if (typeof onStream === 'function') { try { const s = codexNotificationToStream(msg); if (s) onStream(s); } catch (e) { /* 非关键 */ } }
+        const m0 = msg.method || msg.notification;
+        if (m0 === 'item/completed') {
+          const it = (msg.params || {}).item || {};
+          if (it.type === 'agentMessage' && typeof it.text === 'string' && it.text) agentMessages.push(it.text);
+        }
         if (settled) return;
-        const m = msg.method || msg.notification;
+        const m = m0;
         if (msg.__terminated) { settled = true; clearTimeout(timer); reject(Object.assign(new Error('app-server 终止'), { code: msg.code || CODEX_TURN_FAILED })); return; }
         if (m === 'turn/completed') { settled = true; clearTimeout(timer); terminal = msg.params || {}; resolve(); }
         else if (m === 'error' && msg.params && msg.params.fatal) { settled = true; clearTimeout(timer); reject(Object.assign(new Error('app-server fatal: ' + JSON.stringify(msg.params).slice(0, 200)), { code: CODEX_TURN_FAILED })); }
       };
     });
 
-    // turn/start:cwd=workspace,sandboxPolicy=workspaceWrite(禁网),approvalPolicy=never(spec §6.3)
+    // turn/start:cwd=workspace,approvalPolicy=never(spec §6.3)。sandboxPolicy:默认 workspaceWrite(禁网);
+    // readOnly(patch)→ {type:'readOnly'}(OS 层禁写,0.145+ schema 的 ReadOnlySandboxPolicy)。
     const turnParams = {
       threadId,
       input: [{ type: 'text', text: prompt, text_elements: [] }],
       cwd: workspaceCwd,
       approvalPolicy: 'never',
-      sandboxPolicy: { type: 'workspaceWrite', writableRoots: [workspaceCwd], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true },
+      sandboxPolicy: readOnly
+        ? { type: 'readOnly', networkAccess: false }
+        : { type: 'workspaceWrite', writableRoots: [workspaceCwd], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true },
     };
     try { await this._request('turn/start', turnParams, turnTimeout); }
     catch (e) { if (!terminal) { try { await this.close(); } catch (_) {} throw e; } }
 
     await done;
-    return { threadId, terminal };
+    return { threadId, terminal, messages: agentMessages };
   }
 
   // runCandidate = runTask(向后兼容 codex-adapter 的 candidate 执行)。

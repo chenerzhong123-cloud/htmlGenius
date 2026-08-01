@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { executeCodexCandidateRun, executeCodexPlanRun } from "../../codex-adapter.mjs";
+import { executeCodexCandidateRun, executeCodexPlanRun, executeCodexPatchPreviewRun, executeCodexPatchApplyRun } from "../../codex-adapter.mjs";
 import { probeCodex } from "../../provider-probe.mjs";
 import {
   CODEX_APP_NOT_FOUND, CODEX_AUTH_REQUIRED
@@ -46,7 +46,26 @@ function clientFor(scenario, context) {
     case "plan_invalid":
       return { runPlan: async ({ workspaceCwd }) => { fs.mkdirSync(path.join(workspaceCwd, "output"), { recursive: true }); fs.writeFileSync(path.join(workspaceCwd, "output", "plan.json"), "{ bad"); return { threadId: "thr_fake_cert" }; }, close: async () => {} };
     case "auth_required":
-      return { runCandidate: async () => fail(CODEX_AUTH_REQUIRED, "codex auth required"), runPlan: async () => fail(CODEX_AUTH_REQUIRED, "codex auth required"), close: async () => {} };
+      return { runCandidate: async () => fail(CODEX_AUTH_REQUIRED, "codex auth required"), runPlan: async () => fail(CODEX_AUTH_REQUIRED, "codex auth required"), runTask: async () => fail(CODEX_AUTH_REQUIRED, "codex auth required"), close: async () => {} };
+    case "patch_preview_success":
+    case "patch_apply_success":
+      // 方向3:Codex 只读沙箱读 source,最终 agent message 输出编辑 JSON(hello→goodbye,关联评论 r1)。
+      // 两条消息:先过程说明、后 JSON —— 验证 extractEditsFromMessages 的倒序提取(过程 prose 不干扰)。
+      return {
+        runTask: async ({ readOnly }) => {
+          if (!readOnly) fail("CODEX_TURN_FAILED", "fixture: codex patch preview 必须 readOnly 沙箱");
+          return {
+            threadId: "thr_fake_cert",
+            messages: [
+              "我读取了 source.html,评论 r1 要求把 hello 改为 goodbye。",
+              JSON.stringify({ schema_version: 1, edits: [{ id: "e1", comment_ref: "r1", action: "replace_text", locator: { exact: "hello" }, replacement: "goodbye" }] })
+            ]
+          };
+        },
+        close: async () => {}
+      };
+    case "patch_invalid_json":
+      return { runTask: async () => ({ threadId: "thr_fake_cert", messages: ["抱歉,我无法生成编辑。"] }), close: async () => {} };
     case "runtime_changed":
       return { runCandidate: async () => fail("CODEX_TURN_FAILED", "not applicable"), close: async () => {} };
     default:
@@ -56,11 +75,12 @@ function clientFor(scenario, context) {
 
 export const fixture = {
   provider: "codex_app_server",
-  capabilities: ["candidate", "plan"],
+  capabilities: ["candidate", "plan", "patch"],
   scenarios: [
     "ready", "not_installed", "auth_required", "incompatible", "probe_error",
     "candidate_success", "candidate_missing", "candidate_out_of_scope", "source_mutated",
-    "plan_success", "plan_invalid"
+    "plan_success", "plan_invalid",
+    "patch_preview_success", "patch_apply_success", "patch_invalid_json"
   ],
   probeExpectations: {
     ready: ["ready"], not_installed: ["not_found", "not_installed"], auth_required: ["auth_required"],
@@ -90,7 +110,9 @@ export const fixture = {
     const opts = { client, runtime: { runtimePath: "/fake/codex-runtime" }, schemaDir };
     return {
       invokeCandidate: ({ msg, emit }) => executeCodexCandidateRun(msg, { emit, ...opts }),
-      invokePlan: ({ msg, emit }) => executeCodexPlanRun(msg, { emit, ...opts })
+      invokePlan: ({ msg, emit }) => executeCodexPlanRun(msg, { emit, ...opts }),
+      invokePatchPreview: ({ msg, emit }) => executeCodexPatchPreviewRun(msg, { emit, ...opts }),
+      invokePatchApply: ({ msg, emit }) => executeCodexPatchApplyRun(msg, { emit })
     };
   },
   cleanup(context) {

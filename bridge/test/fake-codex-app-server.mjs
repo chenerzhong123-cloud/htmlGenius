@@ -8,7 +8,7 @@ import path from 'node:path';
 const LOG = process.env.CODEX_FAKE_LOG;
 function record(method, params) {
   if (!LOG) return;
-  try { fs.appendFileSync(LOG, JSON.stringify({ method, cwd: params && params.cwd, threadId: params && params.threadId, sandboxPolicy: params && params.sandboxPolicy }) + '\n'); } catch (e) {}
+  try { fs.appendFileSync(LOG, JSON.stringify({ method, cwd: params && params.cwd, threadId: params && params.threadId, sandbox: params && params.sandbox, sandboxPolicy: params && params.sandboxPolicy }) + '\n'); } catch (e) {}
 }
 
 let buf = '';
@@ -47,7 +47,17 @@ function handle(msg) {
       try { fs.writeFileSync(path.join(p.cwd, 'candidate.html'), '<!doctype html>\n<html lang="en"><body><p>fake codex candidate</p></body></html>'); } catch (e) {}
     }
     if (!process.env.CODEX_FAKE_NO_COMPLETED) {
-      setTimeout(() => send({ jsonrpc: '2.0', method: 'turn/completed', params: { turnId: 'turn_fake' } }), 5);
+      setTimeout(() => {
+        // CODEX_FAKE_AGENT_MESSAGES(JSON 字符串数组)→ 先发 agentMessage item/completed(供 patch 消息捕获测试)
+        if (process.env.CODEX_FAKE_AGENT_MESSAGES) {
+          try {
+            for (const text of JSON.parse(process.env.CODEX_FAKE_AGENT_MESSAGES)) {
+              send({ jsonrpc: '2.0', method: 'item/completed', params: { item: { type: 'agentMessage', text } } });
+            }
+          } catch (e) {}
+        }
+        send({ jsonrpc: '2.0', method: 'turn/completed', params: { turnId: 'turn_fake' } });
+      }, 5);
     }
   }
   // forbidden(thread/list, thread/read, thread/fork, turn/steer, thread/inject_items 等):

@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  parseEditsJson, validateEdit, collectScope, locateExact, owningStartTag, rewriteStyleAttr, applyEdits
+  parseEditsJson, validateEdit, collectScope, locateExact, owningStartTag, rewriteStyleAttr, applyEdits,
+  extractEditsFromMessages
 } from "../patch-edits.mjs";
 
 // —— helpers ——
@@ -179,4 +180,30 @@ test("collectScope: DFS 含回复 id 与锚点", () => {
   const { commentIds, anchors } = collectScope(task);
   assert.ok(commentIds.has("a1") && commentIds.has("r1"));
   assert.equal(anchors.length, 2);
+});
+
+// ============================ extractEditsFromMessages(codex/copilot 多消息)============================
+test("extractEditsFromMessages: 倒序逐条尝试 —— 过程 prose 在前、JSON 在最后 → 取最后一条", () => {
+  const msgs = ["我读取了 source.html 并分析了评论。", '{"schema_version":1,"edits":[]}'];
+  const { edits } = extractEditsFromMessages(msgs);
+  assert.deepEqual(edits, []);
+});
+
+test("extractEditsFromMessages: 最后一条是 prose、倒数第二条是 JSON → 仍提取成功(不要求必须在最后)", () => {
+  const msgs = ['{"schema_version":1,"edits":[]}', "以上就是我的结论。"];
+  const { edits } = extractEditsFromMessages(msgs);
+  assert.deepEqual(edits, []);
+});
+
+test("extractEditsFromMessages: 拼接会误解析的场景 —— 过程消息含非 edits JSON,逐条解析不受干扰", () => {
+  // 若拼接后解析,extractFirstObject 会先命中 {"note":...} 并因 schema_version≠1 失败;逐条倒序则跳过它
+  const msgs = ['这是进度:{"note":"thinking"}', '最终结果 ```json\n{"schema_version":1,"edits":[]}\n```'];
+  const { edits } = extractEditsFromMessages(msgs);
+  assert.deepEqual(edits, []);
+});
+
+test("extractEditsFromMessages: 全部无效 / 空数组 → PATCH_EDITS_INVALID", () => {
+  assert.throws(() => extractEditsFromMessages(["抱歉", "我无法生成"]), (e) => e.code === "PATCH_EDITS_INVALID");
+  assert.throws(() => extractEditsFromMessages([]), (e) => e.code === "PATCH_EDITS_INVALID");
+  assert.throws(() => extractEditsFromMessages(null), (e) => e.code === "PATCH_EDITS_INVALID");
 });
