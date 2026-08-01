@@ -9,19 +9,22 @@
 // 本版 Claude 无写文件权限:不产 candidate、不回写、不导航 —— 验收是「任务真实到达 Claude Code CLI」。
 import {
   resolveSourceArtifact, verifySourceHash, createWorkspace, writeTaskBundle,
-  buildHandoffPrompt, buildCandidatePrompt, buildPlanPrompt, approvedPlanPreamble, rootAnnotationIdsOf, isSha256Tagged, sha256File
+  buildHandoffPrompt, buildCandidatePrompt, buildPlanPrompt, buildPatchPrompt, approvedPlanPreamble, rootAnnotationIdsOf, isSha256Tagged, sha256File
 } from "./task-bundle.mjs";
-import { isSessionUuid, checkAuth, runHandoff, resumeHandoff, HANDOFF_TIMEOUT_MS } from "./claude-cli.mjs";
+import { isSessionUuid, checkAuth, runHandoff, resumeHandoff, runPatch, HANDOFF_TIMEOUT_MS } from "./claude-cli.mjs";
 import {
   resolveSourcePath, prepareCandidateRun, writeManifest, validateCandidate,
-  publishSiblingCandidate, quarantineCandidate, writeApprovedPlan, nextCandidateVersionLabel
+  publishSiblingCandidate, quarantineCandidate, writeApprovedPlan, nextCandidateVersionLabel, sha256Bytes
 } from "./candidate-workspace.mjs";
 import {
   preparePlanRun, verifyTaskBundleUnchanged, validatePlanJson, writePlanManifest, quarantinePlan
 } from "./plan-workspace.mjs";
+import { parseEditsJson, applyEdits } from "./patch-edits.mjs";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import fs from "node:fs";
+import path from "node:path";
 
-const realClaude = { checkAuth, runHandoff, resumeHandoff };
+const realClaude = { checkAuth, runHandoff, resumeHandoff, runPatch };
 
 // candidate run 需要读写完整 HTML 文件,比 ack 回执慢得多。实测:1 条评论约 3 分钟;
 // v0.8.1:Claude 候选超时 15 分钟(与 Codex 两侧统一)。整页重生成常很慢(等 API 占 98% 时间),
@@ -454,5 +457,267 @@ export async function executePlanRun(msg, { emit: rawEmit, claude } = {}) {
     plan_sha256: planResult.planSha256,
     plan: { schema_version: p.schema_version, summary: p.summary, plan_markdown: p.plan_markdown, out_of_scope: Array.isArray(p.out_of_scope) ? p.out_of_scope.slice() : [] },
     manifest_path: manifestPath
+  });
+}
+
+// —— 方向3 确定性编辑快车道:preview 编排(run_kind === "patch_preview")——
+// Claude 只读 source.html、以最终文本输出结构化编辑 JSON(不写任何文件);host 提取并 dry-run applyEdits
+// 得到每条编辑的状态(ok/not_found/ambiguous/conflict/out_of_scope),写 edits.json 供 apply 复用,
+// emit patch-preview-ready(编辑清单+状态+合规汇总)。坏 JSON → PATCH_EDITS_INVALID(供 background 回落 candidate)。
+const PATCH_TIMEOUT_MS = 8 * 60 * 1000; // 结构化输出通常比整页重写快,8 分钟给真实复杂页 + 模型繁忙留余量(用户可随时终止)
+const PATCH_FAIL_STATUS = {
+  BAD_REQUEST: "bad_request",
+  INVALID_MODE: "bad_request",
+  SOURCE_MUTATED_DURING_PATCH: "source_changed_during_run",
+  PATCH_EDITS_INVALID: "patch_edits_invalid",
+  PATCH_RUN_NOT_FOUND: "patch_run_not_found",
+  CLAUDE_RUN_FAILED: "claude_failed",
+  CLAUDE_INVALID_RESULT: "claude_failed",
+  CLAUDE_TIMEOUT: "timed_out"
+};
+
+function readTaskJson(runsDir, runId) {
+  return JSON.parse(fs.readFileSync(path.join(runsDir, "task-" + runId + ".json"), "utf8"));
+}
+
+export async function executePatchPreviewRun(msg, { emit: rawEmit, claude } = {}) {
+  if (typeof rawEmit !== "function") throw new Error("emit is required");
+  const cli = claude || realClaude;
+  const runId = msg && msg.run_id;
+  const emit = wrapEmit(rawEmit, { runId, allowStream: false }); // patch 无流式;模型文本不进 bridge_stream
+  const status = (s) => emit({ type: "bridge_status", run_id: runId, status: s });
+  const failed = (code, message, runsDir, ctx) => {
+    if (runsDir) {
+      try {
+        writeManifest({
+          runsDir, runId,
+          logicalDocumentId: (ctx && ctx.logicalDocumentId) || (msg && msg.source && msg.source.logical_document_id) || null,
+          provider: "claude_code_cli",
+          sourcePath: (ctx && ctx.sourcePath) || null,
+          sourceSha256Before: (ctx && ctx.sourceSha256Before) || null,
+          changeContractSha256: (ctx && ctx.taskSha256) || null,
+          status: PATCH_FAIL_STATUS[code] || "claude_failed"
+        });
+      } catch (_) {}
+    }
+    emit({ type: "bridge_failed", run_id: runId, code, message: truncateMsg(message) });
+  };
+
+  // 1. 字段校验
+  if (!msg || typeof msg !== "object") { emit({ type: "bridge_failed", code: "BAD_REQUEST", message: "missing message" }); return; }
+  if (typeof runId !== "string" || !runId) { emit({ type: "bridge_failed", code: "BAD_REQUEST", message: "missing run_id" }); return; }
+  const source = msg.source || {};
+  const task = msg.task;
+  if (typeof source.logical_document_id !== "string" || !source.logical_document_id) { failed("BAD_REQUEST", "missing source.logical_document_id"); return; }
+  if (typeof source.artifact_uri !== "string" || !source.artifact_uri) { failed("BAD_REQUEST", "missing source.artifact_uri"); return; }
+  if (!isSha256Tagged(source.base_artifact_hash)) { failed("BAD_REQUEST", "source.base_artifact_hash must be sha256:<64hex>"); return; }
+  if (!task || task.mode !== "precise_patch") { failed("INVALID_MODE", "patch run_kind requires task.mode precise_patch"); return; }
+
+  status("checking");
+
+  // 2. source 解析 + workspace + task bundle
+  const workspaceRoot = sourceWorkspaceRoot(source);
+  let sourcePath, workspace, bundle;
+  try {
+    sourcePath = resolveSourcePath(source.artifact_uri, { workspaceRoot });
+    const hostHash = sha256File(sourcePath);
+    workspace = createWorkspace({ sourcePath, logicalDocumentId: source.logical_document_id });
+    bundle = writeTaskBundle({ workspace, runId, task, sourcePath, baseArtifactHash: hostHash });
+  } catch (e) { failed(e.code || "PREPARE_FAILED", e.message, null, { logicalDocumentId: source.logical_document_id }); return; }
+
+  // 3. candidate 工作区:source snapshot(0400)+ task 复制进 runs/<runId>(与 apply 共享同一 run 目录)
+  let prep;
+  try {
+    prep = prepareCandidateRun({ sourcePath, workspaceRoot: workspace, logicalDocumentId: source.logical_document_id, runId, taskJsonPath: bundle.jsonPath, taskMdPath: bundle.mdPath });
+  } catch (e) { failed(e.code || "PREPARE_FAILED", e.message, null, { logicalDocumentId: source.logical_document_id, sourcePath, taskSha256: bundle.taskSha256 }); return; }
+  const ctxBase = { logicalDocumentId: source.logical_document_id, sourcePath, sourceSha256Before: prep.sourceSha256Before, taskSha256: bundle.taskSha256 };
+
+  // 4. auth
+  try { await cli.checkAuth({ cwd: prep.runsDir }); }
+  catch (e) { failed(e.code || "CLAUDE_NOT_LOGGED_IN", e.message, prep.runsDir, ctxBase); return; }
+
+  // 5. 驱动 Claude 输出编辑 JSON(只读工具,不写文件)
+  status("running");
+  const promptText = buildPatchPrompt({ runId, task });
+  let resultText;
+  try {
+    const r = await cli.runPatch({ cwd: prep.runsDir, promptText, timeoutMs: PATCH_TIMEOUT_MS });
+    resultText = r.resultText;
+  } catch (e) { failed(e.code || "CLAUDE_RUN_FAILED", e.message, prep.runsDir, ctxBase); return; }
+
+  // 6. 提取并校验编辑清单(坏 → PATCH_EDITS_INVALID,background 据此回落 candidate)
+  let edits;
+  try { edits = parseEditsJson(resultText).edits; }
+  catch (e) { failed("PATCH_EDITS_INVALID", e.message, prep.runsDir, ctxBase); return; }
+
+  // 7. dry-run applyEdits 得每条状态(preview 与 apply 共用同一解析,状态永远一致)
+  const snapshotHtml = fs.readFileSync(prep.snapshotPath, "utf8");
+  const dry = applyEdits(snapshotHtml, edits, task);
+  const skipById = new Map(dry.skipped.map((s) => [s.id, s]));
+  const annotated = edits.map((ed) => {
+    const sk = skipById.get(ed.id);
+    return Object.assign({}, ed, { status: sk ? sk.status : "ok", message: sk ? sk.message : "" });
+  });
+  const compliance = {
+    total: edits.length,
+    applicable: dry.applied.length,
+    out_of_scope: dry.skipped.filter((s) => s.status === "out_of_scope").length,
+    not_found: dry.skipped.filter((s) => s.status === "not_found").length,
+    ambiguous: dry.skipped.filter((s) => s.status === "ambiguous").length,
+    conflict: dry.skipped.filter((s) => s.status === "conflict").length
+  };
+
+  // 8. 落 edits.json(0600)供 apply run 复用(同一 run 目录)
+  try {
+    const ep = path.join(prep.runsDir, "edits.json");
+    fs.writeFileSync(ep, JSON.stringify({ schema_version: 1, run_id: runId, task_sha256: bundle.taskSha256, edits }, null, 2), { mode: 0o600 });
+    try { fs.chmodSync(ep, 0o600); } catch (_) {}
+  } catch (e) { failed("PREPARE_FAILED", "cannot write edits.json: " + (e && e.message), prep.runsDir, ctxBase); return; }
+
+  // 9. 重读 source:运行期被改 → 预览作废
+  let sourceSha256After;
+  try { sourceSha256After = sha256File(sourcePath); }
+  catch (e) { failed("SOURCE_MUTATED_DURING_PATCH", "cannot re-read source after patch preview", prep.runsDir, ctxBase); return; }
+  if (sourceSha256After !== prep.sourceSha256Before) {
+    failed("SOURCE_MUTATED_DURING_PATCH", "source changed during patch preview; preview invalidated", prep.runsDir, { ...ctxBase, sourceSha256After });
+    return;
+  }
+
+  // 10. patch-preview-ready(结构化编辑清单 + 状态 + 合规汇总;不含模型原始文本)
+  emit({
+    type: "patch-preview-ready",
+    run_id: runId,
+    task_sha256: bundle.taskSha256,
+    logical_document_id: source.logical_document_id,
+    source_uri: pathToFileURL(sourcePath).href,
+    source_sha256_before: prep.sourceSha256Before,
+    edits: annotated,
+    compliance
+  });
+}
+
+// —— 方向3:apply 编排(run_kind === "patch_apply")——
+// 读回 preview 落盘的 edits.json + source snapshot,应用 confirmed_edit_ids 子集 → candidate.html,
+// 经现有 validate/publish/manifest 发 candidate-ready(附带 applied/skipped)。
+// 安全:candidate = snapshot + 且仅 + 确认编辑;真实 source 已偏离 snapshot(preview 后被改)→ SOURCE_MUTATED_DURING_PATCH 拒绝。
+export async function executePatchApplyRun(msg, { emit: rawEmit, claude } = {}) {
+  if (typeof rawEmit !== "function") throw new Error("emit is required");
+  const runId = msg && msg.run_id;
+  const emit = wrapEmit(rawEmit, { runId, allowStream: false });
+  const status = (s) => emit({ type: "bridge_status", run_id: runId, status: s });
+  const failed = (code, message, runsDir, ctx) => {
+    if (runsDir) {
+      try {
+        writeManifest({
+          runsDir, runId,
+          logicalDocumentId: (ctx && ctx.logicalDocumentId) || (msg && msg.source && msg.source.logical_document_id) || null,
+          provider: "claude_code_cli",
+          sourcePath: (ctx && ctx.sourcePath) || null,
+          sourceSha256Before: (ctx && ctx.sourceSha256Before) || null,
+          changeContractSha256: (ctx && ctx.taskSha256) || null,
+          status: PATCH_FAIL_STATUS[code] || "claude_failed"
+        });
+      } catch (_) {}
+    }
+    emit({ type: "bridge_failed", run_id: runId, code, message: truncateMsg(message) });
+  };
+
+  // 1. 字段校验
+  if (!msg || typeof msg !== "object") { emit({ type: "bridge_failed", code: "BAD_REQUEST", message: "missing message" }); return; }
+  if (typeof runId !== "string" || !runId) { emit({ type: "bridge_failed", code: "BAD_REQUEST", message: "missing run_id" }); return; }
+  const source = msg.source || {};
+  if (typeof source.logical_document_id !== "string" || !source.logical_document_id) { failed("BAD_REQUEST", "missing source.logical_document_id"); return; }
+  if (typeof source.artifact_uri !== "string" || !source.artifact_uri) { failed("BAD_REQUEST", "missing source.artifact_uri"); return; }
+  if (!Array.isArray(msg.confirmed_edit_ids)) { failed("BAD_REQUEST", "confirmed_edit_ids must be an array"); return; }
+  const confirmedIds = new Set(msg.confirmed_edit_ids.map(String));
+
+  status("checking");
+
+  // 2. 定位 preview 留下的 run 目录(workspace 由 source+logicalId 稳定派生)
+  const workspaceRoot = sourceWorkspaceRoot(source);
+  let sourcePath, workspace;
+  try {
+    sourcePath = resolveSourcePath(source.artifact_uri, { workspaceRoot });
+    workspace = createWorkspace({ sourcePath, logicalDocumentId: source.logical_document_id });
+  } catch (e) { failed(e.code || "PREPARE_FAILED", e.message, null, { logicalDocumentId: source.logical_document_id }); return; }
+  const runsDir = path.join(workspace, "runs", runId);
+  const snapshotPath = path.join(runsDir, "source.html");
+  const editsPath = path.join(runsDir, "edits.json");
+  const candidatePath = path.join(runsDir, "candidate.html");
+  if (!fs.existsSync(snapshotPath) || !fs.existsSync(editsPath)) {
+    failed("PATCH_RUN_NOT_FOUND", "patch preview run dir missing (snapshot/edits)", null, { logicalDocumentId: source.logical_document_id, sourcePath });
+    return;
+  }
+
+  // 3. 读 snapshot + edits + task
+  let snapshotHtml, snapshotByteLength, snapshotSha, editsRecord, task;
+  try {
+    const snapBuf = fs.readFileSync(snapshotPath);
+    snapshotHtml = snapBuf.toString("utf8");
+    snapshotByteLength = snapBuf.length;
+    snapshotSha = sha256Bytes(snapBuf);
+    editsRecord = JSON.parse(fs.readFileSync(editsPath, "utf8"));
+    task = readTaskJson(runsDir, runId);
+  } catch (e) { failed("PATCH_RUN_NOT_FOUND", "cannot read patch run artifacts: " + (e && e.message), null, { logicalDocumentId: source.logical_document_id, sourcePath }); return; }
+  const allEdits = Array.isArray(editsRecord.edits) ? editsRecord.edits : [];
+  const confirmedEdits = allEdits.filter((ed) => ed && confirmedIds.has(String(ed.id)));
+  const ctxBase = { logicalDocumentId: source.logical_document_id, sourcePath, sourceSha256Before: snapshotSha, taskSha256: editsRecord.task_sha256 || null };
+
+  // 4. source 漂移校验:真实 source 必须仍等于 snapshot(preview 后被改 → 拒绝基于陈旧内容产 candidate)
+  let realSourceSha;
+  try { realSourceSha = sha256File(sourcePath); }
+  catch (e) { failed("SOURCE_MUTATED_DURING_PATCH", "cannot re-read source before apply", runsDir, ctxBase); return; }
+  if (realSourceSha !== snapshotSha) {
+    failed("SOURCE_MUTATED_DURING_PATCH", "source changed since patch preview; candidate not produced", runsDir, ctxBase);
+    return;
+  }
+
+  // 5. 确定性应用(构造保证:candidate = snapshot + 且仅 + 确认编辑)
+  status("running");
+  const result = applyEdits(snapshotHtml, confirmedEdits, task);
+  try {
+    fs.writeFileSync(candidatePath, Buffer.from(result.html, "utf8"), { mode: 0o600 });
+  } catch (e) { failed("PREPARE_FAILED", "cannot write candidate.html: " + (e && e.message), runsDir, ctxBase); return; }
+
+  // 6. 校验 candidate 形态
+  let cand;
+  try { cand = validateCandidate(candidatePath, snapshotByteLength); }
+  catch (e) { failed(e.code || "CANDIDATE_MISSING", e.message, runsDir, ctxBase); return; }
+
+  // 7. 原子 sibling + 版本号
+  let resultPath, versionLabel;
+  try {
+    versionLabel = nextCandidateVersionLabel({ sourcePath, logicalDocumentId: source.logical_document_id });
+    resultPath = publishSiblingCandidate({ candidatePath, sourcePath, runId, versionLabel });
+  } catch (e) { failed(e.code || "CANDIDATE_PUBLISH_FAILED", e.message, runsDir, ctxBase); return; }
+
+  // 8. ready manifest
+  let manifestPath;
+  try {
+    manifestPath = writeManifest({
+      runsDir, runId, logicalDocumentId: source.logical_document_id, provider: "claude_code_cli",
+      sourcePath, sourceSha256Before: snapshotSha, sourceSha256After: realSourceSha,
+      candidateResultPath: resultPath, candidateWorkspacePath: candidatePath,
+      candidateSha256: cand.sha256, candidateByteLength: cand.byteLength,
+      changeContractSha256: editsRecord.task_sha256 || null, sessionId: null, status: "ready"
+    });
+  } catch (e) { failed("MANIFEST_FAILED", e.message, runsDir, ctxBase); return; }
+
+  // 9. candidate-ready(复用现有终态;附带 patch.applied/skipped 供 UI 展示与 candidate 侧变更高亮)
+  //    applied 携带完整编辑对象(含定位),content-script 据此在候选页重锚并高亮改动区域。
+  const appliedIds = new Set(result.applied.map((a) => a.id));
+  const appliedFull = confirmedEdits.filter((ed) => ed && appliedIds.has(String(ed.id)));
+  emit({
+    type: "candidate-ready",
+    run_id: runId,
+    task_sha256: editsRecord.task_sha256 || null,
+    logical_document_id: source.logical_document_id,
+    source_uri: pathToFileURL(sourcePath).href,
+    source_sha256_before: snapshotSha,
+    candidate_uri: pathToFileURL(resultPath).href,
+    candidate_sha256: cand.sha256,
+    version_label: versionLabel,
+    manifest_path: manifestPath,
+    patch: { applied: appliedFull, skipped: result.skipped }
   });
 }

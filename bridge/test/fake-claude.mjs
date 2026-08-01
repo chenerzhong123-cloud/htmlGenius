@@ -2,13 +2,15 @@
 // 与 fake-claude-bin/claude(可执行文件级,测真实 spawn)互补:本 fake 跑 host-runner 编排测试,
 // 零进程开销、可精确断言调用参数与顺序。
 export function makeFakeClaude(overrides = {}) {
-  const calls = { checkAuth: [], runHandoff: [], resumeHandoff: [] };
+  const calls = { checkAuth: [], runHandoff: [], resumeHandoff: [], runPatch: [] };
   const cfg = {
     authFail: null,          // 设 code 字符串 → checkAuth 抛错
     runResult: { sessionId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" },
     runFail: null,           // 设 {code,message} → runHandoff 抛错
     resumeResult: null,      // 默认与 runResult 相同
     resumeFail: null,
+    runPatchResult: { sessionId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", resultText: '{"schema_version":1,"edits":[]}' },
+    runPatchFail: null,      // 设 {code,message} → runPatch 抛错
     onRun: null,             // 钩子:(args) => void(可用来模拟运行期改 source)
     ...overrides
   };
@@ -32,6 +34,12 @@ export function makeFakeClaude(overrides = {}) {
       if (cfg.onRun) cfg.onRun(args);
       if (cfg.resumeFail) throw mkErr(cfg.resumeFail);
       return { ...(cfg.resumeResult || cfg.runResult) };
+    },
+    async runPatch(args) {
+      calls.runPatch.push(args || {});
+      if (cfg.onRun) cfg.onRun(args);
+      if (cfg.runPatchFail) throw mkErr(cfg.runPatchFail);
+      return { ...cfg.runPatchResult };
     }
   };
 }

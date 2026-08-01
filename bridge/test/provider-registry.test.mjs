@@ -28,6 +28,10 @@ test("registry:三家 provider + descriptor 严格合法 + API 行为", () => {
   assert.equal(providerSupports("github_copilot", "candidate"), true);
   assert.equal(providerSupports("github_copilot", "handoff"), false);
   assert.equal(providerSupports("rogue", "candidate"), false);
+  // 方向3:patch 能力 v1 仅 claude
+  assert.equal(providerSupports("claude_code_cli", "patch"), true);
+  assert.equal(providerSupports("codex_app_server", "patch"), false);
+  assert.equal(providerSupports("github_copilot", "patch"), false);
   // 不可变
   assert.throws(() => { PROVIDER_REGISTRY.rogue = {}; }, TypeError);
 });

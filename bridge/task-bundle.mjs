@@ -223,6 +223,45 @@ export function buildCandidatePrompt({ runId, task }) {
   return prelude + "\n\n## Change Contract (execute strictly)\n" + rendered;
 }
 
+// —— 方向3 确定性编辑快车道执行前言:Agent 不写任何文件,只以最终回复输出结构化编辑 JSON ——
+// cwd=runs/<runId>,source.html 与 task-<runId>.* 在当前目录(由 prepareCandidateRun 复制)。runKind "patch" 无 Write 权限,
+// 输出走最终文本(--output-format json 的 result 字段),host 交 patch-edits.parseEditsJson 提取后确定性应用。
+export function buildPatchPrompt({ runId, task }) {
+  const prelude = [
+    "You are producing precise edits inside HTML Genius's controlled workspace.",
+    "",
+    "- Read source.html and task-" + runId + ".md / task-" + runId + ".json in the current directory.",
+    "- Do NOT modify any file. Do NOT write candidate.html. Do not use shell, network, MCP, plugins, or the browser.",
+    "- For each selected comment in the Change Contract, decide the minimal precise edit that satisfies it.",
+    "- Emit ONLY a single UTF-8 JSON object as your final response, matching the schema below. No Markdown, no prose, no code fences.",
+    "- Only propose edits located at the commented targets. If a target cannot be uniquely located, omit that edit (do not guess).",
+    "- Every edit must reference the comment it serves via comment_ref (the comment's id)."
+  ].join("\n");
+  const schema = [
+    "",
+    "## Required output schema (final response = exactly this JSON)",
+    "```json",
+    "{",
+    '  "schema_version": 1,',
+    '  "edits": [',
+    '    { "id": "e1", "comment_ref": "<selected comment id>",',
+    '      "action": "replace_text",',
+    '      "locator": { "prefix": "…", "exact": "<exact text to replace>", "suffix": "…" },',
+    '      "replacement": "<new text>" },',
+    '    { "id": "e2", "comment_ref": "<selected comment id>",',
+    '      "action": "set_style",',
+    '      "locator": { "prefix": "…", "exact": "<text inside the target element>", "suffix": "…" },',
+    '      "property": "font-size", "value": "18px" }',
+    "  ]",
+    "}",
+    "```",
+    "- action is one of: replace_text (set replacement) or set_style (set property/value on the element containing the located text).",
+    "- locator.exact must be copied verbatim from source.html; prefix/suffix are the surrounding text used to disambiguate.",
+    '- If no edit is needed, return {"schema_version":1,"edits":[]}.'
+  ].join("\n");
+  return prelude + schema + "\n\n## Change Contract (produce edits strictly within its boundaries)\n" + ChangeContract.renderPrompt(task);
+}
+
 // —— Codex App Server 执行前言(v0.8 spec §6.4,固定、不可由用户覆盖)——
 // 与 buildCandidatePrompt 语义等价(都是受控候选工作区),按 spec §6.4 中文原文;前言在 renderPrompt 之前拼接。
 export function buildCodexPrompt({ task }) {

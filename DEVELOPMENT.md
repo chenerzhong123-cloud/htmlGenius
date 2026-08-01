@@ -47,9 +47,9 @@ uv run pytest -v          # 仅多人协同自托管后端
 
 - **content-script**（注入页面）：text-quote 定位、非侵入 overlay、富文本/元素级编辑、`get-export`/`artifact-update-ready` 受控消费（打开新版本 + 重锚）。
 - **sidepanel**：评论收件箱 / 评论选择流 / Change Contract 表单 / 本机 Agent 发送与只读结果态；状态机用 `data-step="select|compose"` 显式表达，临时选择只存内存。
-- **background**（service worker）：`bridge-start` 严格校验（自取 artifact state、`run_kind` 透传、restructure 拒绝 candidate）→ 连 Native Host → 路由 host 事件 → completion 逐字段双校验。
-- **bridge/**（Node Native Messaging host，`com.htmlgenius.local_bridge`，provider-neutral）：`claude-cli.mjs`（固定 argv、`shell:false`、auth、超时）、`task-bundle.mjs`（规范化 JSON + SHA-256 + 固定 prompt）、`candidate-workspace.mjs`（source 快照 + manifest + sibling + 形态/路径校验）、`host-runner.mjs`（handoff / candidate 编排）。
-- **安全模型**：source 永不自动覆盖；Claude 只写 workspace 内 candidate，host 校验后复制 sibling；run 记录只存元数据；无 promote/overwrite/auto-accept 路径。candidate 的 `--allowed-tools` 仅 `Read,Glob,Grep,Write`，handoff 仅只读。
+- **background**（service worker）：`bridge-start` 严格校验（自取 artifact state、`run_kind` 透传、restructure 拒绝 candidate）→ 连 Native Host → 路由 host 事件 → completion 逐字段双校验。v0.9.13：「精准修补」+ provider 支持 `patch` 时内部升级为 `patch_preview`/`patch_apply` 两阶段（预览可确认 / 直接应用，坏 JSON 自动回落 candidate）。
+- **bridge/**（Node Native Messaging host，`com.htmlgenius.local_bridge`，provider-neutral）：`claude-cli.mjs`（固定 argv、`shell:false`、auth、超时）、`task-bundle.mjs`（规范化 JSON + SHA-256 + 固定 prompt）、`candidate-workspace.mjs`（source 快照 + manifest + sibling + 形态/路径校验）、`patch-edits.mjs`（v0.9.13 确定性编辑：编辑 schema 校验 + 范围映射 + 文本级外科应用，未改字节逐字保留）、`host-runner.mjs`（handoff / candidate / plan / patch 编排）。
+- **安全模型**：source 永不自动覆盖；Claude 只写 workspace 内 candidate，host 校验后复制 sibling；run 记录只存元数据；无 promote/overwrite/auto-accept 路径。candidate 的 `--allowed-tools` 仅 `Read,Glob,Grep,Write`，handoff / patch 仅只读（patch 模式 Claude 只输出结构化编辑 JSON、不写任何文件，由 host 确定性应用）。
 - **artifact 协议（v0.6.2）**：逻辑文档 ID + artifact SHA-256；候选经 `new_artifact` 受控路径打开，base hash 不一致即拒绝导航/链接。
 - **存储**：扩展用 IndexedDB（`annotations` / `versions` / `documents` / `artifact_versions` / `bridge_sessions` / `bridge_runs`，DB v4）；协同模式才走自托管后端。
 

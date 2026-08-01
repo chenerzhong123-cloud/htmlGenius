@@ -53,7 +53,7 @@ export function buildClaudeArgv({ promptText, resumeSessionId, runKind }) {
   const disallowed = canWrite
     ? ["Bash", "Edit", "WebFetch", "WebSearch", "mcp__*"]                           // candidate/plan 禁 in-place Edit/网/MCP
     : ["Bash", "Edit", "Write", "WebFetch", "WebSearch", "mcp__*"];                 // handoff 全只读
-  const maxTurns = runKind === "candidate" ? "24" : runKind === "plan" ? "16" : "4"; // candidate 编辑多轮;plan 写 JSON 中等;handoff 回执少轮
+  const maxTurns = runKind === "candidate" ? "24" : runKind === "plan" ? "16" : runKind === "patch" ? "8" : "4"; // candidate 编辑多轮;plan 写 JSON 中等;patch 读源+输出编辑 JSON;handoff 回执少轮
   const argv = [
     "-p",
     "--output-format", "json",
@@ -169,6 +169,36 @@ export async function runHandoff({ cwd, promptText, timeoutMs, runKind }) {
     fail("CLAUDE_RUN_FAILED", "claude exited " + code + ": " + truncate(stderr), { exitCode: code });
   }
   return parseHandoffResult(stdout);
+}
+
+// —— patch result 解析(方向3 确定性编辑快车道):`claude -p --output-format json` 的 result 字段即模型最终文本,
+// 其中应含结构化编辑 JSON(由 host-runner 交 patch-edits.parseEditsJson 提取)。此处只取 session_id + result 文本。
+export function parsePatchResult(stdout) {
+  const text = String(stdout || "").trim();
+  if (!text) fail("CLAUDE_INVALID_RESULT", "claude produced empty stdout");
+  let obj;
+  try { obj = JSON.parse(text); }
+  catch (e) { fail("CLAUDE_INVALID_RESULT", "claude stdout is not valid JSON"); }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+    fail("CLAUDE_INVALID_RESULT", "claude result is not a JSON object");
+  }
+  const sid = obj.session_id || (obj.result && typeof obj.result === "object" && obj.result.session_id) || null;
+  if (!isSessionUuid(sid)) {
+    fail("CLAUDE_INVALID_RESULT", "claude result missing a valid session_id UUID");
+  }
+  const resultText = typeof obj.result === "string" ? obj.result : "";
+  if (!resultText) fail("CLAUDE_INVALID_RESULT", "claude result missing result text for patch");
+  return { sessionId: String(sid).trim(), resultText, isError: obj.is_error === true };
+}
+
+// —— patch run(方向3):只读工具(runKind "patch" 不放行 Write),Claude 读 source.html 后仅以最终文本输出编辑 JSON。——
+export async function runPatch({ cwd, promptText, timeoutMs }) {
+  const argv = buildClaudeArgv({ promptText, runKind: "patch" });
+  const { code, stdout, stderr } = await runClaude(argv, { cwd, timeoutMs });
+  if (code !== 0) {
+    fail("CLAUDE_RUN_FAILED", "claude exited " + code + ": " + truncate(stderr), { exitCode: code });
+  }
+  return parsePatchResult(stdout);
 }
 
 // —— continue handoff(spec §7 步骤7):只允许 --resume <已保存 UUID>;cwd 必须是该 session 的

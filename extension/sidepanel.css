@@ -848,6 +848,9 @@ button {
 
 /* === v0.8.1 状态栏:计时器 + 可展开(本次进度时间线 + 最近 3 次)=== */
 .contract-bridge-status { cursor: pointer; user-select: none; }
+/* 报错文案 / 进度 / 实时输出 / 历史允许选中复制(整栏默认 none 防误选,文本节点单独放开) */
+.contract-bridge-status .cbs-text, .contract-bridge-status .cbs-stream,
+.contract-bridge-status .cbs-progress, .contract-bridge-status .cbs-history { user-select: text; cursor: text; }
 .contract-bridge-status .cbs-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .contract-bridge-status .cbs-text { flex: 1; min-width: 0; }
 .contract-bridge-status .cbs-timer { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--brand-hover); opacity: .92; }
@@ -938,3 +941,43 @@ button {
 .conn-checking[hidden] { display: none; }
 .conn-checking-dots { display: inline-block; width: 1.4em; text-align: left; color: var(--brand); font-weight: 700; }
 .conn-checking-elapsed { margin-left: auto; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+
+/* === 方向3:确定性编辑预览(先预览后确认)=== */
+/* 精确修改应用方式:两个 radio 选项卡(选中态描边+品牌软底,沿用设计 token) */
+.patch-apply-modes { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.patch-apply-mode {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: var(--r-md);
+  background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--line-default);
+  font-size: 12.5px; cursor: pointer; transition: border-color .15s, background .15s;
+}
+.patch-apply-mode:hover { border-color: var(--brand); }
+.patch-apply-mode input { accent-color: var(--brand); margin: 0; flex: none; }
+.patch-apply-mode:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+.patch-preview {
+  margin-top: 10px; border: 1px solid var(--line-default); border-radius: var(--r-lg);
+  background: var(--bg-surface-raised); overflow: hidden;
+}
+.patch-preview .pp-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 9px 12px; border-bottom: 1px solid var(--line-subtle);
+}
+.patch-preview .pp-title { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.patch-preview .pp-badge {
+  font-size: 11px; color: var(--text-secondary); background: var(--brand-soft);
+  padding: 2px 8px; border-radius: var(--r-pill); white-space: nowrap;
+}
+.patch-preview .pp-list { max-height: 240px; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.patch-preview .pp-item { display: flex; gap: 8px; align-items: flex-start; padding: 8px 9px; border-radius: var(--r-md); background: var(--bg-surface); border: 1px solid var(--line-subtle); }
+.patch-preview .pp-item.pp-problem { opacity: .82; border-color: var(--line-default); }
+.patch-preview .pp-check { margin-top: 2px; accent-color: var(--brand); }
+.patch-preview .pp-body { flex: 1; min-width: 0; }
+.patch-preview .pp-action { font-size: 11px; color: var(--text-muted); margin-bottom: 3px; }
+.patch-preview .pp-detail { font-size: 12.5px; line-height: 1.5; word-break: break-word; }
+.patch-preview .pp-old { color: var(--danger); text-decoration: line-through; }
+.patch-preview .pp-loc { color: var(--text-secondary); }
+.patch-preview .pp-new { color: var(--success); }
+.patch-preview .pp-status { display: inline-block; margin-top: 4px; font-size: 11px; padding: 1px 7px; border-radius: var(--r-pill); }
+.patch-preview .pp-status.pp-out_of_scope { color: var(--danger); background: rgba(255,154,165,.12); }
+.patch-preview .pp-status.pp-not_found, .patch-preview .pp-status.pp-ambiguous, .patch-preview .pp-status.pp-conflict { color: var(--warning); background: var(--warning-soft); }
+.patch-preview .pp-actions { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line-subtle); }
+.patch-preview .pp-actions #patch-confirm { flex: 1; }

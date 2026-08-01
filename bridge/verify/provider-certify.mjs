@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { listProviderIds, getProviderDescriptor } from "../provider-registry.mjs";
 import { providerHealthEntry, isValidRemediation } from "../bridge-health.mjs";
 import {
-  REQUIRED_PROBE_SCENARIOS, REQUIRED_CANDIDATE_SCENARIOS, REQUIRED_PLAN_SCENARIOS,
+  REQUIRED_PROBE_SCENARIOS, REQUIRED_CANDIDATE_SCENARIOS, REQUIRED_PLAN_SCENARIOS, REQUIRED_PATCH_SCENARIOS,
   makeIsolatedWorkspace, cleanupWorkspace, buildStandardMsg, makeCollector, scanInvariants, assertReportSanitized
 } from "../test/providers/provider-fixture-contract.mjs";
 import { sanitizeVerificationReport, makeReportSkeleton, finalizeReport } from "./report-sanitize.mjs";
@@ -156,6 +156,64 @@ async function runRuntimeChangedCheck(fixture, add) {
   }
 }
 
+// ———————————————————————— patch 矩阵(方向3 确定性编辑快车道)————————————————————————
+
+// preview(Claude 输出结构化编辑)→ apply(确定性应用)两阶段;source 字节不得被改写,预览不得发布 sibling。
+async function runPatchCheck(fixture, descriptor, name, add) {
+  const ws = makeIsolatedWorkspace();
+  const context = { sourcePath: ws.sourcePath };
+  const checkId = "patch." + name;
+  const siblings = () => fs.readdirSync(ws.dir).filter((n) => /^reportV[\d.]+\.html$/.test(n));
+  try {
+    const runId = "hgr_certpatch" + (name === "patch_apply_success" ? "apply01" : name === "patch_preview_success" ? "prevw01" : "badjs01");
+    const msg = buildStandardMsg({ sourcePath: ws.sourcePath, provider: descriptor.id, runId });
+    const scen = fixture.makeRunScenario(name, context);
+    const col = makeCollector();
+    await scen.invokePatchPreview({ msg, emit: col.emit });
+    const preview = col.events.find((e) => e.type === "patch-preview-ready");
+    const failedEv = col.events.find((e) => e.type === "bridge_failed");
+
+    let failCode = null;
+    if (name === "patch_preview_success") {
+      if (!preview) failCode = "NO_PATCH_PREVIEW";
+      else if (!Array.isArray(preview.edits) || !preview.edits.length) failCode = "NO_EDITS";
+      else if (!preview.edits.every((e) => typeof e.status === "string")) failCode = "EDIT_MISSING_STATUS";
+      else if (siblings().length) failCode = "PREVIEW_MUST_NOT_PUBLISH";
+    } else if (name === "patch_invalid_json") {
+      if (preview) failCode = "UNEXPECTED_PREVIEW";
+      else if (!failedEv || failedEv.code !== "PATCH_EDITS_INVALID") failCode = "WRONG_FAILURE_CODE";
+    } else if (name === "patch_apply_success") {
+      if (!preview) {
+        failCode = "NO_PATCH_PREVIEW";
+      } else {
+        const okIds = preview.edits.filter((e) => e.status === "ok").map((e) => e.id);
+        const col2 = makeCollector();
+        await scen.invokePatchApply({ msg: { run_id: runId, source: msg.source, confirmed_edit_ids: okIds }, emit: col2.emit });
+        const ready = col2.events.find((e) => e.type === "candidate-ready");
+        const failed2 = col2.events.find((e) => e.type === "bridge_failed");
+        const sibs = siblings();
+        if (failed2) failCode = "UNEXPECTED_FAILURE:" + failed2.code;
+        else if (!ready) failCode = "NO_CANDIDATE_READY";
+        else if (sibs.length !== 1) failCode = "SIBLING_COUNT_" + sibs.length;
+        else {
+          const candHtml = fs.readFileSync(path.join(ws.dir, sibs[0]), "utf8");
+          if (!candHtml.includes("goodbye")) failCode = "EDIT_NOT_APPLIED";
+          else if (!ready.patch || !Array.isArray(ready.patch.applied)) failCode = "MISSING_PATCH_REPORT";
+        }
+      }
+    }
+    if (failCode) { add(checkId, "failed", failCode); return; }
+    const problems = scanInvariants({ ws, events: col.events, expectSourceMutated: false, allowSessionKeys: fixture.expected.no_session_persisted !== true });
+    if (problems.length) { add(checkId, "failed", problems[0]); return; }
+    add(checkId, "passed");
+  } catch (e) {
+    add(checkId, "failed", "RUN_CRASH");
+  } finally {
+    try { fixture.cleanup(context); } catch (_) {}
+    cleanupWorkspace(ws);
+  }
+}
+
 // ———————————————————————— 单 provider 认证 ————————————————————————
 
 async function certifyProvider(id) {
@@ -195,6 +253,10 @@ async function certifyProvider(id) {
       for (const name of REQUIRED_PLAN_SCENARIOS) await runPlanCheck(fixture, descriptor, name, add);
       if (descriptor.runtime_policy === "runtime_locked") await runRuntimeChangedCheck(fixture, add);
       else add("plan.runtime_changed", "skipped", "NOT_RUNTIME_LOCKED");
+    }
+    // 方向3:patch 矩阵(仅声明 patch 能力的 provider)
+    if (descriptor.capabilities.includes("patch")) {
+      for (const name of REQUIRED_PATCH_SCENARIOS) await runPatchCheck(fixture, descriptor, name, add);
     }
   } catch (e) {
     add("provider.crash", "failed", "PROVIDER_CRASH");

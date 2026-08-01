@@ -37,10 +37,9 @@
     <span data-i18n="fileAccess.body">要编辑电脑中的网页文件，需要先打开一项权限。</span>
     <ol class="file-access-steps">
       <li data-i18n="fileAccess.step1">点击下方“复制设置地址”。</li>
-      <li data-i18n="fileAccess.step2">在浏览器顶部的地址栏粘贴，然后按回车。</li>
-      <li data-i18n="fileAccess.step3">找到 htmlGenius，点击“详情”。</li>
-      <li data-i18n="fileAccess.step4">打开“允许访问文件网址”开关。</li>
-      <li data-i18n="fileAccess.step5">回到这里并刷新页面。</li>
+      <li data-i18n="fileAccess.step2">粘贴到浏览器地址栏并按回车，会直接打开 htmlGenius 的扩展详情页。</li>
+      <li data-i18n="fileAccess.step3">打开“允许访问文件网址”开关。</li>
+      <li data-i18n="fileAccess.step4">回到这里并刷新页面。</li>
     </ol>
     <button id="file-access-copy" class="file-access-copy" type="button" data-i18n="fileAccess.copy">复制设置地址</button>
     <span class="file-access-note" data-i18n="fileAccess.hint">复制后，请粘贴到浏览器顶部的地址栏。</span>
@@ -234,6 +233,14 @@
           <p class="field-hint" data-i18n="compose.preserveHint">即使允许大改，也必须原样保留的内容。</p>
           <textarea id="contract-preserve" rows="3" maxlength="2000" data-i18n-placeholder="compose.preservePh" placeholder="每行一条，必须原样保留的内容"></textarea>
         </div>
+        <div class="advanced-field">
+          <label class="advanced-label" data-i18n="patch.modeLabel">精确修改的应用方式</label>
+          <p class="field-hint" data-i18n="patch.modeHint">仅对「精准修补」且已连接 Claude Code 生效；其余情况仍生成完整候选。</p>
+          <div class="patch-apply-modes">
+            <label class="patch-apply-mode"><input type="radio" name="patch-apply-mode" value="preview_confirm"><span data-i18n="patch.modePreview">先预览，确认后再应用</span></label>
+            <label class="patch-apply-mode"><input type="radio" name="patch-apply-mode" value="apply_then_review" checked><span data-i18n="patch.modeApply">直接应用，事后审阅</span></label>
+          </div>
+        </div>
       </details>
 
       <div id="contract-output-fallback" class="contract-fallback" hidden>
@@ -292,12 +299,24 @@
       <div id="contract-bridge-status" class="contract-bridge-status" hidden>
         <div class="cbs-main"><span class="cbs-text"></span><span class="cbs-timer"></span><span class="cbs-candidate" hidden><span class="cbs-version"></span><button class="cbs-open" type="button" data-i18n="candidate.openCandidate">打开候选版本</button></span><span class="cbs-chev" aria-hidden="true">▾</span></div>
         <div class="cbs-detail" hidden>
+          <div class="cbs-section-label" data-i18n="run.recent">最近 3 次</div>
+          <ul class="cbs-history"></ul>
           <div class="cbs-section-label" data-i18n="run.agentStream">Agent 实时输出</div>
           <div class="cbs-stream"></div>
           <div class="cbs-section-label" data-i18n="run.thisRun">本次进度</div>
           <ul class="cbs-progress"></ul>
-          <div class="cbs-section-label" data-i18n="run.recent">最近 3 次</div>
-          <ul class="cbs-history"></ul>
+        </div>
+      </div>
+      <!-- 方向3:确定性编辑预览(先预览后确认模式)。bridge-patch-preview 到达时显示;确认后发 bridge-patch-apply。 -->
+      <div id="patch-preview" class="patch-preview" hidden>
+        <div class="pp-head">
+          <span class="pp-title" data-i18n="patch.previewTitle">将要应用的精确修改</span>
+          <span class="pp-badge" id="patch-badge"></span>
+        </div>
+        <div class="pp-list" id="patch-edit-list"></div>
+        <div class="pp-actions">
+          <button id="patch-confirm" class="send-main" type="button" data-i18n="patch.confirm">确认应用</button>
+          <button id="patch-cancel" class="contract-copy" type="button" data-i18n="patch.cancel">取消</button>
         </div>
       </div>
     </div>
