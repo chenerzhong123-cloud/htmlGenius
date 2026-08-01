@@ -47,11 +47,17 @@ test("background patch 函数齐备:onPatchPreviewReady / handlePatchApply / pat
   assert.match(bg, /async function patchFallbackToCandidate\(/);
 });
 
-test("candidate-ready 携带 patch.applied 完整编辑(host 发出 → background 存高亮清单到 chrome.storage.local)", () => {
+test("候选页禁止私自样式变更:candidate-ready 不带 patch 清单、background 不存 hg_patch_hl、content-script 不注入变更高亮", () => {
+  // 用户铁律:任何情况下新文件都不得留下不可更改的私自样式变更;精确编辑结果应是成品文档。
+  // 故整套「改动区高亮」已移除:host 不再 emit patch 字段;background 不再写 hg_patch_hl;
+  // content-script 不再有 hg-change-hl / renderPatchHighlights / maybeRenderPatchHighlights。
   const hostRunner = fs.readFileSync(path.resolve(__dirname, "..", "host-runner.mjs"), "utf8");
-  assert.match(hostRunner, /applied: appliedFull, skipped: result\.skipped/);
-  assert.match(bg, /completion\.patch && Array\.isArray\(completion\.patch\.applied\)/);
-  assert.match(bg, /hg_patch_hl:/);
+  const cs = fs.readFileSync(path.resolve(__dirname, "..", "..", "extension", "content-script.js"), "utf8");
+  assert.ok(!/patch:\s*\{\s*applied:/.test(hostRunner), "host candidate-ready 不得再携带 patch 清单");
+  assert.ok(!/appliedFull/.test(hostRunner), "host 不得再计算 appliedFull(仅供已删除的高亮)");
+  assert.ok(!/hg_patch_hl:/.test(bg), "background 不得再写 hg_patch_hl 高亮清单");
+  assert.ok(!/hg-change-hl/.test(cs), "content-script 不得再注入 hg-change-hl 样式/overlay");
+  assert.ok(!/renderPatchHighlights|maybeRenderPatchHighlights|changeOverlayData/.test(cs), "content-script 不得残留变更高亮函数/状态");
 });
 
 test("storage getActiveBridgeRunForTab 含 awaiting_confirm(patch 预览待确认期保持 tab 锁,且不计入重启即失败对账)", () => {

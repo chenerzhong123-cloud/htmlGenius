@@ -130,7 +130,7 @@ test("copilot patch apply: sibling = source + 且仅 + 确认编辑,manifest 署
   assert.ok(fs.existsSync(candPath), "sibling 候选已发布");
   const html = fs.readFileSync(candPath, "utf8");
   assert.ok(html.includes("New Title") && html.includes("keep me") && !html.includes("CHANGED"), "仅应用确认编辑");
-  assert.equal(ready.patch.applied.length, 1);
+  assert.equal(ready.patch, undefined, "candidate-ready 不得携带 patch 清单(禁止私自样式变更)");
   const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(p), ".htmlgenius-bridge", "copilot", "hgd_test", "runs", runId, "candidate-manifest.json"), "utf8"));
   assert.equal(manifest.provider, "github_copilot");
   assert.equal(manifest.session, null, "Copilot 永不持久化 session");
