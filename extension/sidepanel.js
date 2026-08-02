@@ -1952,6 +1952,7 @@
   const loginState = document.getElementById("login-state");
   const teamSetup = document.getElementById("team-setup");
   const inviteInput = document.getElementById("invite-code-input");
+  let _sessionTeam = null; // {id, name}:当前团队(注册可见);Google 登录后置位
 
   function getCfg(keys) { return new Promise((r) => chrome.storage.sync.get(keys, r)); }
   function setCfg(obj) { return new Promise((r) => chrome.storage.sync.set(obj, r)); }
@@ -1959,7 +1960,12 @@
   // reload=true:显式登录后刷页(让 content-script 切到 RemoteStore 加载协同批注)。
   // silentReauth(侧边栏打开时静默重登)传 false —— 不刷页,否则会冲掉刚弹出的编辑确认窗。
   async function applySession(r, reload = true) {
-    await setCfg({ mode: "synced", backend: BACKEND, session_token: r.token, user: r.user });
+    // 持久化团队身份(team_id + team_name):account sheet 展示当前团队 + 为后续团队切换预留。
+    // r.teams(Google)带名字;Lark 登录无 teams → team_name 空(飞书租户名不在此呈现)。
+    const tm = (r.teams || []).find((x) => x.team_id === r.team_id);
+    const teamName = (tm && tm.name) || "";
+    _sessionTeam = r.team_id ? { id: r.team_id, name: teamName } : null;
+    await setCfg({ mode: "synced", backend: BACKEND, session_token: r.token, user: r.user, team_id: r.team_id || "", team_name: teamName });
     showLoggedIn(r.user);
     if (teamSetup) teamSetup.hidden = true;
     if (reload) {
@@ -1969,7 +1975,9 @@
   }
   function showLoggedIn(user) {
     _sessionUser = user;
-    loginState.textContent = t("state.loggedIn") + (user.name || user.id) + " ";
+    let txt = t("state.loggedIn") + (user.name || user.id) + " ";
+    if (_sessionTeam && _sessionTeam.name) txt += "· " + t("team.current") + _sessionTeam.name + " ";
+    loginState.textContent = txt;
     renderLogoutBtn();
     renderInviteBtn();
   }
@@ -2040,9 +2048,10 @@
   });
   // 新建团队
   document.getElementById("create-team-btn").addEventListener("click", async () => {
+    const teamName = ((document.getElementById("team-name-input") || {}).value || "").trim();
     loginState.textContent = t("team.creating");
     try {
-      const r = await Login.googleStart({ interactive: true, action: "create" });
+      const r = await Login.googleStart({ interactive: true, action: "create", team_name: teamName });
       if (r.token) { await applySession(r); showToast(t("team.createSuccess")); }
     } catch (e) { loginState.textContent = t("team.createFail"); }
   });
@@ -2109,11 +2118,13 @@
       if (r.token) { await applySession(r, false); return; } // 静默重登不刷页(否则冲掉编辑确认窗)
       if (r.teams && r.teams.length === 0) { loginState.textContent = t("team.needTeam"); if (teamSetup) teamSetup.hidden = false; return; }
     } catch (e) { /* 无 Google token,落到 storage 检查 */ }
-    const cfg = await getCfg(["mode", "session_token"]);
+    const cfg = await getCfg(["mode", "session_token", "team_id", "team_name"]);
     if (cfg.mode === "synced" && cfg.session_token) {
       try {
         const me = await fetch(BACKEND + "/auth/me", { headers: { Authorization: "Bearer " + cfg.session_token } }).then((r) => (r.ok ? r.json() : null));
         if (me && me.id) {
+          // 恢复持久化的团队身份,让 account sheet 继续显示当前团队。
+          _sessionTeam = (cfg.team_id || me.team_id) ? { id: cfg.team_id || me.team_id, name: cfg.team_name || "" } : null;
           showLoggedIn(me);
           return;
         }
