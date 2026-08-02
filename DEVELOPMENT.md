@@ -73,8 +73,13 @@ uv run uvicorn server.app:app --port 8000 --reload
 | `HG_AUTH_ALLOW_DEV` | 开放 `/auth/dev-login` 旁路（本地开发/测试，**生产必须 `0`**） | `"0"` |
 | `HG_SESSION_TTL` | session 有效期（秒） | `604800`（7 天） |
 | `HG_LARK_BASE` | 飞书 API 域名（国际版 Larksuite 改之） | `https://open.feishu.cn` |
+| `HG_ENV` | 环境标识;`dev`/`test`/`local` 等视为非生产(开放 dev-login、流密钥用一次性内存兜底);未设或 `production` 等一律按生产(安全默认) | 生产 |
+| `HG_STREAM_SECRET` | SSE 流票据签名密钥;**生产必填**,缺失则 `POST /api/stream/ticket` fail-closed → 503(飞书部署可用 `HG_LARK_APP_SECRET` 兼作来源) | — |
+| `HG_MAX_TEAMS_PER_USER` | 单用户可拥有的团队数上限(防团队/文档无序蔓延) | `10` |
 
 鉴权：扩展走 `chrome.identity.launchWebAuthFlow` → `/auth/lark/login` → 飞书授权 → `/auth/lark/callback` 换 session token；后续请求带 `Authorization: Bearer <session_token>`。批注 author = 飞书 `open_id`（后端 session 注入，硬身份）。批注写后经 SSE 广播 `annotation:created` / `annotation:updated` / `annotation:deleted`；作者可编辑（`PATCH /api/annotations/:id`，跨团队/非作者 403）、删除（级联子树）自己的批注。所有数据自存自管（SQLite），不用 SaaS。
+
+**团队地基（v0.9.x · scope A）**：文档/版本按 `(team_id, document_id)` 复合主键强制隔离（修跨租户 IDOR,R-1）；流密钥生产必填（R-3 fail-closed,缺失 → SSE 票据 503）；建团者=owner,可解散团队（级联删数据）/移除成员,任意成员可生邀请码;Lark 团队=飞书租户,成员由飞书后台管（治理端点仅适用 Google 自建团队）。详见本地 `docs/2026-08-02-team-foundation-design.md`。
 
 完整部署（Nginx SSE 关 buffering、HTTP/2、env 文件、manifest `host_permissions`、飞书后台重定向 URI、稳定 URL 约束、集成验收矩阵、常见坑）：详见本地 `docs/2026-07-05-v0.4-deploy.md`（含 v0.5 补充；该文档为本地工作文档，已 `.gitignore`，不入库）。
 
