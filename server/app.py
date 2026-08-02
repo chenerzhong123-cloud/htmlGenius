@@ -282,27 +282,30 @@ def create_invite(session: Session = Depends(require_session)):
 
 @app.post("/api/documents")
 def create_document(payload: DocumentCreate, session: Session = Depends(require_session)):
-    return storage.register_document(payload)
+    return storage.register_document(session.team_id, payload)
 
 
 @app.post("/api/documents/{document_id}/versions")
 def add_version(document_id: str, payload: VersionCreate, session: Session = Depends(require_session)):
     try:
-        result = storage.add_version(document_id, payload)
+        result = storage.add_version(session.team_id, document_id, payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="document not found")
-    storage.enforce_window(document_id, keep=20)  # v0.2:滚动窗口
+    storage.enforce_window(session.team_id, document_id, keep=20)  # v0.2:滚动窗口
     return result
 
 
 @app.get("/api/documents/{document_id}/versions")
 def list_versions(document_id: str, session: Session = Depends(require_session)):
-    return {"items": storage.list_versions(document_id)}
+    # 文档不在本团队 → 404(与 get/add/delete/get_html 一致:不属于你的文档不可见)
+    if storage.get_document(session.team_id, document_id) is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    return {"items": storage.list_versions(session.team_id, document_id)}
 
 
 @app.get("/api/documents/{document_id}/versions/{version}")
 def get_version_html(document_id: str, version: int, session: Session = Depends(require_session)):
-    doc_html = storage.get_version_html(document_id, version)
+    doc_html = storage.get_version_html(session.team_id, document_id, version)
     if doc_html is None:
         raise HTTPException(status_code=404, detail="version not found")
     # 存储的 HTML 来自用户/协作者,以 text/html 渲染即存储型 XSS。加严格 CSP:
@@ -322,7 +325,7 @@ def get_version_html(document_id: str, version: int, session: Session = Depends(
 @app.delete("/api/documents/{document_id}/versions/{version}")
 def delete_version(document_id: str, version: int, session: Session = Depends(require_session)):
     try:
-        deleted = storage.delete_version(document_id, version)
+        deleted = storage.delete_version(session.team_id, document_id, version)
     except ValueError:
         raise HTTPException(status_code=400, detail="cannot delete current version")
     if not deleted:
@@ -332,7 +335,7 @@ def delete_version(document_id: str, version: int, session: Session = Depends(re
 
 @app.get("/api/documents/{document_id}")
 def get_document(document_id: str, session: Session = Depends(require_session)):
-    doc = storage.get_document(document_id)
+    doc = storage.get_document(session.team_id, document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
     return doc

@@ -46,7 +46,7 @@ def _run(coro):
 
 def _init(tmp_path, monkeypatch):
     storage.init_db(tmp_path / "sse.db")
-    storage.register_document(DocumentCreate(document_id="doc_x"))
+    storage.register_document("team_a", DocumentCreate(document_id="doc_x"))
     return sessions.create_session("u1", "u1", "team_a")
 
 

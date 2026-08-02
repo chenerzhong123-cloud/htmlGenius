@@ -61,7 +61,7 @@ def _init(tmp_path, monkeypatch):
     """每个测试前清空 presence 全局表,避免相互污染。"""
     presence._USERS.clear()
     storage.init_db(tmp_path / "p.db")
-    storage.register_document(DocumentCreate(document_id="doc_x"))
+    storage.register_document("team_a", DocumentCreate(document_id="doc_x"))
 
 
 def test_join_broadcasts_presence(tmp_path, monkeypatch):
