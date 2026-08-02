@@ -6,7 +6,7 @@ R-1：文档/版本按 team_id 强制隔离（storage 层 + HTTP 层）。
 import pytest
 from fastapi.testclient import TestClient
 
-from server import auth, sessions, storage
+from server import auth, sessions, storage, teams
 from server.app import app
 from server.models import DocumentCreate, VersionCreate
 
@@ -113,3 +113,82 @@ def test_stream_ticket_endpoint_503_when_no_secret(tmp_path, monkeypatch):
     tok = sessions.create_session("u1", "u1", "team_a")
     r = client.post("/api/stream/ticket", headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 503
+
+
+# === owner 角色 + 团队治理 ===
+
+
+def test_create_team_owner_role(tmp_path):
+    _init(tmp_path)
+    tid = teams.create_team("MyT", "g_1")
+    assert teams.member_role("g_1", tid) == "owner"
+
+
+def test_redeem_invite_makes_member(tmp_path):
+    _init(tmp_path)
+    tid = teams.create_team("T", "g_1")
+    code = teams.create_invite(tid, "g_1")
+    assert teams.redeem_invite(code, "g_2") == tid
+    assert teams.member_role("g_2", tid) == "member"
+
+
+def test_remove_member_owner_only_and_not_self(tmp_path):
+    _init(tmp_path)
+    tid = teams.create_team("T", "g_owner")
+    teams.redeem_invite(teams.create_invite(tid, "g_owner"), "g_2")
+    with pytest.raises(PermissionError):  # 非 owner
+        teams.remove_member(tid, "g_owner", "g_2")
+    with pytest.raises(ValueError):  # 移除自己
+        teams.remove_member(tid, "g_owner", "g_owner")
+    teams.remove_member(tid, "g_2", "g_owner")  # owner 移除 g_2
+    assert teams.member_role("g_2", tid) is None
+
+
+def test_dissolve_owner_only_and_cascades(tmp_path):
+    _init(tmp_path)
+    tid = teams.create_team("T", "g_owner")
+    teams.redeem_invite(teams.create_invite(tid, "g_owner"), "g_2")
+    with pytest.raises(PermissionError):  # 非 owner
+        teams.dissolve_team(tid, "g_2")
+    teams.dissolve_team(tid, "g_owner")  # owner 解散
+    assert teams.member_role("g_owner", tid) is None
+    assert teams.team_members(tid) == []
+
+
+def test_team_cap(tmp_path, monkeypatch):
+    monkeypatch.setenv("HG_MAX_TEAMS_PER_USER", "2")
+    _init(tmp_path)
+    teams.create_team("T1", "g_1")
+    teams.create_team("T2", "g_1")
+    with pytest.raises(teams.TeamLimitExceeded):
+        teams.create_team("T3", "g_1")
+
+
+def test_http_team_governance(tmp_path, monkeypatch):
+    """端点层:owner 列成员/移除/解散;非 owner/非成员被拒。"""
+    _init(tmp_path)
+    monkeypatch.setenv("HG_AUTH_ALLOW_DEV", "1")
+    monkeypatch.setenv("HG_ENV", "test")
+    tid = teams.create_team("T", "g_owner")
+    teams.redeem_invite(teams.create_invite(tid, "g_owner"), "g_2")
+    owner = {"Authorization": f"Bearer {_dev_login(tid, open_id='g_owner', name='owner')}"}
+    member = {"Authorization": f"Bearer {_dev_login(tid, open_id='g_2', name='m')}"}
+    outsider = {"Authorization": f"Bearer {_dev_login('team_other', open_id='g_x', name='x')}"}
+    # owner 列成员 → 200,含 owner+member
+    r = client.get(f"/auth/teams/{tid}/members", headers=owner)
+    assert r.status_code == 200
+    assert {"g_owner", "g_2"} <= {m["sub"] for m in r.json()["items"]}
+    # 非成员列成员 → 403
+    assert client.get(f"/auth/teams/{tid}/members", headers=outsider).status_code == 403
+    # 非 owner 移除 → 403
+    assert client.delete(f"/auth/teams/{tid}/members/g_owner", headers=member).status_code == 403
+    # owner 移除 g_2 → 200
+    assert client.delete(f"/auth/teams/{tid}/members/g_2", headers=owner).status_code == 200
+    assert teams.member_role("g_2", tid) is None
+    # owner 移除自己 → 400
+    assert client.delete(f"/auth/teams/{tid}/members/g_owner", headers=owner).status_code == 400
+    # 非 owner 解散 → 403(g_2 已被移除,非成员)
+    assert client.delete(f"/auth/teams/{tid}", headers=member).status_code == 403
+    # owner 解散 → 200
+    assert client.delete(f"/auth/teams/{tid}", headers=owner).status_code == 200
+    assert teams.team_members(tid) == []

@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import os
 import secrets
 from datetime import datetime, timezone
 
@@ -29,20 +30,36 @@ def upsert_user(sub: str, email: str, name: str, picture: str) -> None:
         c.close()
 
 
+class TeamLimitExceeded(Exception):
+    """用户拥有的团队数已达 HG_MAX_TEAMS_PER_USER 上限。"""
+
+
+def _max_teams_per_user() -> int:
+    try:
+        return int(os.environ.get("HG_MAX_TEAMS_PER_USER", "10"))
+    except (TypeError, ValueError):
+        return 10
+
+
 def create_team(name: str, creator_sub: str) -> str:
-    """建 team + 创建者自动成成员。返回 team_id。"""
+    """建 team + 创建者自动成 owner。超 HG_MAX_TEAMS_PER_USER → TeamLimitExceeded。"""
     team_id = "team_" + secrets.token_hex(8)
     c = _connect()
     try:
         c.execute("BEGIN IMMEDIATE")
         try:
+            owned = c.execute(
+                "SELECT COUNT(*) AS n FROM teams WHERE created_by_sub=?", (creator_sub,)
+            ).fetchone()["n"]
+            if owned >= _max_teams_per_user():
+                raise TeamLimitExceeded(f"team limit reached: {owned}")
             c.execute(
                 "INSERT INTO teams(team_id, name, created_by_sub, created_at) VALUES(?,?,?,?)",
                 (team_id, name or "未命名团队", creator_sub, _now()),
             )
             c.execute(
-                "INSERT OR IGNORE INTO memberships(google_sub, team_id, joined_at) VALUES(?,?,?)",
-                (creator_sub, team_id, _now()),
+                "INSERT OR IGNORE INTO memberships(google_sub, team_id, joined_at, role) VALUES(?,?,?,?)",
+                (creator_sub, team_id, _now(), "owner"),
             )
             c.execute("COMMIT")
         except Exception:
@@ -89,7 +106,7 @@ def is_member(sub: str, team_id: str) -> bool:
     return r is not None
 
 
-def create_invite(team_id: str, creator_sub: str, max_uses: int = 100) -> str:
+def create_invite(team_id: str, creator_sub: str, max_uses: int = 50) -> str:
     code = "inv_" + secrets.token_hex(6)
     c = _connect()
     try:
@@ -128,6 +145,70 @@ def redeem_invite(code: str, sub: str) -> "str | None":
             c.execute("UPDATE invites SET used_count=used_count+1 WHERE code=?", (code,))
             c.execute("COMMIT")
             return r["team_id"]
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+    finally:
+        c.close()
+
+
+def member_role(sub: str, team_id: str) -> "str | None":
+    """'owner' | 'member' | None(非成员)。Lark 团队无 membership 行 → None。"""
+    c = _connect()
+    try:
+        r = c.execute(
+            "SELECT role FROM memberships WHERE google_sub=? AND team_id=?", (sub, team_id)
+        ).fetchone()
+    finally:
+        c.close()
+    return r["role"] if r else None
+
+
+def team_members(team_id: str) -> "list[dict]":
+    """团队成员(JOIN users 取名;owner 在前)。Lark 团队无 membership 行 → 返空。"""
+    c = _connect()
+    try:
+        rows = c.execute(
+            "SELECT m.google_sub AS sub, u.name AS name, m.role AS role "
+            "FROM memberships m LEFT JOIN users u ON m.google_sub=u.google_sub "
+            "WHERE m.team_id=? ORDER BY m.role DESC, m.joined_at",
+            (team_id,),
+        ).fetchall()
+    finally:
+        c.close()
+    return [{"sub": r["sub"], "name": r["name"], "role": r["role"]} for r in rows]
+
+
+def remove_member(team_id: str, target_sub: str, actor_sub: str) -> None:
+    """owner 移除成员。actor 非 owner → PermissionError;移除自己 → ValueError(改用解散)。"""
+    if actor_sub == target_sub:
+        raise ValueError("cannot remove self; dissolve the team instead")
+    if member_role(actor_sub, team_id) != "owner":
+        raise PermissionError("only owner can remove members")
+    c = _connect()
+    try:
+        c.execute(
+            "DELETE FROM memberships WHERE google_sub=? AND team_id=?", (target_sub, team_id)
+        )
+    finally:
+        c.close()
+
+
+def dissolve_team(team_id: str, actor_sub: str) -> None:
+    """owner 解散团队:单事务级联删 annotations/versions/documents/invites/memberships/teams。"""
+    if member_role(actor_sub, team_id) != "owner":
+        raise PermissionError("only owner can dissolve")
+    c = _connect()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            c.execute("DELETE FROM annotations WHERE team_id=?", (team_id,))
+            c.execute("DELETE FROM versions WHERE team_id=?", (team_id,))
+            c.execute("DELETE FROM documents WHERE team_id=?", (team_id,))
+            c.execute("DELETE FROM invites WHERE team_id=?", (team_id,))
+            c.execute("DELETE FROM memberships WHERE team_id=?", (team_id,))
+            c.execute("DELETE FROM teams WHERE team_id=?", (team_id,))
+            c.execute("COMMIT")
         except Exception:
             c.execute("ROLLBACK")
             raise

@@ -242,7 +242,10 @@ def auth_google(payload: GoogleIn):
         if not teams.redeem_invite(payload.code, info["sub"]):
             raise HTTPException(status_code=400, detail="invalid or expired code")
     elif payload.action == "create":
-        teams.create_team(payload.team_name or "", info["sub"])
+        try:
+            teams.create_team(payload.team_name or "", info["sub"])
+        except teams.TeamLimitExceeded as e:
+            raise HTTPException(status_code=409, detail=str(e))
     return {
         "sub": info["sub"],
         "email": info["email"],
@@ -275,6 +278,39 @@ def create_invite(session: Session = Depends(require_session)):
     """当前 session 的 team 生成邀请码(任意成员可生)。"""
     code = teams.create_invite(session.team_id, session.open_id)
     return {"code": code, "team_id": session.team_id, "join_url": f"/htmlgenius/join?code={code}"}
+
+
+# === 团队治理(owner 守卫;仅适用 Google 自建团队,Lark 团队无 membership 行) ===
+
+
+@app.get("/auth/teams/{team_id}/members")
+def list_team_members(team_id: str, session: Session = Depends(require_session)):
+    """列团队成员(任意成员可查;非成员 → 403)。"""
+    if teams.member_role(session.open_id, team_id) is None:
+        raise HTTPException(status_code=403, detail="not a member")
+    return {"items": teams.team_members(team_id)}
+
+
+@app.delete("/auth/teams/{team_id}/members/{sub}")
+def remove_team_member(team_id: str, sub: str, session: Session = Depends(require_session)):
+    """owner 移除成员;非 owner → 403;移除自己 → 400(改用解散)。"""
+    try:
+        teams.remove_member(team_id, sub, session.open_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can remove members")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.delete("/auth/teams/{team_id}")
+def dissolve_team(team_id: str, session: Session = Depends(require_session)):
+    """owner 解散团队(级联删团队全部数据);非 owner → 403。"""
+    try:
+        teams.dissolve_team(team_id, session.open_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can dissolve")
+    return {"ok": True}
 
 
 # === 文档 / 版本 (BE-2:全部需 session 鉴权;HTML 响应加严格 CSP 防存储型 XSS) ===
