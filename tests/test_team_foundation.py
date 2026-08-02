@@ -6,7 +6,7 @@ R-1：文档/版本按 team_id 强制隔离（storage 层 + HTTP 层）。
 import pytest
 from fastapi.testclient import TestClient
 
-from server import storage
+from server import auth, sessions, storage
 from server.app import app
 from server.models import DocumentCreate, VersionCreate
 
@@ -77,3 +77,39 @@ def test_http_team_document_isolation(tmp_path, monkeypatch):
         == 404
     )
     assert client.delete("/api/documents/d/versions/1", headers=hb).status_code == 404
+
+
+# === R-3：流密钥 fail-closed ===
+
+
+def test_stream_secret_fail_closed_in_prod(monkeypatch):
+    """生产环境无 HG_STREAM_SECRET/HG_LARK_APP_SECRET → _stream_secret 抛错(fail-closed)。"""
+    monkeypatch.delenv("HG_STREAM_SECRET", raising=False)
+    monkeypatch.delenv("HG_LARK_APP_SECRET", raising=False)
+    monkeypatch.setenv("HG_ENV", "production")
+    with pytest.raises(RuntimeError):
+        auth._stream_secret()
+
+
+def test_stream_secret_dev_fallback_ok(monkeypatch):
+    """dev/test 环境无密钥 → 用一次性内存密钥(不抛)。"""
+    monkeypatch.delenv("HG_STREAM_SECRET", raising=False)
+    monkeypatch.delenv("HG_LARK_APP_SECRET", raising=False)
+    monkeypatch.setenv("HG_ENV", "test")
+    assert isinstance(auth._stream_secret(), bytes)
+
+
+def test_stream_ticket_endpoint_503_when_no_secret(tmp_path, monkeypatch):
+    """生产无密钥 → POST /api/stream/ticket → 503(fail-closed),不回退公开常量。
+
+    注意:这里要 HG_ENV=production 才能触发 fail-closed,而 dev-login 又要求 dev/test
+    环境 —— 二者冲突。故用 sessions.create_session 直接造 token(不依赖 dev-login、不受
+    HG_ENV 限制),再以生产 + 无密钥调端点。
+    """
+    _init(tmp_path)
+    monkeypatch.setenv("HG_ENV", "production")
+    monkeypatch.delenv("HG_STREAM_SECRET", raising=False)
+    monkeypatch.delenv("HG_LARK_APP_SECRET", raising=False)
+    tok = sessions.create_session("u1", "u1", "team_a")
+    r = client.post("/api/stream/ticket", headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 503

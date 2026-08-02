@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import google, lark, sessions, storage, teams
+from .envutil import is_dev_env
 from .auth import (
     Session,
     consume_state,
@@ -29,13 +30,7 @@ from .sse import rooms, TooManyConnections
 BASE = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("HTMLEDITOR_DB", BASE / "annotations.db"))
 
-# BE-3 / BE-7: 环境判定。HG_ENV∈{dev,development,test,testing,local} 视为非生产;
-# 未设或其它值(production/prod/staging/…)一律按生产处理 —— 安全默认。
-_DEV_LOGIN_ENVS = {"dev", "development", "test", "testing", "local"}
-
-
-def _is_dev_env() -> bool:
-    return os.environ.get("HG_ENV", "").strip().lower() in _DEV_LOGIN_ENVS
+# BE-3 / BE-7: 环境判定统一在 envutil.is_dev_env(app/auth 共用,避免循环 import)。
 
 
 # BE-9: 显式 CORS origin 列表替代 allow_origins=["*"]。默认放:
@@ -58,11 +53,19 @@ def _cors_origins() -> list[str]:
 # BE-7: 生产(HG_ENV 非 dev)关闭 /docs /redoc /openapi.json,并改用不泄露内部代号的 title。
 app = FastAPI(
     title="htmlGenius API",
-    docs_url="/docs" if _is_dev_env() else None,
-    redoc_url="/redoc" if _is_dev_env() else None,
-    openapi_url="/openapi.json" if _is_dev_env() else None,
+    docs_url="/docs" if is_dev_env() else None,
+    redoc_url="/redoc" if is_dev_env() else None,
+    openapi_url="/openapi.json" if is_dev_env() else None,
 )
 storage.init_db(DB_PATH)
+# R-3:生产环境若未配流密钥,显式告警(SSE 票据将 fail-closed 拒签 → POST /api/stream/ticket 503)。
+if not is_dev_env() and not (
+    os.environ.get("HG_STREAM_SECRET") or os.environ.get("HG_LARK_APP_SECRET")
+):
+    print(
+        "[startup] WARN HG_STREAM_SECRET 未配置:生产 SSE 票据将 fail-closed(POST /api/stream/ticket → 503)",
+        flush=True,
+    )
 
 # CORS:content-script 从任意页面(如 open.feishu.cn)跨域调后端,
 # 需 CORS 头 + OPTIONS 预检。扩展后端标准做法(session_token 做鉴权,CORS 只控可达)。
@@ -184,7 +187,7 @@ def auth_logout(
 def _dev_login_enabled() -> bool:
     if os.environ.get("HG_AUTH_ALLOW_DEV") != "1":
         return False
-    return _is_dev_env()
+    return is_dev_env()
 
 
 @app.post("/auth/dev-login")
@@ -429,7 +432,12 @@ def stream_ticket(session: Session = Depends(require_session)):
     EventSource 不能设自定义头 → 旧方案把长期 session token 拼进 ?token= 落日志即泄漏。
     改由本端点(需 Bearer 鉴权)换一张短时效票据,SSE 用 ?ticket= 连接,token 不再进 URL。
     """
-    return {"ticket": issue_stream_ticket(session.team_id), "ttl": _STREAM_TICKET_TTL}
+    try:
+        ticket = issue_stream_ticket(session.team_id)
+    except RuntimeError:
+        # R-3 fail-closed:生产未配 HG_STREAM_SECRET → 拒签(503),不回退公开常量。
+        raise HTTPException(status_code=503, detail="stream secret not configured")
+    return {"ticket": ticket, "ttl": _STREAM_TICKET_TTL}
 
 
 @app.get("/api/stream")

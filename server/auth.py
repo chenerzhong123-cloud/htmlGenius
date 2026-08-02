@@ -20,6 +20,7 @@ from fastapi import Header, HTTPException, Query
 from pydantic import BaseModel
 
 from . import sessions
+from .envutil import is_dev_env
 
 
 class Session(BaseModel):
@@ -89,12 +90,18 @@ def consume_state(state: str) -> bool:
 _STREAM_TICKET_TTL = int(os.environ.get("HG_STREAM_TICKET_TTL", "60"))
 
 
+# 进程级一次性密钥:仅 dev 兜底;进程重启即失效 → 旧票据全失效(明确不安全)。
+_DEV_STREAM_SECRET = os.urandom(32)
+
+
 def _stream_secret() -> bytes:
-    return (
-        os.environ.get("HG_STREAM_SECRET")
-        or os.environ.get("HG_LARK_APP_SECRET")
-        or "dev-insecure-stream-secret"
-    ).encode()
+    """流票据签名密钥。生产无 HG_STREAM_SECRET → fail-closed 抛错(R-3);dev → 一次性内存密钥。"""
+    secret = os.environ.get("HG_STREAM_SECRET") or os.environ.get("HG_LARK_APP_SECRET")
+    if secret:
+        return secret.encode()
+    if is_dev_env():
+        return _DEV_STREAM_SECRET
+    raise RuntimeError("HG_STREAM_SECRET not configured: refusing stream ticket (fail-closed)")
 
 
 def issue_stream_ticket(team_id: str, ttl: "int | None" = None) -> str:
