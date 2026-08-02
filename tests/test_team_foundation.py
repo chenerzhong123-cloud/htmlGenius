@@ -192,3 +192,62 @@ def test_http_team_governance(tmp_path, monkeypatch):
     # owner 解散 → 200
     assert client.delete(f"/auth/teams/{tid}", headers=owner).status_code == 200
     assert teams.team_members(tid) == []
+
+
+# === e2e：注册 → 邀请 → 加入 → 协作 ===
+
+
+def _mock_google(sub, name, monkeypatch):
+    monkeypatch.setattr(
+        "server.google.verify",
+        lambda it: {"sub": sub, "email": sub + "@x.com", "name": name, "picture": ""},
+    )
+
+
+def test_e2e_register_invite_comment(tmp_path, monkeypatch):
+    """建团(带名)→邀请→加入→各自 session→发文档+评论→队友 list 可见;跨团队隔离。"""
+    _init(tmp_path)
+    # Alice 建团(带团队名)
+    _mock_google("g_alice", "Alice", monkeypatch)
+    j = client.post(
+        "/auth/google", json={"id_token": "t", "action": "create", "team_name": "设计组"}
+    ).json()
+    assert len(j["teams"]) == 1 and j["teams"][0]["name"] == "设计组"
+    tid = j["teams"][0]["team_id"]
+    Ha = {
+        "Authorization": f"Bearer {client.post('/auth/google/session', json={'id_token': 't', 'team_id': tid}).json()['token']}"
+    }
+    # Alice 生成邀请码(任意成员可生)
+    code = client.post("/auth/invites", headers=Ha).json()["code"]
+    # Bob 凭码加入
+    _mock_google("g_bob", "Bob", monkeypatch)
+    jb = client.post(
+        "/auth/google", json={"id_token": "t2", "action": "join", "code": code}
+    ).json()
+    assert any(t["team_id"] == tid for t in jb["teams"])
+    Hb = {
+        "Authorization": f"Bearer {client.post('/auth/google/session', json={'id_token': 't2', 'team_id': tid}).json()['token']}"
+    }
+    # Alice 注册文档 + 发评论
+    assert client.post("/api/documents", json={"document_id": "d", "title": "D"}, headers=Ha).status_code == 200
+    ann = client.post(
+        "/api/annotations",
+        json={
+            "document_id": "d",
+            "selector": {"type": "TextQuoteSelector", "exact": "hi"},
+            "quote": "hi",
+        },
+        headers=Ha,
+    ).json()
+    # Bob(同团队)能看到 Alice 的评论
+    items = client.get("/api/annotations?document_id=d", headers=Hb).json()["items"]
+    assert any(a["id"] == ann["id"] for a in items)
+    # 跨团队:Carol 自建另一团队,看不到 d 的评论
+    _mock_google("g_carol", "Carol", monkeypatch)
+    jc = client.post(
+        "/auth/google", json={"id_token": "t3", "action": "create", "team_name": "C"}
+    ).json()
+    Hc = {
+        "Authorization": f"Bearer {client.post('/auth/google/session', json={'id_token': 't3', 'team_id': jc['teams'][0]['team_id']}).json()['token']}"
+    }
+    assert client.get("/api/annotations?document_id=d", headers=Hc).json()["items"] == []
