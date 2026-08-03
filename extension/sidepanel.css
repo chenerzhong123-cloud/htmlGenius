@@ -118,8 +118,8 @@ body {
   border-bottom: 1px solid var(--line-subtle);
 }
 .header-actions { display: flex; align-items: center; gap: 4px; }
-/* v0.9.8:账号/登录入口暂时隐藏(功能未完善,代码保留,后续完善后再展示)*/
-#avatar { display: none !important; }
+/* 账号/团队入口:0.9.8 曾因功能未完善隐藏(代码保留);团队协作地基(team foundation:R-1 隔离 / R-3 fail-closed / owner 治理)上线后恢复显示。*/
+#avatar { display: inline-flex; }
 
 /* ghost 图标按钮(主题 / 头像 / 语言 / 反馈 / 官网) */
 .theme-btn, .avatar, .lang-btn, .feedback-btn, .website-btn {
