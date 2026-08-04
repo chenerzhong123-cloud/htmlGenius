@@ -118,8 +118,8 @@ body {
   border-bottom: 1px solid var(--line-subtle);
 }
 .header-actions { display: flex; align-items: center; gap: 4px; }
-/* 账号/团队入口:团队协作功能尚未对外发布,0.9.15 起再次隐藏(代码保留、休眠);团队功能就绪后恢复显示。*/
-#avatar { display: none !important; }
+/* 账号/团队入口:feat/team-collab 分支恢复显示(继续完善团队功能;合并发版时保持可见)。*/
+#avatar { display: inline-flex; }
 
 /* ghost 图标按钮(主题 / 头像 / 语言 / 反馈 / 官网) */
 .theme-btn, .avatar, .lang-btn, .feedback-btn, .website-btn {
