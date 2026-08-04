@@ -12,6 +12,8 @@ from .storage import _connect, _now
 
 _DEFAULT_TTL = int(os.environ.get("HG_SESSION_TTL", "604800"))  # 7 天
 _RENEW_THRESHOLD = 86400  # 滑动续期:剩余不足 1 天则续
+# BE-11:session 绝对寿命上限(从创建起算,即便持续活跃也强制重登)。默认 30 天。
+_ABSOLUTE_TTL = int(os.environ.get("HG_SESSION_ABSOLUTE_TTL", str(30 * 86400)))
 
 
 def _expir(ttl: int) -> str:
@@ -36,14 +38,17 @@ def get_session(token: str) -> "dict[str, str] | None":
     c = _connect()
     try:
         r = c.execute(
-            "SELECT open_id, name, team_id, expires_at FROM sessions WHERE token=?", (token,)
+            "SELECT open_id, name, team_id, created_at, expires_at FROM sessions WHERE token=?", (token,)
         ).fetchone()
     finally:
         c.close()
     if r is None:
         return None
-    exp = datetime.fromisoformat(r["expires_at"])
-    if datetime.now(timezone.utc) > exp:
+    now = datetime.now(timezone.utc)
+    if now > datetime.fromisoformat(r["expires_at"]):
+        return None
+    # BE-11:绝对寿命 —— 超过创建后 _ABSOLUTE_TTL 即失效(强制重登),即便滑动续期也不绕过。
+    if (now - datetime.fromisoformat(r["created_at"])).total_seconds() > _ABSOLUTE_TTL:
         return None
     return {"open_id": r["open_id"], "name": r["name"], "team_id": r["team_id"]}
 
@@ -56,7 +61,7 @@ def touch_session(token: str) -> "dict[str, str] | None":
     c = _connect()
     try:
         r = c.execute(
-            "SELECT open_id, name, team_id, expires_at FROM sessions WHERE token=?", (token,)
+            "SELECT open_id, name, team_id, created_at, expires_at FROM sessions WHERE token=?", (token,)
         ).fetchone()
         if r is None:
             return None
@@ -64,8 +69,14 @@ def touch_session(token: str) -> "dict[str, str] | None":
         now = datetime.now(timezone.utc)
         if now > exp:
             return None
+        created = datetime.fromisoformat(r["created_at"])
+        # BE-11:绝对寿命到 → 失效,不再续。
+        if (now - created).total_seconds() > _ABSOLUTE_TTL:
+            return None
         if (exp - now).total_seconds() < _RENEW_THRESHOLD:
-            c.execute("UPDATE sessions SET expires_at=? WHERE token=?", (_expir(_DEFAULT_TTL), token))
+            # 滑动续期,但 expires_at 不超过创建后 _ABSOLUTE_TTL(绝对寿命硬顶)。
+            remaining_abs = _ABSOLUTE_TTL - (now - created).total_seconds()
+            c.execute("UPDATE sessions SET expires_at=? WHERE token=?", (_expir(min(_DEFAULT_TTL, max(0, remaining_abs))), token))
         return {"open_id": r["open_id"], "name": r["name"], "team_id": r["team_id"]}
     finally:
         c.close()
