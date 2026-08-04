@@ -273,6 +273,30 @@ def auth_google_session(payload: GoogleSessionIn):
     }
 
 
+class SwitchTeamIn(BaseModel):
+    team_id: str
+
+
+@app.post("/auth/switch-team")
+def switch_team(payload: SwitchTeamIn, session: Session = Depends(require_session)):
+    """已登录用户切换当前活跃团队(须是该团队成员)→ 发该团队的新 session。
+    用现有 session 证明身份,无需重新跑 Google OAuth(下拉切换更轻)。"""
+    if not teams.is_member(session.open_id, payload.team_id):
+        raise HTTPException(status_code=403, detail="not a member of this team")
+    team_name = ""
+    for tm in teams.user_teams(session.open_id):
+        if tm["team_id"] == payload.team_id:
+            team_name = tm["name"]
+            break
+    token = sessions.create_session(session.open_id, session.name, payload.team_id)
+    return {
+        "token": token,
+        "team_id": payload.team_id,
+        "team_name": team_name,
+        "user": {"id": session.open_id, "name": session.name},
+    }
+
+
 @app.post("/auth/invites")
 def create_invite(session: Session = Depends(require_session)):
     """当前 session 的 team 生成邀请码(任意成员可生)。"""

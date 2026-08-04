@@ -208,6 +208,30 @@ def test_add_member_by_email_owner_only_and_idempotent(tmp_path):
     assert r.status_code == 400
 
 
+def test_switch_team_session_based(tmp_path):
+    """已登录用户切换活跃团队(须成员)→ 该团队新 session;切到非成员团队 → 403。"""
+    _init(tmp_path)
+    t1 = teams.create_team("T1", "g_u")
+    t2 = teams.create_team("T2", "g_other")
+    teams.redeem_invite(teams.create_invite(t2, "g_other"), "g_u")  # g_u ∈ T2
+    t3 = teams.create_team("T3", "g_x")  # g_u 不在 T3
+    tok1 = sessions.create_session("g_u", "U", t1)
+    H = {"Authorization": f"Bearer {tok1}"}
+
+    # 切到自己是成员的 T2 → 200,新 token,team=t2,name=T2
+    r = client.post("/auth/switch-team", json={"team_id": t2}, headers=H)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["team_id"] == t2
+    assert body["team_name"] == "T2"
+    assert body["token"] != tok1
+
+    # 用新 token 切到非成员团队 T3 → 403
+    r2 = client.post("/auth/switch-team", json={"team_id": t3},
+                     headers={"Authorization": f"Bearer {body['token']}"})
+    assert r2.status_code == 403
+
+
 def test_http_team_governance(tmp_path, monkeypatch):
     """端点层:owner 列成员/移除/解散;非 owner/非成员被拒。"""
     _init(tmp_path)
