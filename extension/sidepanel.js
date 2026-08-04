@@ -1209,6 +1209,15 @@
     return true;
   }
   // §5.2 状态矩阵 → 由纯函数 ConnectionCenterState.connStateFor 驱动(v0.9.1 §9.1,可 node:test 验证)
+  // 语义版本比较(a<b→负,==0,>正);只比数字段。
+  function _cmpVer(a, b) {
+    const pa = String(a || "").split("."), pb = String(b || "").split(".");
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const x = parseInt(pa[i] || "0", 10), y = parseInt(pb[i] || "0", 10);
+      if (x !== y) return x - y;
+    }
+    return 0;
+  }
   function renderConnCenter() {
     if (!connCenter) return;
     if (!_contractOpen) { connCenter.hidden = true; return; }
@@ -1233,6 +1242,14 @@
     let hint = st.permanentHintKey ? t(st.permanentHintKey) : "";
     if (hint && st.devOnly) hint += " " + t("conn.devOnly");
     connSetPermanent(hint);
+    // Bridge 升级提醒:host bridge 版本 < 目标版本(TARGET_BRIDGE_VERSION,经 _bootstrap.bridge_version 传回)
+    // → 常驻提示 + 露出"复制 Terminal 命令"让用户升级(已连接态)。未连接态由 install_required 分支覆盖。
+    const _hostVer = (_health && _health.bridge && _health.bridge.version) || null;
+    const _targetVer = (_bootstrap && _bootstrap.bridge_version) || null;
+    if (_hostVer && _targetVer && _cmpVer(_hostVer, _targetVer) < 0) {
+      connSetPermanent(t("conn.bridgeUpdate").replace("{v}", _targetVer));
+      setConnButton(connSecondary, t("conn.copyTerminal"), "terminal");
+    }
   }
   async function connDo(action, btn) {
     if (!action) return;
