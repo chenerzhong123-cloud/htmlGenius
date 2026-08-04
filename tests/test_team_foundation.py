@@ -164,6 +164,50 @@ def test_team_cap(tmp_path, monkeypatch):
         teams.create_team("T3", "g_1")
 
 
+# === owner 按邮箱加人（档3 增量）===
+
+
+def test_add_member_by_email_owner_only_and_idempotent(tmp_path):
+    """owner 按邮箱加已注册用户 → 入团(幂等,大小写不敏感);非 owner → 403;未注册 → 404;加自己 → 400。"""
+    _init(tmp_path)
+    tid = teams.create_team("T", "g_owner")
+    teams.upsert_user("g_owner", "owner@example.com", "Owner", "")
+    teams.upsert_user("g_target", "target@example.com", "Target", "")
+    teams.upsert_user("g_member", "member@example.com", "Member", "")
+    teams.redeem_invite(teams.create_invite(tid, "g_owner"), "g_member")  # g_member = 普通成员
+    owner_tok = sessions.create_session("g_owner", "Owner", tid)
+    member_tok = sessions.create_session("g_member", "Member", tid)
+    H = lambda t: {"Authorization": f"Bearer {t}"}
+
+    # 非 owner → 403
+    r = client.post(f"/auth/teams/{tid}/members/by-email",
+                    json={"email": "target@example.com"}, headers=H(member_tok))
+    assert r.status_code == 403
+
+    # owner 加未注册邮箱 → 404
+    r = client.post(f"/auth/teams/{tid}/members/by-email",
+                    json={"email": "nobody@example.com"}, headers=H(owner_tok))
+    assert r.status_code == 404
+
+    # owner 加已注册用户(大小写不敏感)→ 200 + 入团
+    r = client.post(f"/auth/teams/{tid}/members/by-email",
+                    json={"email": "TARGET@example.com"}, headers=H(owner_tok))
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Target"
+    assert teams.is_member("g_target", tid)
+
+    # 幂等:再加一次仍 200,成员不重复
+    r2 = client.post(f"/auth/teams/{tid}/members/by-email",
+                     json={"email": "target@example.com"}, headers=H(owner_tok))
+    assert r2.status_code == 200
+    assert sum(1 for m in teams.team_members(tid) if m["sub"] == "g_target") == 1
+
+    # owner 加自己 → 400
+    r = client.post(f"/auth/teams/{tid}/members/by-email",
+                    json={"email": "owner@example.com"}, headers=H(owner_tok))
+    assert r.status_code == 400
+
+
 def test_http_team_governance(tmp_path, monkeypatch):
     """端点层:owner 列成员/移除/解散;非 owner/非成员被拒。"""
     _init(tmp_path)
