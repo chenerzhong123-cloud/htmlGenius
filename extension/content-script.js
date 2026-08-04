@@ -13,10 +13,10 @@
   // cfg 读取异步;协同模式下保存批注需等 _cfg.session_token 就绪(RemoteStore 用它做 Authorization)。
   const cfgReady = new Promise((resolve) => {
     if (chrome.storage && chrome.storage.sync) {
-      chrome.storage.sync.get(
-        ["mode", "backend", "session_token", "user", "team_id"],
-        (c) => {
-          _cfg = Object.assign({}, _cfg, c || {});
+      // SUP-5:session_token 在 storage.local(每设备独立),其余在 sync。
+      chrome.storage.sync.get(["mode", "backend", "user", "team_id"], (c) => {
+        chrome.storage.local.get(["session_token"], (l) => {
+          _cfg = Object.assign({}, _cfg, c || {}, l || {});
           console.log("[hg] cfg:", JSON.stringify({mode:_cfg.mode, backend:_cfg.backend, hasToken:!!_cfg.session_token, hasUser:!!_cfg.user}));
           if (_cfg.mode === "synced") {
             Storage.configure(_cfg); // 切到 RemoteStore
@@ -26,8 +26,8 @@
             console.log("[hg] staying LocalStore(本地)—— storage 里 mode 不是 synced");
           }
           resolve(_cfg);
-        }
-      );
+        });
+      });
     } else {
       resolve(_cfg);
     }

@@ -1954,8 +1954,31 @@
   let _sessionTeam = null; // {id, name}:当前团队(注册可见);Google 登录后置位
   let _sessionTeams = []; // 用户全部团队(下拉切换用);Google 登录 / /auth/me 回填
 
-  function getCfg(keys) { return new Promise((r) => chrome.storage.sync.get(keys, r)); }
-  function setCfg(obj) { return new Promise((r) => chrome.storage.sync.set(obj, r)); }
+  // SUP-5:session_token 走 storage.local(每设备独立,不随 Chrome sync 跨设备外泄);
+  // 其余配置(mode/backend/user/team_id/team_name)仍在 sync。getCfg/setCfg 透明拆分。
+  function getCfg(keys) {
+    return new Promise((r) => {
+      const wantToken = keys.includes("session_token");
+      const syncKeys = keys.filter((k) => k !== "session_token");
+      const out = {};
+      let pending = (syncKeys.length ? 1 : 0) + (wantToken ? 1 : 0);
+      if (pending === 0) return r(out);
+      if (syncKeys.length) chrome.storage.sync.get(syncKeys, (s) => { Object.assign(out, s); if (--pending === 0) r(out); });
+      if (wantToken) chrome.storage.local.get(["session_token"], (l) => { Object.assign(out, l); if (--pending === 0) r(out); });
+    });
+  }
+  function setCfg(obj) {
+    return new Promise((r) => {
+      if (obj && "session_token" in obj) {
+        const rest = Object.assign({}, obj); const tok = rest.session_token; delete rest.session_token;
+        let pending = 1 + (Object.keys(rest).length ? 1 : 0);
+        chrome.storage.local.set({ session_token: tok }, () => { if (--pending === 0) r(); });
+        if (Object.keys(rest).length) chrome.storage.sync.set(rest, () => { if (--pending === 0) r(); });
+      } else {
+        chrome.storage.sync.set(obj || {}, r);
+      }
+    });
+  }
 
   // reload=true:显式登录后刷页(让 content-script 切到 RemoteStore 加载协同批注)。
   // silentReauth(侧边栏打开时静默重登)传 false —— 不刷页,否则会冲掉刚弹出的编辑确认窗。
@@ -2107,7 +2130,11 @@
     if (cfg.session_token) {
       try { await fetch(BACKEND + "/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + cfg.session_token } }); } catch (e) { /* 忽略 */ }
     }
-    await new Promise((r) => chrome.storage.sync.remove(["session_token", "user", "mode"], r));
+    await new Promise((r) => {
+      let p = 2; const done = () => { if (--p === 0) r(); };
+      chrome.storage.local.remove(["session_token"], done); // SUP-5:token 在 local
+      chrome.storage.sync.remove(["user", "mode"], done);
+    });
     _sessionUser = null;
     _sessionTeam = null; _sessionTeams = [];
     loginState.textContent = t("state.loggedOut");
