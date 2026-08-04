@@ -6,11 +6,18 @@ import threading
 from urllib.parse import urlencode
 
 import httpx
+import pytest
 
 from server.app import app
 from server import auth, sessions, storage
 from server.models import DocumentCreate
 from server.sse import rooms
+
+
+@pytest.fixture(autouse=True)
+def _stream_secret_for_tests(monkeypatch):
+    """R-3 后 _stream_secret fail-closed:本文件测试统一注入密钥,避免无密钥抛错。"""
+    monkeypatch.setenv("HG_STREAM_SECRET", "sse_test_secret")
 
 
 def _run(coro):
@@ -46,7 +53,7 @@ def _run(coro):
 
 def _init(tmp_path, monkeypatch):
     storage.init_db(tmp_path / "sse.db")
-    storage.register_document(DocumentCreate(document_id="doc_x"))
+    storage.register_document("team_a", DocumentCreate(document_id="doc_x"))
     return sessions.create_session("u1", "u1", "team_a")
 
 

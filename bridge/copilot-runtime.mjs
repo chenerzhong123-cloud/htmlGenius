@@ -44,8 +44,11 @@ export const MAX_ERROR_MSG_LEN = 400;
 // 真实工具名经 SDK fixture / copilot-cli changelog 核实:文件类 = view/edit/write/grep/glob;
 // 危险类 = bash/read_bash/write_bash/shell/web_fetch/task/read_agent/... (见 DENIED_BUILTIN_TOOLS)。
 // 读工具允许读 workspace 内任意文件(source.html / task bundle / approved-plan.md)。
+// "read" 是 copilot-sdk/CLI 真实的主读取工具名(核实 @github/copilot-sdk dist);
+// 早期列表只放了 "read_file",模型实际调 "read" 读 source.html 时被 onPreToolUse 判
+// tool_not_allowed 拒绝 → 读不到源、产不出 candidate → PERMISSION_DENIED(见 copilot-adapter)。
 export const READ_TOOLS = Object.freeze([
-  "view", "read_file", "read_many_files", "list_directory", "list_dir",
+  "read", "view", "read_file", "read_many_files", "list_directory", "list_dir",
   "grep", "grep_search", "glob", "find_files", "search_files"
 ]);
 // 写工具:路径必须精确等于本次 run 允许的输出文件(由 adapter 指定)。

@@ -1,15 +1,27 @@
-# 发布 @htmlgenius/bridge 到 npm,并带 provenance(来源证明)——消除新包安装时的供应链风险提示。
+# 发布 @htmlgenius/bridge 到 npm —— Trusted Publishing(GitHub OIDC)。
 #
-# 用法:
-#   1. 在 npmjs.com 生成一个 Automation 类型的 access token,加到本仓库
-#      Settings → Secrets and variables → Actions,命名 NPM_TOKEN。
-#   2. 发布时打 tag 并推送:
-#        git tag bridge-v0.9.2 && git push origin bridge-v0.9.2
-#      本 workflow 即在 CI 里 npm ci → 跑测试 → npm publish --provenance --access public。
+# 机制:npm 与 GitHub 建立 OIDC 信任,CI 发布时用「短期、工作流专属、签名」的 token 鉴权,
+#       **不需要任何长效 npm token,也不需要 OTP**。provenance(来源证明)随 trusted publishing
+#       自动生成,无需 --provenance 标志。
 #
-# provenance 原理:permissions 里的 id-token: write 让 npm 通过 GitHub OIDC  attest
-# “这个包是从这个公开仓库的这个 commit 构建的”,npm 页面会显示来源徽章,
-# 支持校验的工具/Agent 因此放行。仍需 NPM_TOKEN 做发布鉴权(OIDC 只负责来源证明)。
+# 2026-08-04 迁移原因:npm 废弃 bypass token(Automation/Granular)用于 direct publishing →
+#   旧「NPM_TOKEN secret + npm publish」在 CI 里开始被拦(E404/EOTP)。Trusted Publishing 是官方迁移路径。
+#
+# ┌─ 一次性前置(用户在 npmjs.com 做,见下方)─────────────────────────────────┐
+# │ npmjs.com → @htmlgenius/bridge → Settings → Trusted Publisher → GitHub Actions │
+# │   Organization or user : chenerzhong123-cloud                                  │
+# │   Repository           : htmlGenius                                             │
+# │   Workflow filename    : publish-bridge.yml   ← 必须与本文件名完全一致(含 .yml) │
+# │   Environment name     : (留空,不用 GitHub environment)                        │
+# │ npm 不在保存时校验,错误只在发布时暴露 —— 填写务必精确(大小写敏感)。           │
+# └───────────────────────────────────────────────────────────────────────────────┘
+#
+# 用法(发布):改 bridge/package.json 版本 + 同步引用 → commit → push 分支 →
+#             git tag bridge-v<ver> && git push origin bridge-v<ver>
+#             本 workflow 即在 CI:npm ci → npm test → npm publish(OIDC 鉴权)。
+#
+# 要求:npm CLI ≥ 11.5.1、Node ≥ 22.14(下面显式升 npm;Node 22 最新已满足)。
+#      macOS runner 是 GitHub-hosted(trusted publishing 要求非 self-hosted),同时满足 bridge 测试的 macOS 依赖。
 name: publish-bridge
 
 on:
@@ -20,11 +32,12 @@ on:
 jobs:
   publish:
     # 产品仅支持 macOS,测试套件大量依赖 macOS 平台(宿主目录/平台预检/Copilot CLI 目录),
-    # 在 Linux runner 上会有十余项失败 → 用 macos-latest 与本地一致。
+    # 在 Linux runner 上会有十余项失败 → 用 macos-latest 与本地一致。macos-latest 仍是 GitHub-hosted,
+    # 满足 trusted publishing 对 runner 的要求(不支持 self-hosted)。
     runs-on: macos-latest
     permissions:
       contents: read
-      id-token: write # npm provenance 必需(OIDC)
+      id-token: write # trusted publishing 必需:让 GitHub 发 OIDC token(取代长效 NPM_TOKEN)
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +45,9 @@ jobs:
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
+
+      - name: Upgrade npm (trusted publishing requires ≥ 11.5.1)
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         working-directory: bridge
@@ -41,8 +57,7 @@ jobs:
         working-directory: bridge
         run: npm test
 
-      - name: Publish with provenance
+      - name: Publish (trusted publishing / OIDC)
         working-directory: bridge
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+        # 不设 NODE_AUTH_TOKEN:npm 自动探测 OIDC 环境并用短期 token 发布(provenance 自动生成)。

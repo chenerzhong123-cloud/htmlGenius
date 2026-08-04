@@ -54,7 +54,7 @@ def _run(coro):
 def _init(tmp_path, monkeypatch):
     """建库 + 返回 team_a / open_id=u1 的鉴权头。"""
     storage.init_db(tmp_path / "b.db")
-    storage.register_document(DocumentCreate(document_id="doc_x"))
+    storage.register_document("team_a", DocumentCreate(document_id="doc_x"))
     return {"Authorization": "Bearer " + sessions.create_session("u1", "u1name", "team_a")}
 
 
@@ -122,7 +122,7 @@ def test_post_does_not_leak_to_other_team(tmp_path, monkeypatch):
 def test_post_does_not_leak_to_other_doc(tmp_path, monkeypatch):
     """同一 team 下 doc_x 的广播不应投递到 (team_a, doc_other) 房间。"""
     H = _init(tmp_path, monkeypatch)
-    storage.register_document(DocumentCreate(document_id="doc_other"))
+    storage.register_document("team_a", DocumentCreate(document_id="doc_other"))
     transport = httpx.ASGITransport(app=app)
 
     async def run():

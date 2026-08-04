@@ -89,7 +89,7 @@ def test_me_requires_session(tmp_path, monkeypatch):
 
 def test_annotation_uses_session_identity(tmp_path, monkeypatch):
     _init(tmp_path, monkeypatch)
-    storage.register_document(DocumentCreate(document_id="doc_x"))
+    storage.register_document("team_a", DocumentCreate(document_id="doc_x"))
     tok = sessions.create_session("ou_a", "alice", "team_a")
     H = {"Authorization": f"Bearer {tok}"}
     r = client.post(
@@ -109,7 +109,7 @@ def test_annotation_uses_session_identity(tmp_path, monkeypatch):
 
 def test_delete_non_owner_403(tmp_path, monkeypatch):
     _init(tmp_path, monkeypatch)
-    storage.register_document(DocumentCreate(document_id="doc_x"))
+    storage.register_document("team_a", DocumentCreate(document_id="doc_x"))
     a = sessions.create_session("ou_a", "alice", "team_a")
     b = sessions.create_session("ou_b", "bob", "team_a")
     created = client.post(

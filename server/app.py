@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import google, lark, sessions, storage, teams
+from .envutil import is_dev_env
 from .auth import (
     Session,
     consume_state,
@@ -29,13 +30,7 @@ from .sse import rooms, TooManyConnections
 BASE = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("HTMLEDITOR_DB", BASE / "annotations.db"))
 
-# BE-3 / BE-7: 环境判定。HG_ENV∈{dev,development,test,testing,local} 视为非生产;
-# 未设或其它值(production/prod/staging/…)一律按生产处理 —— 安全默认。
-_DEV_LOGIN_ENVS = {"dev", "development", "test", "testing", "local"}
-
-
-def _is_dev_env() -> bool:
-    return os.environ.get("HG_ENV", "").strip().lower() in _DEV_LOGIN_ENVS
+# BE-3 / BE-7: 环境判定统一在 envutil.is_dev_env(app/auth 共用,避免循环 import)。
 
 
 # BE-9: 显式 CORS origin 列表替代 allow_origins=["*"]。默认放:
@@ -58,11 +53,19 @@ def _cors_origins() -> list[str]:
 # BE-7: 生产(HG_ENV 非 dev)关闭 /docs /redoc /openapi.json,并改用不泄露内部代号的 title。
 app = FastAPI(
     title="htmlGenius API",
-    docs_url="/docs" if _is_dev_env() else None,
-    redoc_url="/redoc" if _is_dev_env() else None,
-    openapi_url="/openapi.json" if _is_dev_env() else None,
+    docs_url="/docs" if is_dev_env() else None,
+    redoc_url="/redoc" if is_dev_env() else None,
+    openapi_url="/openapi.json" if is_dev_env() else None,
 )
 storage.init_db(DB_PATH)
+# R-3:生产环境若未配流密钥,显式告警(SSE 票据将 fail-closed 拒签 → POST /api/stream/ticket 503)。
+if not is_dev_env() and not (
+    os.environ.get("HG_STREAM_SECRET") or os.environ.get("HG_LARK_APP_SECRET")
+):
+    print(
+        "[startup] WARN HG_STREAM_SECRET 未配置:生产 SSE 票据将 fail-closed(POST /api/stream/ticket → 503)",
+        flush=True,
+    )
 
 # CORS:content-script 从任意页面(如 open.feishu.cn)跨域调后端,
 # 需 CORS 头 + OPTIONS 预检。扩展后端标准做法(session_token 做鉴权,CORS 只控可达)。
@@ -184,7 +187,7 @@ def auth_logout(
 def _dev_login_enabled() -> bool:
     if os.environ.get("HG_AUTH_ALLOW_DEV") != "1":
         return False
-    return _is_dev_env()
+    return is_dev_env()
 
 
 @app.post("/auth/dev-login")
@@ -239,7 +242,10 @@ def auth_google(payload: GoogleIn):
         if not teams.redeem_invite(payload.code, info["sub"]):
             raise HTTPException(status_code=400, detail="invalid or expired code")
     elif payload.action == "create":
-        teams.create_team(payload.team_name or "", info["sub"])
+        try:
+            teams.create_team(payload.team_name or "", info["sub"])
+        except teams.TeamLimitExceeded as e:
+            raise HTTPException(status_code=409, detail=str(e))
     return {
         "sub": info["sub"],
         "email": info["email"],
@@ -274,6 +280,39 @@ def create_invite(session: Session = Depends(require_session)):
     return {"code": code, "team_id": session.team_id, "join_url": f"/htmlgenius/join?code={code}"}
 
 
+# === 团队治理(owner 守卫;仅适用 Google 自建团队,Lark 团队无 membership 行) ===
+
+
+@app.get("/auth/teams/{team_id}/members")
+def list_team_members(team_id: str, session: Session = Depends(require_session)):
+    """列团队成员(任意成员可查;非成员 → 403)。"""
+    if teams.member_role(session.open_id, team_id) is None:
+        raise HTTPException(status_code=403, detail="not a member")
+    return {"items": teams.team_members(team_id)}
+
+
+@app.delete("/auth/teams/{team_id}/members/{sub}")
+def remove_team_member(team_id: str, sub: str, session: Session = Depends(require_session)):
+    """owner 移除成员;非 owner → 403;移除自己 → 400(改用解散)。"""
+    try:
+        teams.remove_member(team_id, sub, session.open_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can remove members")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@app.delete("/auth/teams/{team_id}")
+def dissolve_team(team_id: str, session: Session = Depends(require_session)):
+    """owner 解散团队(级联删团队全部数据);非 owner → 403。"""
+    try:
+        teams.dissolve_team(team_id, session.open_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can dissolve")
+    return {"ok": True}
+
+
 # === 文档 / 版本 (BE-2:全部需 session 鉴权;HTML 响应加严格 CSP 防存储型 XSS) ===
 # 旧版无鉴权且把用户 HTML 以 text/html 直吐 → 匿名植入 <script> + 诱使打开 = 存储型
 # XSS → 账户接管,DELETE 也匿名可删。现:写/读/删全要 Bearer session;HTML 响应加
@@ -282,27 +321,30 @@ def create_invite(session: Session = Depends(require_session)):
 
 @app.post("/api/documents")
 def create_document(payload: DocumentCreate, session: Session = Depends(require_session)):
-    return storage.register_document(payload)
+    return storage.register_document(session.team_id, payload)
 
 
 @app.post("/api/documents/{document_id}/versions")
 def add_version(document_id: str, payload: VersionCreate, session: Session = Depends(require_session)):
     try:
-        result = storage.add_version(document_id, payload)
+        result = storage.add_version(session.team_id, document_id, payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="document not found")
-    storage.enforce_window(document_id, keep=20)  # v0.2:滚动窗口
+    storage.enforce_window(session.team_id, document_id, keep=20)  # v0.2:滚动窗口
     return result
 
 
 @app.get("/api/documents/{document_id}/versions")
 def list_versions(document_id: str, session: Session = Depends(require_session)):
-    return {"items": storage.list_versions(document_id)}
+    # 文档不在本团队 → 404(与 get/add/delete/get_html 一致:不属于你的文档不可见)
+    if storage.get_document(session.team_id, document_id) is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    return {"items": storage.list_versions(session.team_id, document_id)}
 
 
 @app.get("/api/documents/{document_id}/versions/{version}")
 def get_version_html(document_id: str, version: int, session: Session = Depends(require_session)):
-    doc_html = storage.get_version_html(document_id, version)
+    doc_html = storage.get_version_html(session.team_id, document_id, version)
     if doc_html is None:
         raise HTTPException(status_code=404, detail="version not found")
     # 存储的 HTML 来自用户/协作者,以 text/html 渲染即存储型 XSS。加严格 CSP:
@@ -322,7 +364,7 @@ def get_version_html(document_id: str, version: int, session: Session = Depends(
 @app.delete("/api/documents/{document_id}/versions/{version}")
 def delete_version(document_id: str, version: int, session: Session = Depends(require_session)):
     try:
-        deleted = storage.delete_version(document_id, version)
+        deleted = storage.delete_version(session.team_id, document_id, version)
     except ValueError:
         raise HTTPException(status_code=400, detail="cannot delete current version")
     if not deleted:
@@ -332,7 +374,7 @@ def delete_version(document_id: str, version: int, session: Session = Depends(re
 
 @app.get("/api/documents/{document_id}")
 def get_document(document_id: str, session: Session = Depends(require_session)):
-    doc = storage.get_document(document_id)
+    doc = storage.get_document(session.team_id, document_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
     return doc
@@ -426,7 +468,12 @@ def stream_ticket(session: Session = Depends(require_session)):
     EventSource 不能设自定义头 → 旧方案把长期 session token 拼进 ?token= 落日志即泄漏。
     改由本端点(需 Bearer 鉴权)换一张短时效票据,SSE 用 ?ticket= 连接,token 不再进 URL。
     """
-    return {"ticket": issue_stream_ticket(session.team_id), "ttl": _STREAM_TICKET_TTL}
+    try:
+        ticket = issue_stream_ticket(session.team_id)
+    except RuntimeError:
+        # R-3 fail-closed:生产未配 HG_STREAM_SECRET → 拒签(503),不回退公开常量。
+        raise HTTPException(status_code=503, detail="stream secret not configured")
+    return {"ticket": ticket, "ttl": _STREAM_TICKET_TTL}
 
 
 @app.get("/api/stream")

@@ -73,8 +73,13 @@ uv run uvicorn server.app:app --port 8000 --reload
 | `HG_AUTH_ALLOW_DEV` | 开放 `/auth/dev-login` 旁路（本地开发/测试，**生产必须 `0`**） | `"0"` |
 | `HG_SESSION_TTL` | session 有效期（秒） | `604800`（7 天） |
 | `HG_LARK_BASE` | 飞书 API 域名（国际版 Larksuite 改之） | `https://open.feishu.cn` |
+| `HG_ENV` | 环境标识;`dev`/`test`/`local` 等视为非生产(开放 dev-login、流密钥用一次性内存兜底);未设或 `production` 等一律按生产(安全默认) | 生产 |
+| `HG_STREAM_SECRET` | SSE 流票据签名密钥;**生产必填**,缺失则 `POST /api/stream/ticket` fail-closed → 503(飞书部署可用 `HG_LARK_APP_SECRET` 兼作来源) | — |
+| `HG_MAX_TEAMS_PER_USER` | 单用户可拥有的团队数上限(防团队/文档无序蔓延) | `10` |
 
 鉴权：扩展走 `chrome.identity.launchWebAuthFlow` → `/auth/lark/login` → 飞书授权 → `/auth/lark/callback` 换 session token；后续请求带 `Authorization: Bearer <session_token>`。批注 author = 飞书 `open_id`（后端 session 注入，硬身份）。批注写后经 SSE 广播 `annotation:created` / `annotation:updated` / `annotation:deleted`；作者可编辑（`PATCH /api/annotations/:id`，跨团队/非作者 403）、删除（级联子树）自己的批注。所有数据自存自管（SQLite），不用 SaaS。
+
+**团队地基（v0.9.x · scope A）**：文档/版本按 `(team_id, document_id)` 复合主键强制隔离（修跨租户 IDOR,R-1）；流密钥生产必填（R-3 fail-closed,缺失 → SSE 票据 503）；建团者=owner,可解散团队（级联删数据）/移除成员,任意成员可生邀请码;Lark 团队=飞书租户,成员由飞书后台管（治理端点仅适用 Google 自建团队）。详见本地 `docs/2026-08-02-team-foundation-design.md`。
 
 完整部署（Nginx SSE 关 buffering、HTTP/2、env 文件、manifest `host_permissions`、飞书后台重定向 URI、稳定 URL 约束、集成验收矩阵、常见坑）：详见本地 `docs/2026-07-05-v0.4-deploy.md`（含 v0.5 补充；该文档为本地工作文档，已 `.gitignore`，不入库）。
 
@@ -91,6 +96,22 @@ uv run uvicorn server.app:app --port 8000 --reload
 - **EventSource 在 content-script**：SSE 连接随页面生命周期，关标签即断（`bye` 心跳负责 presence 移除）。
 - **RangeSelector 未实现**：选区跨多个块级元素时，exact 会被压成单段。
 - **章节锚点兜底**：依赖原文有 h1/h2/h3 结构；无标题时仅靠前后文消歧。
+
+## Bridge 发布到 npm
+
+`@htmlgenius/bridge` 用 **npm Trusted Publishing（GitHub OIDC）** 发布——**免长效 token、免 OTP**。npm 废弃 bypass token（Automation/Granular）用于 direct publishing 后，旧 `NPM_TOKEN`+publish 已失效（CI 报 E404/EOTP），已迁移到 trusted publishing（1.0.2 起验证可用）。
+
+- **日常发布（全自动）**：改 `bridge/package.json` 版本 + 同步三处引用 → commit → push 分支 → 推 tag：
+  ```bash
+  git tag bridge-v<ver> && git push origin bridge-v<ver>
+  # CI(macos-latest)升 npm≥11.5.1 → npm ci → npm test → npm publish(OIDC) → 看 Actions 跑通:
+  npm view @htmlgenius/bridge@<ver> version
+  ```
+  - CI 挂了重发：`git tag -f bridge-v<ver> <commit>` → `git push origin :refs/tags/bridge-v<ver>` → `git push origin bridge-v<ver>`（删旧+推新；勿用 `--force`）。
+- **前置（npmjs.com，已配）**：`@htmlgenius/bridge` → Settings → Trusted Publisher → GitHub Actions：owner=`chenerzhong123-cloud`、repo=`htmlGenius`、workflow=`publish-bridge.yml`（精确匹配）。要求 npm≥11.5.1、Node≥22.14。
+- **本地兜底（需 OTP，仅应急）**：`cd bridge && npm publish --otp=<6位码>`。`NPM_TOKEN` 在 `~/.zshenv`（`~/.npmrc` 用 `${NPM_TOKEN}` 引用）；`npm token list` 看类型。
+
+升版**必须同步**所有引用点（`extension/background.js` 的 `TARGET_BRIDGE_VERSION`、官网 `shared.js` 的 `bridgeVersion`、`setup.html` 的 npx 命令），详见 `CLAUDE.md`「Bridge 版本升级」。发 bridge 与扩展发版（商店 dist）、阿里云后端部署是三件独立的事。
 
 ## 路线图
 

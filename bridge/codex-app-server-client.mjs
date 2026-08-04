@@ -81,6 +81,24 @@ function sanitizedEnv() {
   return env;
 }
 
+// Codex 登录态只读探测(补 spec §7):CodexAppServerClient.initialize() 只做 JSON-RPC 协议握手,
+// 不查登录 —— 会把「装了 App 但没登录」误报为 ready。Codex App/CLI 把 ChatGPT 登录或 API key
+// 落进 ~/.codex/auth.json(与 runtime sanitizedEnv 保留 HOME → 用同一目录),未登录则无有效凭据。
+// 本函数只读该文件、只返回布尔,绝不回读/外泄 token 内容或路径(符合 probe 只读、不创 thread/turn)。
+// 有效 = 解析为对象且含 tokens.access_token 或 OPENAI_API_KEY(非空字符串)。
+export function codexAuthPresent({ fsImpl = fs, home } = {}) {
+  try {
+    const authPath = path.join(home || os.homedir(), '.codex', 'auth.json');
+    const d = JSON.parse(fsImpl.readFileSync(authPath, 'utf8'));
+    if (d && typeof d === 'object' && !Array.isArray(d)) {
+      const tok = d.tokens;
+      if (tok && typeof tok === 'object' && typeof tok.access_token === 'string' && tok.access_token) return true;
+      if (typeof d.OPENAI_API_KEY === 'string' && d.OPENAI_API_KEY) return true;
+    }
+    return false;
+  } catch (_) { return false; }
+}
+
 // —— App runtime 发现与信任(spec §2.2,同步纯 Node)——
 // 首发查 /Applications/ChatGPT.app + ~/Applications/ChatGPT.app;mdfind 按 bundle id 兜底;**不搜 PATH**(§2.1)。
 export function discoverAppRuntime() {

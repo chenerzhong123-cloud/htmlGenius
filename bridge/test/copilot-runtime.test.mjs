@@ -265,6 +265,8 @@ test("pre-tool 策略:读工具+workspace 内路径 allow;越界/写非输出/�
     // allow
     assert.equal(handler({ toolName: "view", toolArgs: { path: path.join(tmp, "source.html") } }).permissionDecision, "allow");
     assert.equal(handler({ toolName: "view", toolArgs: { path: "source.html" } }).permissionDecision, "allow"); // 相对路径按 workspace 解析
+    // "read" 是 copilot-sdk 真实读工具名(回归:缺它会被 tool_not_allowed 拒绝 → PERMISSION_DENIED)
+    assert.equal(handler({ toolName: "read", toolArgs: { path: "source.html" } }).permissionDecision, "allow");
     assert.equal(handler({ toolName: "write", toolArgs: { path: "candidate.html", content: "x" } }).permissionDecision, "allow");
     // deny: 越界读
     assert.equal(handler({ toolName: "view", toolArgs: { path: "../../etc/passwd" } }).permissionDecision, "deny");

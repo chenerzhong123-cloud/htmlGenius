@@ -41,7 +41,17 @@
 - `landing/demo-2026-07/setup.html`：写死的 `npx --yes @htmlgenius/bridge@<ver> doctor/setup/uninstall`（含 `data-copy` 属性，多处）。
 - 全仓核对：`grep -rn "@htmlgenius/bridge@\|TARGET_BRIDGE_VERSION\|bridgeVersion" extension/ landing/`。
 
-顺序：**先 `npm publish` 确认新版本上 registry，再提交/部署引用了新版本号的改动**（否则安装命令会指向不存在的版本）。bridge 走 2FA 时发布需 OTP。
+顺序（Trusted Publishing）：改 `bridge/package.json` 版本 + 同步三处引用 **一起 commit** → push 分支 → 打 tag → CI 自动发布 → `npm view` 确认上 registry **后**再把分支合并到 main（避免 main 的引用指向还没发上去的版本）。
+
+## Bridge 发 npm：Trusted Publishing（GitHub OIDC，2026-08-04 起为唯一免 OTP 通道）
+
+npm 废弃 bypass token（Automation/Granular）用于 direct publishing 后，旧「`NPM_TOKEN` secret + `npm publish`」在 CI 开始被拦（E404/EOTP）。bridge 已迁移到 **npm Trusted Publishing**：CI 用 OIDC 短期 token 发布，**免长效 token、免 OTP**，provenance 自动生成。**1.0.2 已用此通道验证发布成功**。
+
+- **发布流程（日常，全自动）**：改 `bridge/package.json` 版本 + 同步引用 → commit → `git push origin <分支>` → `git tag bridge-v<ver> && git push origin bridge-v<ver>` → `.github/workflows/publish-bridge.yml` 在 `macos-latest` 升 npm≥11.5.1 → `npm ci → npm test → npm publish`（OIDC 鉴权）→ `npm view @htmlgenius/bridge@<ver> version` 确认上 registry。
+  - CI 挂了要重发：`git tag -f bridge-v<ver> <修复后的 commit>` → `git push origin :refs/tags/bridge-v<ver>` → `git push origin bridge-v<ver>`（删旧+推新触发 CI；**不要用 `--force`**，会被安全分类器拦）。
+- **一次性前置（npmjs.com，已配）**：`@htmlgenius/bridge` → Settings → Trusted Publisher → GitHub Actions：owner=`chenerzhong123-cloud`、repo=`htmlGenius`、workflow=`publish-bridge.yml`（大小写敏感，必须精确）。`repository.url` 须与仓库精确匹配（已匹配 `git+https://github.com/chenerzhong123-cloud/htmlGenius.git`）。要求 npm≥11.5.1、Node≥22.14、GitHub-hosted runner（用 macos-latest，兼顾测试）。
+- **收紧（建议做）**：npmjs.com Settings → Publishing access → "Require two-factor authentication and disallow tokens" → trusted publishing 成为唯一通道；之后 revoke 旧 token、删 GitHub `NPM_TOKEN` secret（已不需要）。
+- **本地兜底（需 OTP，仅应急）**：`cd bridge && npm publish --otp=<6位码>`。`NPM_TOKEN` 在 `~/.zshenv`（`~/.npmrc` 用 `${NPM_TOKEN}` 引用）；`npm token list` 看类型（只有 Automation 曾免 OTP，**现已失效**）。仅 CI 不可用时用。
 
 ## 安全审计修复批次（2026-07-29，v0.9.10）
 

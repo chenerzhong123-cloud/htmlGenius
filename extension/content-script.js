@@ -14,7 +14,7 @@
   const cfgReady = new Promise((resolve) => {
     if (chrome.storage && chrome.storage.sync) {
       chrome.storage.sync.get(
-        ["mode", "backend", "session_token", "user"],
+        ["mode", "backend", "session_token", "user", "team_id"],
         (c) => {
           _cfg = Object.assign({}, _cfg, c || {});
           console.log("[hg] cfg:", JSON.stringify({mode:_cfg.mode, backend:_cfg.backend, hasToken:!!_cfg.session_token, hasUser:!!_cfg.user}));

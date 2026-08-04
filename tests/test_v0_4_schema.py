@@ -6,7 +6,7 @@ from server.models import AnnotationCreate, DocumentCreate, TextQuoteSelector
 
 def _init(tmp_path):
     storage.init_db(tmp_path / "s.db")
-    storage.register_document(DocumentCreate(document_id="doc_x"))
+    storage.register_document("team_a", DocumentCreate(document_id="doc_x"))
 
 
 def test_migration_adds_team_and_parent_columns(tmp_path):

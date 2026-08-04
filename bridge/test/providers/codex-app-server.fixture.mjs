@@ -96,7 +96,7 @@ export const fixture = {
     };
     const handshakeOk = async () => {};
     switch (name) {
-      case "ready": return { invoke: () => probeCodex({ codexDiscover: discover, generateSchema: schemaOk, codexHandshake: handshakeOk }) };
+      case "ready": return { invoke: () => probeCodex({ codexDiscover: discover, generateSchema: schemaOk, codexHandshake: handshakeOk, authPresent: () => true }) };
       case "not_installed": return { invoke: () => probeCodex({ codexDiscover: () => { const e = new Error("app not found"); e.code = CODEX_APP_NOT_FOUND; throw e; } }) };
       case "auth_required": return { invoke: () => probeCodex({ codexDiscover: discover, generateSchema: schemaOk, codexHandshake: async () => { const e = new Error("auth"); e.code = CODEX_AUTH_REQUIRED; throw e; } }) };
       case "incompatible": return { invoke: () => probeCodex({ codexDiscover: discover, generateSchema: async () => { throw new Error("schema gen failed"); } }) };

@@ -9,7 +9,7 @@ client = TestClient(app)
 
 def _init(tmp_path, monkeypatch):
     storage.init_db(tmp_path / "d.db")
-    storage.register_document(DocumentCreate(document_id="doc_x"))
+    storage.register_document("team_a", DocumentCreate(document_id="doc_x"))
 
 
 def _mk(team, uid, parent=None):

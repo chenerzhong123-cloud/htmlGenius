@@ -31,18 +31,21 @@ def init_db(path: Path) -> None:
         c.executescript(
             """
             CREATE TABLE IF NOT EXISTS documents (
-                document_id TEXT PRIMARY KEY,
+                team_id TEXT NOT NULL,
+                document_id TEXT NOT NULL,
                 title TEXT,
-                current_version INTEGER
+                current_version INTEGER,
+                PRIMARY KEY (team_id, document_id)
             );
             CREATE TABLE IF NOT EXISTS versions (
-                document_id TEXT,
+                team_id TEXT NOT NULL,
+                document_id TEXT NOT NULL,
                 version INTEGER,
                 html_path TEXT,
                 created_at TEXT,
                 source TEXT,
                 parent INTEGER,
-                PRIMARY KEY (document_id, version)
+                PRIMARY KEY (team_id, document_id, version)
             );
             CREATE TABLE IF NOT EXISTS annotations (
                 id TEXT PRIMARY KEY,
@@ -83,6 +86,7 @@ def init_db(path: Path) -> None:
                 google_sub TEXT,
                 team_id TEXT,
                 joined_at TEXT,
+                role TEXT NOT NULL DEFAULT 'member',
                 PRIMARY KEY (google_sub, team_id)
             );
             CREATE TABLE IF NOT EXISTS invites (
@@ -106,42 +110,84 @@ def init_db(path: Path) -> None:
             c.execute("ALTER TABLE annotations ADD COLUMN team_id TEXT DEFAULT 'default'")
         if "parent_id" not in cols_ann:
             c.execute("ALTER TABLE annotations ADD COLUMN parent_id TEXT")
+        # v0.9.x 迁移 (R-1):documents/versions 加 team_id、PK 改团队级复合键;memberships 加 role。
+        # 仅当旧表存在(列集非空)且缺目标列时迁移,幂等;部分遗留库(只含部分表)也能安全跳过。
+        cols_doc = {row["name"] for row in c.execute("PRAGMA table_info(documents)")}
+        if cols_doc and "team_id" not in cols_doc:
+            c.executescript(
+                """
+                ALTER TABLE documents RENAME TO _documents_old;
+                CREATE TABLE documents (
+                    team_id TEXT NOT NULL, document_id TEXT NOT NULL, title TEXT, current_version INTEGER,
+                    PRIMARY KEY (team_id, document_id)
+                );
+                INSERT INTO documents(team_id, document_id, title, current_version)
+                    SELECT 'default', document_id, title, current_version FROM _documents_old;
+                DROP TABLE _documents_old;
+                """
+            )
+        cols_ver = {row["name"] for row in c.execute("PRAGMA table_info(versions)")}
+        if cols_ver and "team_id" not in cols_ver:
+            c.executescript(
+                """
+                ALTER TABLE versions RENAME TO _versions_old;
+                CREATE TABLE versions (
+                    team_id TEXT NOT NULL, document_id TEXT NOT NULL, version INTEGER,
+                    html_path TEXT, created_at TEXT, source TEXT, parent INTEGER, html_content TEXT,
+                    PRIMARY KEY (team_id, document_id, version)
+                );
+                INSERT INTO versions(team_id, document_id, version, html_path, created_at, source, parent, html_content)
+                    SELECT 'default', document_id, version, html_path, created_at, source, parent, html_content FROM _versions_old;
+                DROP TABLE _versions_old;
+                """
+            )
+        cols_mem = {row["name"] for row in c.execute("PRAGMA table_info(memberships)")}
+        if cols_mem and "role" not in cols_mem:
+            c.execute("ALTER TABLE memberships ADD COLUMN role TEXT NOT NULL DEFAULT 'member'")
+            c.execute(
+                "UPDATE memberships SET role='owner' WHERE (google_sub, team_id) IN "
+                "(SELECT created_by_sub, team_id FROM teams WHERE created_by_sub IS NOT NULL)"
+            )
     finally:
         c.close()
 
 
-def register_document(payload: DocumentCreate) -> dict | None:
+def register_document(team_id: str, payload: DocumentCreate) -> dict | None:
     c = _connect()
     try:
         c.execute(
-            "INSERT OR IGNORE INTO documents(document_id, title, current_version) VALUES(?,?,0)",
-            (payload.document_id, payload.title),
+            "INSERT OR IGNORE INTO documents(team_id, document_id, title, current_version) VALUES(?,?,?,0)",
+            (team_id, payload.document_id, payload.title),
         )
     finally:
         c.close()
-    return get_document(payload.document_id)
+    return get_document(team_id, payload.document_id)
 
 
-def add_version(document_id: str, payload: VersionCreate) -> dict:
-    """单事务:读 current + 写 versions(含 html_content)+ 更新 documents。"""
+def add_version(team_id: str, document_id: str, payload: VersionCreate) -> dict:
+    """单事务:读 current + 写 versions(含 html_content)+ 更新 documents。
+
+    按 (team_id, document_id) 限定:文档不在本团队 → KeyError(端点层映射 404)。
+    """
     c = _connect()
     try:
         c.execute("BEGIN IMMEDIATE")
         try:
             row = c.execute(
-                "SELECT current_version FROM documents WHERE document_id=?", (document_id,)
+                "SELECT current_version FROM documents WHERE team_id=? AND document_id=?",
+                (team_id, document_id),
             ).fetchone()
             if row is None:
-                raise KeyError(f"document not found: {document_id}")
+                raise KeyError(f"document not found: {team_id}/{document_id}")
             v = (row["current_version"] or 0) + 1
             c.execute(
-                "INSERT INTO versions (document_id, version, html_path, created_at, source, parent, html_content) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (document_id, v, payload.html_path, _now(), payload.source, payload.parent, payload.html_content),
+                "INSERT INTO versions (team_id, document_id, version, html_path, created_at, source, parent, html_content) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (team_id, document_id, v, payload.html_path, _now(), payload.source, payload.parent, payload.html_content),
             )
             c.execute(
-                "UPDATE documents SET current_version=? WHERE document_id=?",
-                (v, document_id),
+                "UPDATE documents SET current_version=? WHERE team_id=? AND document_id=?",
+                (v, team_id, document_id),
             )
             c.execute("COMMIT")
         except Exception:
@@ -152,63 +198,66 @@ def add_version(document_id: str, payload: VersionCreate) -> dict:
     return {"document_id": document_id, "version": v}
 
 
-def list_versions(document_id: str) -> list[dict]:
+def list_versions(team_id: str, document_id: str) -> list[dict]:
     c = _connect()
     try:
         rows = c.execute(
-            "SELECT document_id, version, html_path, created_at, source, parent "
-            "FROM versions WHERE document_id=? ORDER BY version",
-            (document_id,),
+            "SELECT team_id, document_id, version, html_path, created_at, source, parent "
+            "FROM versions WHERE team_id=? AND document_id=? ORDER BY version",
+            (team_id, document_id),
         ).fetchall()
     finally:
         c.close()
     return [dict(r) for r in rows]
 
 
-def get_version_html(document_id: str, version: int) -> str | None:
+def get_version_html(team_id: str, document_id: str, version: int) -> str | None:
     c = _connect()
     try:
         r = c.execute(
-            "SELECT html_content FROM versions WHERE document_id=? AND version=?",
-            (document_id, version),
+            "SELECT html_content FROM versions WHERE team_id=? AND document_id=? AND version=?",
+            (team_id, document_id, version),
         ).fetchone()
     finally:
         c.close()
     return r["html_content"] if r else None
 
 
-def _current_version(c: sqlite3.Connection, document_id: str) -> int | None:
+def _current_version(c: sqlite3.Connection, team_id: str, document_id: str) -> int | None:
     row = c.execute(
-        "SELECT current_version FROM documents WHERE document_id=?", (document_id,)
+        "SELECT current_version FROM documents WHERE team_id=? AND document_id=?", (team_id, document_id)
     ).fetchone()
     return row["current_version"] if row else None
 
 
-def enforce_window(document_id: str, keep: int = 20) -> list[int]:
-    """保留最近 keep 个版本,删更早的;删前把挂在被删版本上的批注 version 更新到 current。"""
+def enforce_window(team_id: str, document_id: str, keep: int = 20) -> list[int]:
+    """保留最近 keep 个版本,删更早的;删前把挂在被删版本上的批注 version 更新到 current。
+
+    按 (team_id, document_id) 限定:批注迁移也带 team_id,不波及其它团队同名 doc 的批注。
+    """
     c = _connect()
     deleted: list[int] = []
     try:
         c.execute("BEGIN IMMEDIATE")
         try:
-            current = _current_version(c, document_id)
+            current = _current_version(c, team_id, document_id)
             if current is None:
                 c.execute("ROLLBACK")
                 return []
             rows = c.execute(
-                "SELECT version FROM versions WHERE document_id=? ORDER BY version DESC",
-                (document_id,),
+                "SELECT version FROM versions WHERE team_id=? AND document_id=? ORDER BY version DESC",
+                (team_id, document_id),
             ).fetchall()
             for r in rows[keep:]:
                 v = r["version"]
                 if current is not None:
                     c.execute(
-                        "UPDATE annotations SET version=? WHERE document_id=? AND version=?",
-                        (current, document_id, v),
+                        "UPDATE annotations SET version=? WHERE team_id=? AND document_id=? AND version=?",
+                        (current, team_id, document_id, v),
                     )
                 c.execute(
-                    "DELETE FROM versions WHERE document_id=? AND version=?",
-                    (document_id, v),
+                    "DELETE FROM versions WHERE team_id=? AND document_id=? AND version=?",
+                    (team_id, document_id, v),
                 )
                 deleted.append(v)
             c.execute("COMMIT")
@@ -220,23 +269,26 @@ def enforce_window(document_id: str, keep: int = 20) -> list[int]:
     return deleted
 
 
-def delete_version(document_id: str, version: int) -> bool:
-    """删某版本;批注引用该版本则更新到 current。不允许删 current。"""
+def delete_version(team_id: str, document_id: str, version: int) -> bool:
+    """删某版本;批注引用该版本则更新到 current。不允许删 current。
+
+    按 (team_id, document_id) 限定:跨团队同名 doc 不受影响。
+    """
     c = _connect()
     try:
         c.execute("BEGIN IMMEDIATE")
         try:
-            current = _current_version(c, document_id)
+            current = _current_version(c, team_id, document_id)
             if current == version:
                 raise ValueError("cannot delete current version")
             if current is not None:
                 c.execute(
-                    "UPDATE annotations SET version=? WHERE document_id=? AND version=?",
-                    (current, document_id, version),
+                    "UPDATE annotations SET version=? WHERE team_id=? AND document_id=? AND version=?",
+                    (current, team_id, document_id, version),
                 )
             cur = c.execute(
-                "DELETE FROM versions WHERE document_id=? AND version=?",
-                (document_id, version),
+                "DELETE FROM versions WHERE team_id=? AND document_id=? AND version=?",
+                (team_id, document_id, version),
             )
             c.execute("COMMIT")
             return cur.rowcount > 0
@@ -369,18 +421,18 @@ def list_annotations(document_id: str, team_id: str = "default") -> list[dict]:
     return [_row_to_ann(r) for r in rows]
 
 
-def get_document(document_id: str) -> dict | None:
+def get_document(team_id: str, document_id: str) -> dict | None:
     c = _connect()
     try:
         d = c.execute(
-            "SELECT * FROM documents WHERE document_id=?", (document_id,)
+            "SELECT * FROM documents WHERE team_id=? AND document_id=?", (team_id, document_id)
         ).fetchone()
         if d is None:
             return None
         vs = c.execute(
-            "SELECT document_id, version, html_path, created_at, source, parent "
-            "FROM versions WHERE document_id=? ORDER BY version",
-            (document_id,),
+            "SELECT team_id, document_id, version, html_path, created_at, source, parent "
+            "FROM versions WHERE team_id=? AND document_id=? ORDER BY version",
+            (team_id, document_id),
         ).fetchall()
     finally:
         c.close()
