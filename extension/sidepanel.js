@@ -2082,7 +2082,7 @@
       const doneText = msg.candidate ? t("bridge.candidateCompleted") : t("bridge.completed");
       setBridgeStatus(doneText, "ok");
       pushProgress(doneText);
-      recordRun({ provider: _provider, run_kind: "candidate", status: "completed", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode() });
+      recordRun({ provider: _provider, run_kind: _contractRunKind || "candidate", status: "completed", duration_s: runDurationSec(), started_at: nowHMS(), mode: getContractMode() });
       expandBridgeDetail(false); // 完成后收起进度窗(候选版本号 + 打开按钮仍在主行可见)
     } else if (msg.type === "bridge-failed") {
       setContractRunning(false); stopRunTimer();

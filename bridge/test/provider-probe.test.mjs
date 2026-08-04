@@ -28,7 +28,8 @@ test('两 provider 都 ready', async () => {
     claudeAuthCheck: async () => {},
     codexDiscover: () => ({ runtimePath: '/fake', version: '0.1', appVersion: '9.9' }),
     schemaDir: makeSchemaDir(),
-    codexHandshake: async () => {}
+    codexHandshake: async () => {},
+    authPresent: () => true
   });
   assert.equal(find(r, 'claude_code_cli').status, 'ready');
   assert.equal(find(r, 'claude_code_cli').version, '1.2.3');
@@ -43,7 +44,8 @@ test('claude auth_required + codex ready:互不污染(§5.1)', async () => {
     claudeAuthCheck: async () => { const e = new Error('x'); e.code = 'CLAUDE_NOT_LOGGED_IN'; throw e; },
     codexDiscover: () => ({ runtimePath: '/fake', version: '0.1' }),
     schemaDir: makeSchemaDir(),
-    codexHandshake: async () => {}
+    codexHandshake: async () => {},
+    authPresent: () => true
   });
   assert.equal(find(r, 'claude_code_cli').status, 'auth_required', 'claude 未登录');
   assert.equal(find(r, 'codex_app_server').status, 'ready', 'codex 未被 claude 失败污染');
@@ -79,6 +81,40 @@ test('codex handshake auth_required 分类', async () => {
   assert.equal(find(r, 'codex_app_server').status, 'auth_required');
 });
 
+test('codex 握手 OK 但未登录(auth.json 无凭据)→ auth_required,不误报 ready', async () => {
+  const r = await probeProviders(['codex_app_server'], {
+    codexDiscover: () => ({ runtimePath: '/fake', version: '0.1' }),
+    schemaDir: makeSchemaDir(),
+    codexHandshake: async () => {},
+    authPresent: () => false
+  });
+  assert.equal(find(r, 'codex_app_server').status, 'auth_required');
+  assert.deepEqual(find(r, 'codex_app_server').capabilities, []);
+});
+
+test('codexAuthPresent: ~/.codex/auth.json 有 tokens.access_token / OPENAI_API_KEY → true;缺/坏 → false', async () => {
+  const { codexAuthPresent } = await import('../codex-app-server-client.mjs');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-'));
+  const dir = path.join(home, '.codex');
+  fs.mkdirSync(dir, { recursive: true });
+  const f = (o) => { fs.writeFileSync(path.join(dir, 'auth.json'), JSON.stringify(o)); return { fsImpl: fs, home }; };
+  // ChatGPT 登录态
+  let r = f({ auth_mode: 'chatgpt', tokens: { access_token: 'tok', id_token: 'id', refresh_token: 'r' }, last_refresh: 'x' });
+  assert.equal(codexAuthPresent(r), true);
+  // API key 登录态
+  r = f({ OPENAI_API_KEY: 'sk-xxx' });
+  assert.equal(codexAuthPresent(r), true);
+  // 空 tokens(未登录)
+  r = f({ auth_mode: 'chatgpt', tokens: {} });
+  assert.equal(codexAuthPresent(r), false);
+  // 坏 JSON
+  fs.writeFileSync(path.join(dir, 'auth.json'), 'not json');
+  assert.equal(codexAuthPresent({ fsImpl: fs, home }), false);
+  // 文件不存在
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(codexAuthPresent({ fsImpl: fs, home }), false);
+});
+
 test('只探一个 provider:只返回请求的', async () => {
   const r = await probeProviders(['claude_code_cli'], { claudeVersion: () => '1.0', claudeAuthCheck: async () => {} });
   assert.equal(r.providers.length, 1);
@@ -90,7 +126,8 @@ test('provider 抛未分类异常 → 归一 error(不崩、不污染另一 prov
     claudeVersion: () => { throw new Error('boom'); },
     codexDiscover: () => ({ runtimePath: '/fake', version: '0.1' }),
     schemaDir: makeSchemaDir(),
-    codexHandshake: async () => {}
+    codexHandshake: async () => {},
+    authPresent: () => true
   });
   assert.equal(find(r, 'claude_code_cli').status, 'error');
   assert.equal(find(r, 'codex_app_server').status, 'ready');

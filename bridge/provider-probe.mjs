@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process';
 import { CLAUDE_BIN, checkAuth, sanitizedEnv } from './claude-cli.mjs';
 import {
-  discoverAppRuntime, verifySchema, CodexAppServerClient,
+  discoverAppRuntime, verifySchema, CodexAppServerClient, codexAuthPresent,
   CODEX_APP_NOT_FOUND, CODEX_APP_UNTRUSTED, CODEX_INCOMPATIBLE, CODEX_AUTH_REQUIRED, CODEX_TIMED_OUT
 } from './codex-app-server-client.mjs';
 import { spawnGenerateSchema } from './codex-adapter.mjs';
@@ -44,8 +44,8 @@ export async function probeClaude({ claudeVersion, claudeAuthCheck } = {}) {
 }
 
 // Codex App Server 探测(§7):discovery + 签名 + --version + schema gen/validation + 短初始化 handshake。绝不创建 thread/turn。
-// opts 注入点:codexDiscover() / generateSchema / codexHandshake(runtimePath)(测试用 fake)。
-export async function probeCodex({ codexDiscover, generateSchema, codexHandshake, schemaDir } = {}) {
+// opts 注入点:codexDiscover() / generateSchema / codexHandshake(runtimePath) / authPresent(测试用 fake)。
+export async function probeCodex({ codexDiscover, generateSchema, codexHandshake, authPresent, schemaDir } = {}) {
   let rt;
   try {
     rt = typeof codexDiscover === 'function' ? codexDiscover() : discoverAppRuntime();
@@ -79,6 +79,10 @@ export async function probeCodex({ codexDiscover, generateSchema, codexHandshake
       try { await c.initialize(PROBE_TIMEOUT_MS); }
       finally { try { await c.close(); } catch (_) {} }
     }
+    // initialize() 只做协议握手、不查登录(见 codex-app-server-client)。握手 OK 但 ~/.codex/auth.json
+    // 无有效凭据 → 装了 App 却没登录:报 auth_required,而非误报 ready。
+    const hasAuth = typeof authPresent === 'function' ? authPresent() : codexAuthPresent();
+    if (!hasAuth) return { id: 'codex_app_server', label: 'Codex', status: 'auth_required', capabilities: [] };
     return { id: 'codex_app_server', label: 'Codex', status: 'ready', version: rt.version || rt.appVersion || null, capabilities: ['candidate', 'plan'] };
   } catch (e) {
     if (e && e.code === CODEX_AUTH_REQUIRED) return { id: 'codex_app_server', label: 'Codex', status: 'auth_required', capabilities: [] };
