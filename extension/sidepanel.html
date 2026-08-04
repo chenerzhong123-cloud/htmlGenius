@@ -175,6 +175,29 @@
     </div>
   </div>
   <div id="login-state"></div>
+  <div id="team-panel" hidden>
+    <div id="team-switch-row" class="collab-row" hidden>
+      <select id="team-select" aria-label="团队"></select>
+    </div>
+    <div class="team-block">
+      <div class="team-block-title" data-i18n="team.inviteTitle">邀请成员</div>
+      <div class="collab-row">
+        <button id="gen-invite-btn" data-i18n="team.genLink">生成邀请链接</button>
+      </div>
+      <div id="invite-link-row" class="invite-link-row" hidden>
+        <code id="invite-link-url"></code>
+        <button id="copy-invite-btn" data-i18n="team.copy">复制</button>
+      </div>
+      <div class="collab-row">
+        <input id="add-email-input" type="email" data-i18n-placeholder="team.emailPh" placeholder="对方 Gmail" />
+        <button id="add-email-btn" data-i18n="team.add">添加</button>
+      </div>
+    </div>
+    <div class="team-block">
+      <div class="team-block-title"><span data-i18n="team.members">成员</span> <span id="member-count"></span></div>
+      <div id="member-list" class="member-list"></div>
+    </div>
+  </div>
   <div id="presence-count" class="presence-count" hidden></div>
 </div>
 

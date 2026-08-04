@@ -673,6 +673,14 @@
   // content script → side panel: chrome.runtime.sendMessage
   // side panel → content script: chrome.tabs.sendMessage
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === "team-changed") {
+      // 团队切换:重读 storage(新 session_token/team_id)→ 协同页整页重载,以新团队身份重载批注+SSE。
+      chrome.storage.sync.get(["mode"], (c) => {
+        if (c && c.mode === "synced") { try { location.reload(); } catch (e) {} }
+        try { sendResponse({ ok: true }); } catch (e) {}
+      });
+      return true;
+    }
     if (msg.type === "get-annotations") {
       getArtifactState().then((artifact_state) => sendResponse({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing, artifact_state }))
         .catch(() => sendResponse({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing, artifact_state: artifactStateSnapshot() }));

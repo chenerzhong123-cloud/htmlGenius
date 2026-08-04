@@ -164,8 +164,9 @@ def lark_callback(payload: CallbackIn):
 
 @app.get("/auth/me")
 def auth_me(session: Session = Depends(require_session)):
-    """扩展启动时校验 session 是否仍有效。"""
-    return {"id": session.open_id, "name": session.name, "team_id": session.team_id}
+    """扩展启动时校验 session 是否仍有效;顺带返回该用户全部团队(供侧栏团队下拉)。"""
+    return {"id": session.open_id, "name": session.name, "team_id": session.team_id,
+            "teams": teams.user_teams(session.open_id)}
 
 
 @app.post("/auth/logout")

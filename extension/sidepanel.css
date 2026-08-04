@@ -998,3 +998,22 @@ button {
 .patch-preview .pp-status.pp-not_found, .patch-preview .pp-status.pp-ambiguous, .patch-preview .pp-status.pp-conflict { color: var(--warning); background: var(--warning-soft); }
 .patch-preview .pp-actions { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line-subtle); }
 .patch-preview .pp-actions #patch-confirm { flex: 1; }
+
+/* === 团队管理面板(账号浮层内):下拉切换 + 邀请链接 + 邮箱加 + 成员列表 === */
+#team-panel { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+#team-select { flex: 1; height: 30px; font-size: 12px; background: var(--bg-surface-raised); color: var(--text-primary); border: 1px solid var(--line-default); border-radius: var(--r-md); padding: 0 8px; font-family: var(--font-sans); }
+.team-block { display: flex; flex-direction: column; gap: 6px; }
+.team-block-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+#gen-invite-btn, #add-email-btn, #copy-invite-btn {
+  background: var(--bg-surface-raised); color: var(--text-primary); border: 1px solid var(--line-default);
+  height: 28px; padding: 0 10px; font-size: 11px; border-radius: var(--r-sm); cursor: pointer; font-family: var(--font-sans); white-space: nowrap;
+}
+#gen-invite-btn:hover, #add-email-btn:hover, #copy-invite-btn:hover { border-color: var(--brand); }
+#add-email-input { flex: 1; height: 28px; font-size: 12px; background: var(--bg-surface-raised); color: var(--text-primary); border: 1px solid var(--line-default); border-radius: var(--r-sm); padding: 0 8px; font-family: var(--font-sans); }
+.invite-link-row { display: flex; align-items: center; gap: 6px; }
+.invite-link-row code { flex: 1; font-size: 10px; color: var(--text-muted); background: var(--bg-surface); border: 1px solid var(--line-subtle); border-radius: var(--r-sm); padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-list { display: flex; flex-direction: column; gap: 3px; }
+.member-row { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-secondary); }
+.member-row .member-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-remove { background: transparent; color: var(--danger); border: none; font-size: 10px; cursor: pointer; padding: 0 4px; font-family: var(--font-sans); }
+.member-remove:hover { text-decoration: underline; }

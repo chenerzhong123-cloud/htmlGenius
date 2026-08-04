@@ -1952,6 +1952,7 @@
   const teamSetup = document.getElementById("team-setup");
   const inviteInput = document.getElementById("invite-code-input");
   let _sessionTeam = null; // {id, name}:当前团队(注册可见);Google 登录后置位
+  let _sessionTeams = []; // 用户全部团队(下拉切换用);Google 登录 / /auth/me 回填
 
   function getCfg(keys) { return new Promise((r) => chrome.storage.sync.get(keys, r)); }
   function setCfg(obj) { return new Promise((r) => chrome.storage.sync.set(obj, r)); }
@@ -1960,7 +1961,7 @@
   // silentReauth(侧边栏打开时静默重登)传 false —— 不刷页,否则会冲掉刚弹出的编辑确认窗。
   async function applySession(r, reload = true) {
     // 持久化团队身份(team_id + team_name):account sheet 展示当前团队 + 为后续团队切换预留。
-    // r.teams(Google)带名字;Lark 登录无 teams → team_name 空(飞书租户名不在此呈现)。
+    if (Array.isArray(r.teams)) _sessionTeams = r.teams; // Google 登录带全部团队;switch 复用现存列表
     const tm = (r.teams || []).find((x) => x.team_id === r.team_id);
     const teamName = (tm && tm.name) || "";
     _sessionTeam = r.team_id ? { id: r.team_id, name: teamName } : null;
@@ -1978,7 +1979,7 @@
     if (_sessionTeam && _sessionTeam.name) txt += "· " + t("team.current") + _sessionTeam.name + " ";
     loginState.textContent = txt;
     renderLogoutBtn();
-    renderInviteBtn();
+    renderTeamPanel();
   }
   function refreshLoginState() { if (_sessionUser) showLoggedIn(_sessionUser); }
   function renderLogoutBtn() {
@@ -1986,10 +1987,120 @@
     if (!b) { b = document.createElement("button"); b.id = "logout-btn"; b.addEventListener("click", doLogout); loginState.appendChild(b); }
     b.textContent = t("state.logout");
   }
-  function renderInviteBtn() {
-    let b = document.getElementById("invite-btn");
-    if (!b) { b = document.createElement("button"); b.id = "invite-btn"; b.addEventListener("click", doInvite); loginState.appendChild(b); }
-    b.textContent = t("state.invite");
+  let _teamPanelWired = false;
+  let _inviteLinkUrl = "";
+  // 团队管理面板:下拉切换 + 邀请链接 + 按邮箱加 + 成员列表(owner 可移除)
+  function renderTeamPanel() {
+    const panel = document.getElementById("team-panel");
+    if (!panel) return;
+    panel.hidden = false;
+    const sel = document.getElementById("team-select");
+    const swRow = document.getElementById("team-switch-row");
+    if (sel && swRow) {
+      sel.innerHTML = "";
+      for (const tm of _sessionTeams) {
+        const o = document.createElement("option");
+        o.value = tm.team_id; o.textContent = tm.name || tm.team_id;
+        if (_sessionTeam && tm.team_id === _sessionTeam.id) o.selected = true;
+        sel.appendChild(o);
+      }
+      swRow.hidden = _sessionTeams.length < 2; // 单团队不显示切换
+    }
+    if (!_teamPanelWired) {
+      _teamPanelWired = true;
+      const gen = document.getElementById("gen-invite-btn"); if (gen) gen.addEventListener("click", genInviteLink);
+      const cp = document.getElementById("copy-invite-btn"); if (cp) cp.addEventListener("click", copyInviteLink);
+      const add = document.getElementById("add-email-btn"); if (add) add.addEventListener("click", addMemberByEmail);
+      if (sel) sel.addEventListener("change", () => { if (sel.value) switchTeam(sel.value); });
+    }
+    loadMembers();
+  }
+  async function _authFetch(path, init) {
+    const cfg = await getCfg(["session_token"]);
+    const headers = Object.assign({ Authorization: "Bearer " + cfg.session_token }, (init && init.headers) || {});
+    return fetch(BACKEND + path, Object.assign({}, init, { headers }));
+  }
+  async function genInviteLink() {
+    try {
+      const r = await _authFetch("/auth/invites", { method: "POST" });
+      const j = await r.json();
+      if (j.join_url) {
+        const base = BACKEND || "https://deuce.monster";
+        _inviteLinkUrl = new URL(j.join_url, base).href; // join_url 是 /htmlgenius/join?code= 路径 → 绝对
+        const box = document.getElementById("invite-link-row");
+        const u = document.getElementById("invite-link-url");
+        if (box && u) { u.textContent = _inviteLinkUrl.replace(/^https?:\/\//, ""); box.hidden = false; }
+      } else { showToast(t("team.inviteFail")); }
+    } catch (e) { showToast(t("team.inviteFail")); }
+  }
+  async function copyInviteLink() {
+    if (!_inviteLinkUrl) return;
+    try { await navigator.clipboard.writeText(_inviteLinkUrl); showToast(t("team.linkCopied")); } catch (e) {}
+  }
+  async function addMemberByEmail() {
+    const email = ((document.getElementById("add-email-input") || {}).value || "").trim();
+    if (!email) return;
+    const teamId = _sessionTeam && _sessionTeam.id;
+    try {
+      const r = await _authFetch("/auth/teams/" + teamId + "/members/by-email",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+      if (r.ok) { showToast(t("team.addedOk")); (document.getElementById("add-email-input") || {}).value = ""; loadMembers(); }
+      else if (r.status === 404) showToast(t("team.addNotFound"));
+      else if (r.status === 403) showToast(t("team.ownerOnly"));
+      else showToast(t("team.addFail"));
+    } catch (e) { showToast(t("team.addFail")); }
+  }
+  async function loadMembers() {
+    const teamId = _sessionTeam && _sessionTeam.id;
+    const list = document.getElementById("member-list");
+    const cnt = document.getElementById("member-count");
+    if (!teamId || !list) return;
+    try {
+      const r = await _authFetch("/auth/teams/" + teamId + "/members");
+      if (!r.ok) { list.textContent = ""; if (cnt) cnt.textContent = ""; return; }
+      const items = (await r.json()).items || [];
+      if (cnt) cnt.textContent = "(" + items.length + ")";
+      const meId = _sessionUser && _sessionUser.id;
+      const isOwner = items.some((m) => m.sub === meId && m.role === "owner");
+      list.innerHTML = "";
+      for (const m of items) {
+        const row = document.createElement("div"); row.className = "member-row";
+        const nm = document.createElement("span"); nm.className = "member-name";
+        nm.textContent = (m.name || m.sub) + " · " + (m.role === "owner" ? "owner" : "member");
+        row.appendChild(nm);
+        if (isOwner && m.sub !== meId) {
+          const rm = document.createElement("button"); rm.className = "member-remove"; rm.textContent = t("team.remove");
+          rm.addEventListener("click", () => removeMember(m.sub));
+          row.appendChild(rm);
+        }
+        list.appendChild(row);
+      }
+    } catch (e) { /* 非关键 */ }
+  }
+  async function removeMember(sub) {
+    const teamId = _sessionTeam && _sessionTeam.id;
+    try {
+      const r = await _authFetch("/auth/teams/" + teamId + "/members/" + encodeURIComponent(sub), { method: "DELETE" });
+      if (r.ok) loadMembers(); else showToast(t("team.removeFail"));
+    } catch (e) { showToast(t("team.removeFail")); }
+  }
+  async function switchTeam(teamId) {
+    try {
+      const r = await _authFetch("/auth/switch-team",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ team_id: teamId }) });
+      if (!r.ok) throw new Error("switch " + r.status);
+      const j = await r.json();
+      await applySession({ token: j.token, user: j.user, team_id: j.team_id, teams: _sessionTeams }, false);
+      showToast(t("team.switched"));
+      broadcastTeamChanged(); // 所有协同页重载(切到新团队的批注/SSE)
+    } catch (e) { showToast(t("team.switchFail")); }
+  }
+  function broadcastTeamChanged() {
+    chrome.tabs.query({}, (tabs) => {
+      for (const tb of tabs || []) {
+        if (tb && tb.id != null) { try { chrome.tabs.sendMessage(tb.id, { type: "team-changed" }).catch(() => {}); } catch (e) {} }
+      }
+    });
   }
   async function doLogout() {
     const cfg = await getCfg(["session_token"]);
@@ -1998,20 +2109,12 @@
     }
     await new Promise((r) => chrome.storage.sync.remove(["session_token", "user", "mode"], r));
     _sessionUser = null;
+    _sessionTeam = null; _sessionTeams = [];
     loginState.textContent = t("state.loggedOut");
     ["logout-btn", "invite-btn"].forEach((id) => { const e = document.getElementById(id); if (e) e.remove(); });
+    const tp = document.getElementById("team-panel"); if (tp) tp.hidden = true;
+    const lr = document.getElementById("invite-link-row"); if (lr) lr.hidden = true;
     renderPresence([]); // 登出:清掉在线人数
-  }
-  async function doInvite() {
-    const cfg = await getCfg(["session_token"]);
-    try {
-      const r = await fetch(BACKEND + "/auth/invites", { method: "POST", headers: { Authorization: "Bearer " + cfg.session_token } });
-      const j = await r.json();
-      if (j.code) {
-        showToast(t("team.inviteCopied") + j.code);
-        try { await navigator.clipboard.writeText(j.code); } catch (e) {}
-      }
-    } catch (e) { showToast(t("team.inviteFail")); }
   }
 
   // Google 登录(交互)
@@ -2112,8 +2215,11 @@
       try {
         const me = await fetch(BACKEND + "/auth/me", { headers: { Authorization: "Bearer " + cfg.session_token } }).then((r) => (r.ok ? r.json() : null));
         if (me && me.id) {
-          // 恢复持久化的团队身份,让 account sheet 继续显示当前团队。
-          _sessionTeam = (cfg.team_id || me.team_id) ? { id: cfg.team_id || me.team_id, name: cfg.team_name || "" } : null;
+          // 恢复持久化的团队身份 + 全部团队列表(/auth/me 现返回 teams),供下拉切换。
+          if (Array.isArray(me.teams)) _sessionTeams = me.teams;
+          const cur = _sessionTeams.find((x) => x.team_id === (cfg.team_id || me.team_id));
+          _sessionTeam = cur ? { id: cur.team_id, name: cur.name }
+            : ((cfg.team_id || me.team_id) ? { id: cfg.team_id || me.team_id, name: cfg.team_name || "" } : null);
           showLoggedIn(me);
           return;
         }
