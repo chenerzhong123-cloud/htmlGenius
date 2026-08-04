@@ -41,7 +41,18 @@
 - `landing/demo-2026-07/setup.html`：写死的 `npx --yes @htmlgenius/bridge@<ver> doctor/setup/uninstall`（含 `data-copy` 属性，多处）。
 - 全仓核对：`grep -rn "@htmlgenius/bridge@\|TARGET_BRIDGE_VERSION\|bridgeVersion" extension/ landing/`。
 
-顺序：**先 `npm publish` 确认新版本上 registry，再提交/部署引用了新版本号的改动**（否则安装命令会指向不存在的版本）。bridge 走 2FA 时发布需 OTP。
+顺序：**先确认新版本上 registry，再提交/部署引用了新版本号的改动**（否则安装命令会指向不存在的版本）。发布通道见下。
+
+## Bridge 发 npm 的两条通道（2026-08-04 踩坑，必读）
+
+npm 已收紧策略：**bypass 类 token（Automation / Granular）被限制用于"direct publishing"**（日志见 `npm tokens that bypass 2FA are being restricted for … direct publishing`，`gh.io/npm-gat-bypass2fa-deprecation`）。后果：**本地 `npm publish` 现在强制 OTP**，即便 `NPM_TOKEN` 是 Automation 类型也绕不过（报 `EOTP`）。
+
+- **CI 发布（免 OTP，首选）**：推 tag `bridge-v<ver>`（如 `bridge-v1.0.2`）→ `.github/workflows/publish-bridge.yml` 在 `macos-latest` 跑 `npm ci → npm test → npm publish --provenance`，用仓库 **Secrets 的 `NPM_TOKEN`（须 Automation 类型）** + GitHub OIDC provenance，**CI 非交互不弹 OTP**。这是当前免 OTP 发 bridge 的可靠通道。
+  - 流程：改版本 + 同步引用 → commit → `git push origin <分支>` → `git tag bridge-v<ver> && git push origin bridge-v<ver>` → 看 Actions 跑通 → `npm view @htmlgenius/bridge@<ver> version` 确认上 registry。
+  - 历史：`bridge-v0.9.2/0.9.3/0.9.4/1.0.0` 走 CI；`1.0.1` 当时是**本地带 OTP** 发的（无对应 tag）。
+- **本地 `npm publish`（需 OTP，兜底）**：`cd bridge && npm publish --otp=<6位码>`，OTP 来自绑定的 Authenticator（30 秒有效）。CI 被拦或临时发版时用。
+  - `NPM_TOKEN` 定义在 `~/.zshenv`（`export NPM_TOKEN=...`），`~/.npmrc` 通过 `${NPM_TOKEN}` 引用；**轮换 token 改 `~/.zshenv` 那一行**（注释已写明）。token 类型用 `npm token list` 看——只有 Automation 能免 OTP，Publish/Granular 都要 OTP。
+  - 本地直发顺序：先 `npm publish --otp=` 确认上 registry，再提交引用（避免提交指向不存在版本的引用）。
 
 ## 安全审计修复批次（2026-07-29，v0.9.10）
 

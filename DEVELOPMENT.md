@@ -97,6 +97,21 @@ uv run uvicorn server.app:app --port 8000 --reload
 - **RangeSelector 未实现**：选区跨多个块级元素时，exact 会被压成单段。
 - **章节锚点兜底**：依赖原文有 h1/h2/h3 结构；无标题时仅靠前后文消歧。
 
+## Bridge 发布到 npm
+
+`@htmlgenius/bridge` 升版后发 npm。**npm 已收紧策略：bypass 类 token（Automation/Granular）被限制用于 direct publishing，本地 `npm publish` 现强制 OTP**（即便 token 是 Automation 类型也报 `EOTP`）。两条通道：
+
+- **CI 发布（免 OTP，首选）**：推 tag `bridge-v<ver>` → `.github/workflows/publish-bridge.yml` 在 `macos-latest` 跑 `npm ci → npm test → npm publish --provenance`，用仓库 Secrets 的 `NPM_TOKEN`（Automation 类型）+ GitHub OIDC provenance，CI 非交互不弹 OTP。
+  ```bash
+  # 改 bridge/package.json + 同步三处引用 → commit → push 分支 →
+  git tag bridge-v<ver> && git push origin bridge-v<ver>
+  # 看 Actions 跑通,再确认:
+  npm view @htmlgenius/bridge@<ver> version
+  ```
+- **本地发布（需 OTP，兜底）**：`cd bridge && npm publish --otp=<6位码>`（OTP 来自 Authenticator，30s 有效）。`NPM_TOKEN` 定义在 `~/.zshenv`，`~/.npmrc` 用 `${NPM_TOKEN}` 引用，轮换改那一行；token 类型用 `npm token list` 看（只有 Automation 免 OTP）。
+
+升版**必须同步**所有引用点（`extension/background.js` 的 `TARGET_BRIDGE_VERSION`、官网 `shared.js` 的 `bridgeVersion`、`setup.html` 的 npx 命令），详见 `CLAUDE.md`「Bridge 版本升级」。先确认上 registry 再部署引用。发 bridge 与扩展发版（商店 dist）、阿里云后端部署是三件独立的事。
+
 ## 路线图
 
 - ~~强身份鉴权：飞书 OAuth 替换 team-token~~（v0.5 已完成）。
