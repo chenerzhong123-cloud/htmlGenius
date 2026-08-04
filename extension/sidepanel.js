@@ -1945,9 +1945,8 @@
     }
   }
 
-  // === 协同登录(飞书 + Google 档3,后端地址烤在 config.js) ===
+  // === 协同登录(Google 档3,后端地址烤在 config.js;飞书登录 UX 已下线,后端 /auth/lark/* 保留) ===
   const BACKEND = (window.HG_CONFIG && window.HG_CONFIG.backend) || "";
-  const loginBtn = document.getElementById("lark-login-btn");
   const googleBtn = document.getElementById("google-login-btn");
   const loginState = document.getElementById("login-state");
   const teamSetup = document.getElementById("team-setup");
@@ -2014,16 +2013,6 @@
       }
     } catch (e) { showToast(t("team.inviteFail")); }
   }
-
-  // 飞书登录
-  loginBtn.addEventListener("click", async () => {
-    loginState.textContent = t("login.larkLoading");
-    try {
-      const r = await Login.start({ backend: BACKEND });
-      await applySession(r);
-      showToast(t("login.larkSuccess"));
-    } catch (e) { loginState.textContent = t("login.fail") + (e && e.message ? e.message : e); }
-  });
 
   // Google 登录(交互)
   googleBtn.addEventListener("click", async () => {
