@@ -629,6 +629,11 @@
   let _provider = null;             // 当前选中 provider id(仅 ready 可选)
   let _providerStates = {};         // { providerId: probe 记录 }
   let _providerCacheAt = 0;         // probe 缓存时间戳(ms);30s 内不重探
+  // 默认 provider:优先 Codex(用户偏好),Codex 不可用则退第一个 ready。
+  function _pickDefaultProvider() {
+    if (_providerStates["codex_app_server"] && _providerStates["codex_app_server"].status === "ready") return "codex_app_server";
+    return Object.keys(_providerStates).find((id) => _providerStates[id] && _providerStates[id].status === "ready") || null;
+  }
   let _plan = null;                 // 已校验计划记录(bridge-plan-ready):{ plan_id, plan_sha256, plan_markdown, provider, source_artifact_uri, base_artifact_hash, task_sha256 }
   let _planStale = false;           // 计划后改 contract/artifact → true,阻止确认
   let _patchPending = null;         // 方向3:待确认的精确编辑预览 { run_id, edits, compliance }
@@ -976,7 +981,7 @@
       _providerCacheAt = Date.now();
       // 恢复上次选择(仅 ready),否则选第一个 ready
       if (!_provider || !(_providerStates[_provider] && _providerStates[_provider].status === "ready")) {
-        _provider = (Object.keys(_providerStates).find((id) => _providerStates[id].status === "ready")) || null;
+        _provider = _pickDefaultProvider();
       }
       if (_contractOpen) { renderProviderMenu(); refreshContractUI(); }
     }).catch(() => {});
@@ -1115,7 +1120,7 @@
       _health.providers.forEach((p) => { if (p && p.id) _providerStates[p.id] = p; });
       _providerCacheAt = Date.now();
       if (!_provider || !(_providerStates[_provider] && _providerStates[_provider].status === "ready")) {
-        _provider = (Object.keys(_providerStates).find((id) => _providerStates[id].status === "ready")) || null;
+        _provider = _pickDefaultProvider();
       }
       renderProviderMenu();
       refreshContractUI();
