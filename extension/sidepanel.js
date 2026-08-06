@@ -1405,6 +1405,7 @@
     if (msg.kind === "command") return msg.starting ? ("🔧 " + t("run.command")) : null;
     if (msg.kind === "reasoning") return msg.starting ? ("💭 " + t("run.reasoning")) : null;
     if (msg.kind === "tokens") return "⚡ " + msg.text + " tokens";
+    if (msg.kind === "info") return "· " + String(msg.text || "");  // Copilot tool/denied 等(info 流):可见以便排障
     return null;
   }
   function renderStreamText() {

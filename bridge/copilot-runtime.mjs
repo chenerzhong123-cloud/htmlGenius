@@ -339,10 +339,13 @@ export function createPreToolPolicy({ workspaceDir, writableFiles, fsImpl = fs, 
   const stats = { denials: 0 };
 
   const handler = (input) => {
-    const toolName = String((input && input.toolName) || "").toLowerCase();
+    const rawName = String((input && input.toolName) || "");
+    // SDK 可能以 "builtin:read" 形态传 toolName(availableTools 用 builtin:<name> 选择器);
+    // 白名单存裸名,先剥前缀,否则 read 被误判 tool_not_allowed 拒绝(Copilot 读源失败根因)。
+    const toolName = rawName.toLowerCase().replace(/^builtin:/, "");
     const deny = (category) => {
       stats.denials += 1;
-      try { recordDenial(toolName, category); } catch (_) {}
+      try { recordDenial(rawName || toolName, category); } catch (_) {}  // 记原始名便于排障
       return { permissionDecision: "deny", permissionDecisionReason: "htmlgenius: " + category };
     };
 
