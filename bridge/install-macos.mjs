@@ -72,10 +72,7 @@ export async function install({ extensionId, hostsDir, claudePath, bridgeDir }) 
   const outDir = hostsDir || defaultHostsDir();
   // origin 硬边界(§6.3):已存在但 extension ID 不匹配 → 拒绝覆盖
   const existing = inspectExistingManifest({ hostsDir: outDir, extensionId });
-  if (existing.state === "ours_mismatch") {
-    const e = new Error("existing HTML Genius host is registered for a different extension; refusing to overwrite");
-    e.code = "EXTENSION_ORIGIN_MISMATCH"; throw e;
-  }
+  // ours_mismatch(本 host 已注册、本次 extensionId 未含)→ 不拒绝;继续到 ensureHostRegistration 合并追加(多扩展支持)。仅 foreign(无关 manifest)拒绝。
   if (existing.state === "foreign") {
     const e = new Error("an unrelated host manifest occupies the HTML Genius host name; refusing to overwrite");
     e.code = "MANIFEST_FOREIGN"; throw e;
