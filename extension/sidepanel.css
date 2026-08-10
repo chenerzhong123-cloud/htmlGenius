@@ -1017,3 +1017,12 @@ button {
 .member-row .member-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .member-remove { background: transparent; color: var(--danger); border: none; font-size: 10px; cursor: pointer; padding: 0 4px; font-family: var(--font-sans); }
 .member-remove:hover { text-decoration: underline; }
+
+/* === 诊断上报(A 一键报告 + B opt-in)=== */
+.diag-report-btn { margin-top: 10px; width: 100%; height: 30px; background: var(--bg-surface-raised); color: var(--text-secondary); border: 1px solid var(--line-default); border-radius: var(--r-sm); font-size: 11px; cursor: pointer; font-family: var(--font-sans); }
+.diag-report-btn:hover { border-color: var(--brand); }
+.diag-sheet .diag-preview { max-height: 180px; overflow: auto; background: var(--bg-input); border: 1px solid var(--line-subtle); border-radius: var(--r-sm); padding: 8px; font: 10px/1.5 var(--font-mono, ui-monospace, monospace); color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; user-select: text; margin: 8px 0; }
+.diag-auto-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); margin: 6px 0; }
+.diag-actions { display: flex; gap: 6px; }
+.diag-actions button { flex: 1; height: 30px; background: var(--bg-surface-raised); color: var(--text-primary); border: 1px solid var(--line-default); border-radius: var(--r-sm); font-size: 12px; cursor: pointer; font-family: var(--font-sans); }
+.diag-actions button:hover { border-color: var(--brand); }

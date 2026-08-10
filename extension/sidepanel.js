@@ -623,6 +623,7 @@
   let _contractRunKind = "candidate"; // candidate | plan(sidepanel 本次派发)
   let _contractRunId = null;          // 当前 sidepanel 跟踪的 run id(匹配 bridge-stream/完成事件)
   let _streamText = "";               // Agent 实时输出累积(agentMessage delta)
+  let _lastFailed = null;             // 最近一次 bridge 失败(诊断上报用)
   let _candidateResult = null;      // 最近一次 candidate-ready 结果(只读成功态)
   let _candidateVersionLabel = null;  // 本文档候选版本号标签(来自 host "1.N" 字符串,如 "1.3")
   // v0.8.1 provider probe + plan-first 状态(spec §3.D/§5)
@@ -2230,6 +2231,8 @@
     } else if (msg.type === "bridge-failed") {
       setContractRunning(false); stopRunTimer();
       if (_contractStep === "plan-running") setContractStep("compose");
+      _lastFailed = { code: msg.code || null, message: msg.message || "", provider: _provider, run_kind: _contractRunKind || null, at: new Date().toISOString() };
+      maybeAutoReportDiag(); // B:opt-in 则自动上报诊断
       const failText = tBridgeFailed(msg.code, msg);
       setBridgeStatus(failText, bridgeFailClass(msg.code));
       pushProgress(failText);
@@ -2374,6 +2377,69 @@
     const fbClose = document.getElementById("feedback-close");
     if (fbClose) fbClose.addEventListener("click", closeFeedbackSheet);
   }
+  // === 诊断上报(A 一键报告 + B opt-in 自动):环境 + 最近错误 + Agent 流式 → 可审视 → 上传/复制 ===
+  let _lastDiagBundle = null;
+  function collectDiagnostics(mode) {
+    const manifest = chrome.runtime.getManifest();
+    const ua = navigator.userAgent || "";
+    return {
+      mode, at: new Date().toISOString(),
+      app_version: manifest.version,
+      chrome_version: (ua.match(/Chrome\/([\d.]+)/) || [])[1] || "",
+      platform: navigator.platform || "",
+      os_hint: (ua.match(/\(([^)]+)\)/) || [])[1] || "",
+      backend: BACKEND,
+      bridge: (_health && _health.bridge) ? { status: _health.bridge.status, version: _health.bridge.version } : null,
+      providers: (_health && _health.providers) || [],
+      provider_selected: _provider,
+      last_error: _lastFailed,
+      agent_stream: (_streamText || "").slice(-8000), // 最近会话(可能含页面内容 → 上报前用户可审视)
+      active_team: _sessionTeam ? { id: _sessionTeam.id, name: _sessionTeam.name } : null,
+    };
+  }
+  async function uploadDiagnostics(bundle) {
+    const r = await fetch(BACKEND + "/api/diagnostics", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bundle),
+    }).catch(() => null);
+    return (r && r.ok) ? r.json() : null;
+  }
+  function openDiagSheet() {
+    _lastDiagBundle = collectDiagnostics("manual");
+    const pre = document.getElementById("diag-preview");
+    if (pre) pre.textContent = JSON.stringify(_lastDiagBundle, null, 2);
+    const sheet = document.getElementById("diag-sheet");
+    if (!sheet) return;
+    sheet.hidden = false;
+    getCfg(["hgAutoDiag"]).then((c) => { const cb = document.getElementById("diag-auto-toggle"); if (cb) cb.checked = !!c.hgAutoDiag; });
+  }
+  async function maybeAutoReportDiag() {
+    let c; try { c = await getCfg(["hgAutoDiag"]); } catch (_) { return; }
+    if (!c || !c.hgAutoDiag) return; // opt-in 默认关
+    const r = await uploadDiagnostics(collectDiagnostics("auto"));
+    try { showToast(r && r.id != null ? t("diag.autoOk") : t("diag.autoFail")); } catch (_) {}
+  }
+  const diagReportBtn = document.getElementById("diag-report-btn");
+  if (diagReportBtn) diagReportBtn.addEventListener("click", openDiagSheet);
+  const diagSheetEl = document.getElementById("diag-sheet");
+  const diagClose = document.getElementById("diag-close");
+  if (diagClose) diagClose.addEventListener("click", () => { if (diagSheetEl) diagSheetEl.hidden = true; });
+  const diagUpload = document.getElementById("diag-upload-btn");
+  if (diagUpload) diagUpload.addEventListener("click", async () => {
+    if (!_lastDiagBundle) return;
+    diagUpload.disabled = true;
+    const r = await uploadDiagnostics(_lastDiagBundle);
+    diagUpload.disabled = false;
+    showToast(r && r.id != null ? t("diag.uploadOk").replace("{id}", r.id) : t("diag.uploadFail"));
+    if (r && r.id != null && diagSheetEl) diagSheetEl.hidden = true;
+  });
+  const diagCopy = document.getElementById("diag-copy-btn");
+  if (diagCopy) diagCopy.addEventListener("click", () => {
+    if (!_lastDiagBundle) return;
+    try { navigator.clipboard.writeText(JSON.stringify(_lastDiagBundle, null, 2)); showToast(t("diag.copied")); } catch (_) {}
+  });
+  const diagAuto = document.getElementById("diag-auto-toggle");
+  if (diagAuto) diagAuto.addEventListener("change", () => setCfg({ hgAutoDiag: !!diagAuto.checked }));
+
   // v0.9.9 前往官网(header 主页按钮 → 新标签打开;URL 取 manifest.homepage_url,与商店/仓库同源)
   const websiteBtn = document.getElementById("website-btn");
   if (websiteBtn) websiteBtn.addEventListener("click", () => {

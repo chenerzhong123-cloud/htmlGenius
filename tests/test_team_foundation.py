@@ -319,3 +319,17 @@ def test_e2e_register_invite_comment(tmp_path, monkeypatch):
         "Authorization": f"Bearer {client.post('/auth/google/session', json={'id_token': 't3', 'team_id': jc['teams'][0]['team_id']}).json()['token']}"
     }
     assert client.get("/api/annotations?document_id=d", headers=Hc).json()["items"] == []
+
+
+def test_diagnostics_endpoint(tmp_path):
+    """A+B:诊断上报端点接收任意 JSON、落库、大小封顶(128KB)。"""
+    _init(tmp_path)
+    r = client.post("/api/diagnostics", json={
+        "mode": "manual", "app_version": "0.9.15", "chrome_version": "Chrome/120",
+        "last_error": {"code": "CLAUDE_TIMEOUT", "message": "timed out"}, "agent_stream": "…",
+    })
+    assert r.status_code == 200, r.text
+    assert isinstance(r.json().get("id"), int)
+    # 超大 → 413
+    big = {"x": "a" * (130 * 1024)}
+    assert client.post("/api/diagnostics", json=big).status_code == 413

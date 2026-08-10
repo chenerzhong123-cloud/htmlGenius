@@ -360,6 +360,22 @@ def dissolve_team(team_id: str, session: Session = Depends(require_session)):
     return {"ok": True}
 
 
+# === 诊断上报(A+B:用户一键报告 / opt-in 自动上报;不鉴权,用户主动触发)===
+
+
+@app.post("/api/diagnostics")
+def submit_diagnostics(payload: dict):
+    """接收诊断包。大小封顶(128KB)防滥用;不鉴权(用户主动上报/opt-in 自动)。
+    payload 由扩展构造:app/chrome/os 版本、bridge 状态、provider、最近错误、Agent 流式(可能含页面内容)。
+    """
+    raw = json.dumps(payload, ensure_ascii=False)
+    if len(raw) > 128 * 1024:
+        raise HTTPException(status_code=413, detail="diagnostics payload too large")
+    mode = str((payload.get("mode") if isinstance(payload, dict) else "") or "manual")[:16]
+    diag_id = storage.save_diagnostics(raw, mode)
+    return {"ok": True, "id": diag_id}
+
+
 # === 文档 / 版本 (BE-2:全部需 session 鉴权;HTML 响应加严格 CSP 防存储型 XSS) ===
 # 旧版无鉴权且把用户 HTML 以 text/html 直吐 → 匿名植入 <script> + 诱使打开 = 存储型
 # XSS → 账户接管,DELETE 也匿名可删。现:写/读/删全要 Bearer session;HTML 响应加

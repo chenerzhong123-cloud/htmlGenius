@@ -98,6 +98,12 @@ def init_db(path: Path) -> None:
                 used_count INTEGER DEFAULT 0,
                 expires_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS diagnostics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                mode TEXT,
+                payload TEXT NOT NULL
+            );
             """
         )
         # v0.2 迁移:versions 加 html_content 列(若旧库缺)
@@ -460,3 +466,42 @@ def _row_to_ann(r: sqlite3.Row) -> dict:
         "team_id": r["team_id"],
         "parent_id": r["parent_id"],
     }
+
+
+# === 诊断上报(A+B:用户一键报告 / opt-in 自动上报)===
+def save_diagnostics(payload_json: str, mode: str = "manual") -> int:
+    """存一条诊断包(原始 JSON 字符串)。大小由端点封顶,此处只落库。返回 id。"""
+    c = _connect()
+    try:
+        cur = c.execute(
+            "INSERT INTO diagnostics(created_at, mode, payload) VALUES (?,?,?)",
+            (_now(), str(mode)[:16], payload_json),
+        )
+        return int(cur.lastrowid)
+    finally:
+        c.close()
+
+
+def list_diagnostics(limit: int = 50) -> list[dict]:
+    """最近诊断记录(管理/排障查;只回 id/时间/mode,不含 payload 正文防误泄)。"""
+    c = _connect()
+    try:
+        rows = c.execute(
+            "SELECT id, created_at, mode FROM diagnostics ORDER BY id DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+    finally:
+        c.close()
+    return [{"id": r["id"], "created_at": r["created_at"], "mode": r["mode"]} for r in rows]
+
+
+def get_diagnostics(diag_id: int) -> "dict | None":
+    """取单条诊断正文(含 payload)。仅管理查。"""
+    c = _connect()
+    try:
+        r = c.execute("SELECT id, created_at, mode, payload FROM diagnostics WHERE id=?", (int(diag_id),)).fetchone()
+    finally:
+        c.close()
+    if not r:
+        return None
+    return {"id": r["id"], "created_at": r["created_at"], "mode": r["mode"], "payload": r["payload"]}

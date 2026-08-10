@@ -210,6 +210,20 @@
     <img class="feedback-qr" src="icons/feedback-qrcode.jpeg" alt="小红书二维码,也可在小红书搜索 @AI二重同学 反馈" />
   </div>
   <div class="feedback-scan" data-i18n="feedback.scanHint">扫码前往小红书反馈</div>
+  <button id="diag-report-btn" class="diag-report-btn" type="button" data-i18n="diag.reportBtn">报告问题（附诊断信息）</button>
+</div>
+
+<!-- 诊断上报(A+B):可审视诊断包 → 上传/复制;opt-in 自动上报 -->
+<div id="diag-sheet" class="sheet diag-sheet" role="dialog" aria-modal="true" aria-labelledby="diag-title" hidden>
+  <button id="diag-close" class="feedback-close" type="button" aria-label="✕">✕</button>
+  <div id="diag-title" class="sheet-title" data-i18n="diag.title">报告问题</div>
+  <div class="sheet-sub" data-i18n="diag.sub">将收集以下信息用于排障（不含登录凭证/密钥）。确认后上传，或复制后手动发送。</div>
+  <pre id="diag-preview" class="diag-preview"></pre>
+  <label class="diag-auto-row"><input id="diag-auto-toggle" type="checkbox" /><span data-i18n="diag.autoOpt">以后出错自动上报</span></label>
+  <div class="diag-actions">
+    <button id="diag-upload-btn" type="button" data-i18n="diag.upload">上传到服务器</button>
+    <button id="diag-copy-btn" type="button" data-i18n="diag.copy">复制</button>
+  </div>
 </div>
 
 <!-- v0.8.1 创建编辑任务(覆盖式 sheet)。data-step:compose(选择修改范围,默认全选)/ comment-scope(选择评论范围,高级入口)/ plan-review(确认修改计划)。
