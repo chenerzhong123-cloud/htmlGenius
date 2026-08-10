@@ -891,7 +891,7 @@ button {
 .contract-bridge-status .cbs-empty { color: var(--text-faint); font-style: italic; }
 
 /* Agent 实时输出流(逐字滚动 + 光标) */
-.contract-bridge-status .cbs-stream { margin: 2px 0 6px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--bg-input); color: var(--text-secondary); font: 11px/1.55 var(--font-mono, ui-monospace, monospace); white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow-y: auto; }
+.contract-bridge-status .cbs-stream { margin: 2px 0 6px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--bg-input); color: var(--text-secondary); font: 11px/1.55 var(--font-mono, ui-monospace, monospace); white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow-y: auto; }
 .contract-bridge-status .cbs-stream:empty { display: none; }
 .contract-bridge-status .cbs-stream.typing::after { content: "▌"; color: var(--brand); animation: cbs-blink 1s steps(2) infinite; }
 @keyframes cbs-blink { 50% { opacity: 0; } }

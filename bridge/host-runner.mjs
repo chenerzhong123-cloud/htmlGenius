@@ -262,12 +262,14 @@ export async function executeCandidateRun(msg, { emit: rawEmit, claude } = {}) {
   const promptText = buildCandidatePrompt({ runId, task })
     + (msg.approved_plan ? approvedPlanPreamble(msg.approved_plan.edited_plan_markdown) : "");
   let sessionId;
+  // Claude 流式:stream-json 事件 → bridge_stream(sidepanel 实时展示生成过程/工具,便于排障超时)
+  const claudeStream = (ev) => { try { emit({ type: "bridge_stream", run_id: runId, kind: ev.kind, text: ev.text, starting: !!ev.starting }); } catch (_) {} };
   try {
     if (session.mode === "continue") {
-      const r = await cli.resumeHandoff({ cwd: prep.runsDir, promptText, resumeSessionId: session.session_id, runKind: "candidate", timeoutMs: CANDIDATE_TIMEOUT_MS });
+      const r = await cli.resumeHandoff({ cwd: prep.runsDir, promptText, resumeSessionId: session.session_id, runKind: "candidate", timeoutMs: CANDIDATE_TIMEOUT_MS, onStream: claudeStream });
       sessionId = r.sessionId;
     } else {
-      const r = await cli.runHandoff({ cwd: prep.runsDir, promptText, runKind: "candidate", timeoutMs: CANDIDATE_TIMEOUT_MS });
+      const r = await cli.runHandoff({ cwd: prep.runsDir, promptText, runKind: "candidate", timeoutMs: CANDIDATE_TIMEOUT_MS, onStream: claudeStream });
       sessionId = r.sessionId;
       emit({ type: "bridge_session_created", run_id: runId, session_id: sessionId });
     }
@@ -409,8 +411,9 @@ export async function executePlanRun(msg, { emit: rawEmit, claude } = {}) {
   status("running");
   const promptText = buildPlanPrompt({ runId, task });
   let sessionId;
+  const claudeStream = (ev) => { try { emit({ type: "bridge_stream", run_id: runId, kind: ev.kind, text: ev.text, starting: !!ev.starting }); } catch (_) {} };
   try {
-    const r = await cli.runHandoff({ cwd: prep.plansDir, promptText, runKind: "plan", timeoutMs: CLAUDE_PLAN_TIMEOUT_MS });
+    const r = await cli.runHandoff({ cwd: prep.plansDir, promptText, runKind: "plan", timeoutMs: CLAUDE_PLAN_TIMEOUT_MS, onStream: claudeStream });
     sessionId = r.sessionId;
   } catch (e) {
     const code = (e && e.code === "CLAUDE_TIMEOUT") ? "CLAUDE_PLAN_TIMEOUT" : (e.code || "CLAUDE_PLAN_FAILED");

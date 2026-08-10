@@ -44,7 +44,7 @@ export function sanitizedEnv() {
 // prompt 永远是 argv 最后一个元素;resumeSessionId 只接受校验过的 UUID。
 // runKind: "handoff"(只读回执,v0.7.1) | "candidate"(Night Pack A:放行 Write 写 candidate.html)
 //        | "plan"(v0.8.1:放行 Write 写 output/plan.json;§6.5 同 candidate 工具集,禁 Bash/Edit/网/MCP)。
-export function buildClaudeArgv({ promptText, resumeSessionId, runKind }) {
+export function buildClaudeArgv({ promptText, resumeSessionId, runKind, stream }) {
   if (typeof promptText !== "string" || !promptText.length) {
     fail("BAD_PROMPT", "promptText is required");
   }
@@ -56,7 +56,7 @@ export function buildClaudeArgv({ promptText, resumeSessionId, runKind }) {
   const maxTurns = runKind === "candidate" ? "24" : runKind === "plan" ? "16" : runKind === "patch" ? "12" : "4"; // candidate 编辑多轮;plan 写 JSON 中等;patch 读源+输出编辑 JSON(实测「无需修改」判定也会消耗 6+ 轮校验,8 太紧会耗尽,12 留余量);handoff 回执少轮
   const argv = [
     "-p",
-    "--output-format", "json",
+    "--output-format", stream ? "stream-json" : "json",  // stream=true → NDJSON 事件流(实时展示生成过程)
     "--safe-mode",                    // 禁用户自定义 hooks/plugins/MCP/skills/本地项目定制
     "--disable-slash-commands",       // 禁 skills 与 slash commands
     "--allowed-tools", allowed,
@@ -64,6 +64,7 @@ export function buildClaudeArgv({ promptText, resumeSessionId, runKind }) {
     "--permission-mode", "dontAsk",   // 非交互:不弹权限询问
     "--max-turns", maxTurns
   ];
+  if (stream) argv.push("--verbose"); // stream-json 配合 verbose 输出 assistant/tool 事件
   if (resumeSessionId != null) {
     if (!isSessionUuid(resumeSessionId)) fail("CLAUDE_SESSION_UNAVAILABLE", "resume session_id is not a valid UUID");
     argv.push("--resume", String(resumeSessionId).trim());
@@ -76,8 +77,30 @@ export function buildHandoffArgv({ promptText, resumeSessionId }) {
   return buildClaudeArgv({ promptText, resumeSessionId, runKind: "handoff" });
 }
 
+// —— stream-json NDJSON 逐行解析:assistant 文本/tool_use/tool_result → onStream;result 事件返回(取 session_id)——
+export function parseStreamLine(line, onStream) {
+  let obj; try { obj = JSON.parse(line); } catch (_) { return null; }
+  if (!obj || typeof obj !== "object") return null;
+  const msg = obj.message;
+  if (obj.type === "assistant" && msg && Array.isArray(msg.content)) {
+    for (const blk of msg.content) {
+      if (blk && blk.type === "text" && blk.text) { try { onStream({ kind: "delta", text: String(blk.text) }); } catch (_) {} }
+      else if (blk && blk.type === "tool_use") { try { onStream({ kind: "command", text: "🔧 " + String(blk.name || "tool"), starting: true }); } catch (_) {} }
+    }
+  } else if (obj.type === "user" && msg && Array.isArray(msg.content)) {
+    for (const blk of msg.content) {
+      if (blk && blk.type === "tool_result") {
+        const c = blk.content;
+        const txt = typeof c === "string" ? c : (Array.isArray(c) ? c.map((x) => (x && x.text) || "").join("") : "");
+        if (txt) { try { onStream({ kind: "info", text: "↩ " + String(txt).slice(0, 600) }); } catch (_) {} }
+      }
+    }
+  }
+  return obj.type === "result" ? obj : null;
+}
+
 // —— 底层 spawn:shell:false + 超时 + stderr 截断 + stdout 防御上限 ——
-function runClaude(argv, { cwd, timeoutMs } = {}) {
+function runClaude(argv, { cwd, timeoutMs, onStream } = {}) {
   if (typeof cwd !== "string" || !cwd.length) fail("BAD_CWD", "cwd is required");
   return new Promise((resolve, reject) => {
     let child;
@@ -97,6 +120,8 @@ function runClaude(argv, { cwd, timeoutMs } = {}) {
     let stdout = Buffer.alloc(0);
     let stderr = Buffer.alloc(0);
     let settled = false;
+    let lineBuf = "";
+    let resultObj = null; // 流式:末尾 result 事件(供 session_id 解析)
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -108,6 +133,15 @@ function runClaude(argv, { cwd, timeoutMs } = {}) {
 
     child.stdout.on("data", (c) => {
       if (stdout.length < MAX_STDOUT_BYTES) stdout = Buffer.concat([stdout, c]);
+      if (typeof onStream === "function") {
+        lineBuf += c.toString("utf8");
+        let nl;
+        while ((nl = lineBuf.indexOf("\n")) >= 0) {
+          const line = lineBuf.slice(0, nl); lineBuf = lineBuf.slice(nl + 1);
+          const r = parseStreamLine(line, onStream);
+          if (r) resultObj = r;
+        }
+      }
     });
     child.stderr.on("data", (c) => {
       if (stderr.length < MAX_STDERR_BYTES) {
@@ -124,7 +158,12 @@ function runClaude(argv, { cwd, timeoutMs } = {}) {
     child.on("close", (code) => {
       if (settled) return;
       settled = true; clearTimeout(timer);
-      resolve({ code, stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8") });
+      let outStr = stdout.toString("utf8");
+      if (typeof onStream === "function") {
+        if (lineBuf.trim()) { const r = parseStreamLine(lineBuf, onStream); if (r) resultObj = r; }
+        if (resultObj) outStr = JSON.stringify(resultObj); // 流式:用 result 事件作 stdout 供 parseHandoffResult/classify 解析
+      }
+      resolve({ code, stdout: outStr, stderr: stderr.toString("utf8") });
     });
   });
 }
@@ -181,9 +220,9 @@ export function classifyClaudeFailure({ code, stdout, stderr }) {
 }
 
 // —— new handoff(spec §7 步骤6)——
-export async function runHandoff({ cwd, promptText, timeoutMs, runKind }) {
-  const argv = buildClaudeArgv({ promptText, runKind });
-  const { code, stdout, stderr } = await runClaude(argv, { cwd, timeoutMs });
+export async function runHandoff({ cwd, promptText, timeoutMs, runKind, onStream }) {
+  const argv = buildClaudeArgv({ promptText, runKind, stream: !!onStream });
+  const { code, stdout, stderr } = await runClaude(argv, { cwd, timeoutMs, onStream });
   const cls = classifyClaudeFailure({ code, stdout, stderr });
   if (cls) fail(cls.code, cls.message, { exitCode: code });
   return parseHandoffResult(stdout);
@@ -210,9 +249,9 @@ export function parsePatchResult(stdout) {
 }
 
 // —— patch run(方向3):只读工具(runKind "patch" 不放行 Write),Claude 读 source.html 后仅以最终文本输出编辑 JSON。——
-export async function runPatch({ cwd, promptText, timeoutMs }) {
-  const argv = buildClaudeArgv({ promptText, runKind: "patch" });
-  const { code, stdout, stderr } = await runClaude(argv, { cwd, timeoutMs });
+export async function runPatch({ cwd, promptText, timeoutMs, onStream }) {
+  const argv = buildClaudeArgv({ promptText, runKind: "patch", stream: !!onStream });
+  const { code, stdout, stderr } = await runClaude(argv, { cwd, timeoutMs, onStream });
   const cls = classifyClaudeFailure({ code, stdout, stderr });
   if (cls) fail(cls.code, cls.message, { exitCode: code });
   return parsePatchResult(stdout);
@@ -220,11 +259,11 @@ export async function runPatch({ cwd, promptText, timeoutMs }) {
 
 // —— continue handoff(spec §7 步骤7):只允许 --resume <已保存 UUID>;cwd 必须是该 session 的
 // workspace(调用方保证)。不支持/找不到 session → CLAUDE_SESSION_UNAVAILABLE;绝不回退 -c 或 picker。——
-export async function resumeHandoff({ cwd, promptText, resumeSessionId, timeoutMs, runKind }) {
-  const argv = buildClaudeArgv({ promptText, resumeSessionId, runKind });
+export async function resumeHandoff({ cwd, promptText, resumeSessionId, timeoutMs, runKind, onStream }) {
+  const argv = buildClaudeArgv({ promptText, resumeSessionId, runKind, stream: !!onStream });
   let r;
   try {
-    r = await runClaude(argv, { cwd, timeoutMs });
+    r = await runClaude(argv, { cwd, timeoutMs, onStream });
   } catch (e) {
     // timeout/not-installed 保持原 code 上抛,其余归为 session 不可用
     if (e && (e.code === "CLAUDE_TIMEOUT" || e.code === "CLAUDE_NOT_INSTALLED")) throw e;

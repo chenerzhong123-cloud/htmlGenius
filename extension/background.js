@@ -21,10 +21,10 @@ const HANDOFF_START_TYPES = (() => {
 // v0.9 §4.3:版本单一来源 —— 扩展版本一律取 manifest(getManifest().version),杜绝四处漂移。
 // BRIDGE_PROTOCOL_VERSION:与 bridge-health/host 共用;TARGET_BRIDGE_VERSION:bootstrap 指向的受控 CLI 版本(不得 latest)。
 const BRIDGE_PROTOCOL_VERSION = 1;
-const TARGET_BRIDGE_VERSION = "1.0.4";
+const TARGET_BRIDGE_VERSION = "1.0.5";
 // bridge 自 1.0.0 起独立于扩展 manifest 编号(扩展仍按 0.x.x);此处只钉 bootstrap 指向的 bridge 版本。
 // bootstrap 发行态:"development" = 仓库内开发命令(显著标注仅开发环境);"production" = 已发布的固定版本 npx 命令。
-// @htmlgenius/bridge 已发布到 npm → production:任何设备 `npx --yes @htmlgenius/bridge@1.0.4 setup` 即可安装。
+// @htmlgenius/bridge 已发布到 npm → production:任何设备 `npx --yes @htmlgenius/bridge@1.0.5 setup` 即可安装。
 const BOOTSTRAP_DISTRIBUTION = "production";
 function extensionVersion() { try { return chrome.runtime.getManifest().version; } catch (_) { return "0.0.0"; } }
 // v0.8.1 §5.2/§6.7:candidate + plan 是新主流程;handoff 旧路径保留兼容(V0.8.1 UI 不再创建)。
@@ -337,7 +337,7 @@ function onHostMessage(tab_id, runId, m, taskSha, logicalId, artifactUrl) {
   }
   if (m.type === "bridge_stream") {
     // v0.8.1:Codex turn 中途进度(token 流/工具/文件)。只转发安全摘要,不含命令体/路径/stderr/思维链正文。
-    broadcast({ type: "bridge-stream", tab_id, run_id: runId, kind: m.kind || "info", text: String(m.text || "").slice(0, 800), starting: !!m.starting });
+    broadcast({ type: "bridge-stream", tab_id, run_id: runId, kind: m.kind || "info", text: String(m.text || "").slice(0, 8000), starting: !!m.starting });
     return;
   }
   if (m.type === "bridge_failed") {

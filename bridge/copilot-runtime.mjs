@@ -405,7 +405,7 @@ export async function runCopilotSession({
         try {
           const type = event && event.type;
           if (type === "tool.execution_start") onEvent({ kind: "tool", name: String((event.data && event.data.toolName) || "").slice(0, 64) });
-          else if (type === "assistant.message") onEvent({ kind: "text", text: String((event.data && event.data.content) || "").slice(0, 500) });
+          else if (type === "assistant.message") onEvent({ kind: "text", text: String((event.data && event.data.content) || "").slice(0, 4000) });
           else if (type === "session.idle") onEvent({ kind: "idle" });
         } catch (_) {}
       });

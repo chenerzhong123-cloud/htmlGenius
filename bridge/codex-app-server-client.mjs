@@ -63,7 +63,7 @@ function codexNotificationToStream(msg) {
     }
     if (it.type === 'commandExecution') return { kind: 'command', starting };
     if (it.type === 'reasoning') return { kind: 'reasoning', starting };
-    if (it.type === 'agentMessage' && !starting) return { kind: 'message', text: String(it.text || '').slice(0, 400) };
+    if (it.type === 'agentMessage' && !starting) return { kind: 'message', text: String(it.text || '').slice(0, 4000) };
     return null;
   }
   if (m === 'thread/tokenUsage/updated') {

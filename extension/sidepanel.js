@@ -1411,8 +1411,9 @@
   function renderStreamText() {
     const el = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-stream");
     if (!el) return;
-    el.textContent = _streamText.slice(-400);
+    el.textContent = _streamText; // 完整会话(不再只取末尾 400 字符),框可滚动便于排障
     el.classList.toggle("typing", !!_streamText);
+    el.scrollTop = el.scrollHeight; // 自动滚到底,最新输出可见
   }
   function bridgeFailClass(code) {
     if (code === "USER_CANCELLED") return "warn";
