@@ -2414,7 +2414,7 @@
     if (pre) pre.textContent = JSON.stringify(_lastDiagBundle, null, 2);
     const sheet = document.getElementById("diag-sheet");
     if (!sheet) return;
-    sheet.hidden = false;
+    sheet.classList.add("show"); // .sheet 默认 display:none,统一用 .show 显隐(与 feedback/account sheet 一致;此前用 hidden=false 无效 → 点了没反应)
     getCfg(["hgAutoDiag"]).then((c) => { const cb = document.getElementById("diag-auto-toggle"); if (cb) cb.checked = !!c.hgAutoDiag; });
   }
   async function maybeAutoReportDiag() {
@@ -2427,7 +2427,7 @@
   if (diagReportBtn) diagReportBtn.addEventListener("click", openDiagSheet);
   const diagSheetEl = document.getElementById("diag-sheet");
   const diagClose = document.getElementById("diag-close");
-  if (diagClose) diagClose.addEventListener("click", () => { if (diagSheetEl) diagSheetEl.hidden = true; });
+  if (diagClose) diagClose.addEventListener("click", () => { if (diagSheetEl) diagSheetEl.classList.remove("show"); });
   const diagUpload = document.getElementById("diag-upload-btn");
   if (diagUpload) diagUpload.addEventListener("click", async () => {
     if (!_lastDiagBundle) return;
@@ -2435,7 +2435,7 @@
     const r = await uploadDiagnostics(_lastDiagBundle);
     diagUpload.disabled = false;
     showToast(r && r.id != null ? t("diag.uploadOk").replace("{id}", r.id) : t("diag.uploadFail"));
-    if (r && r.id != null && diagSheetEl) diagSheetEl.hidden = true;
+    if (r && r.id != null && diagSheetEl) diagSheetEl.classList.remove("show");
   });
   const diagCopy = document.getElementById("diag-copy-btn");
   if (diagCopy) diagCopy.addEventListener("click", () => {
