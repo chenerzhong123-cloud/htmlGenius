@@ -1233,8 +1233,17 @@
       userCollapsed: _connCollapsed,
       devOnly: !!(_bootstrap && _bootstrap.dev_only)
     });
-    connCenter.className = "conn-center" + (st.cls ? " " + st.cls : "") + (connHead && st.collapsed ? " collapsed" : "");
-    if (connHead) connHead.setAttribute("aria-expanded", String(!st.collapsed));
+    // Bridge 升级提醒:host bridge 版本 < 目标版本(TARGET_BRIDGE_VERSION,经 _bootstrap.bridge_version 传回)。
+    // 有新版时:① 钉住展开 —— 覆盖 ready 态的自动折叠(connStateFor ready→collapsed=true),否则升级按钮被折进
+    //            display:none 的 body 里、点完「检查连接」就消失;仅在用户未手动折叠过时钉住(尊重用户显式收起)。
+    //         ② 常驻提示 + 露出「复制命令行指令升级」按钮(文案与安装态的「复制 Terminal 命令」区分)。
+    // 未连接态(install_required / repair_required)由 connStateFor 自身露出「复制 Terminal 命令」,不在此覆盖。
+    const _hostVer = (_health && _health.bridge && _health.bridge.version) || null;
+    const _targetVer = (_bootstrap && _bootstrap.bridge_version) || null;
+    const _upgrade = !!(_hostVer && _targetVer && _cmpVer(_hostVer, _targetVer) < 0);
+    const _collapsed = (_upgrade && _connCollapsed === null) ? false : st.collapsed;
+    connCenter.className = "conn-center" + (st.cls ? " " + st.cls : "") + (connHead && _collapsed ? " collapsed" : "");
+    if (connHead) connHead.setAttribute("aria-expanded", String(!_collapsed));
     if (connTitle) {
       connTitle.textContent = (st.titleKey === "conn.titleConnected")
         ? t(st.titleKey).replace("{n}", String(st.readyCount || 0))
@@ -1248,13 +1257,9 @@
     let hint = st.permanentHintKey ? t(st.permanentHintKey) : "";
     if (hint && st.devOnly) hint += " " + t("conn.devOnly");
     connSetPermanent(hint);
-    // Bridge 升级提醒:host bridge 版本 < 目标版本(TARGET_BRIDGE_VERSION,经 _bootstrap.bridge_version 传回)
-    // → 常驻提示 + 露出"复制 Terminal 命令"让用户升级(已连接态)。未连接态由 install_required 分支覆盖。
-    const _hostVer = (_health && _health.bridge && _health.bridge.version) || null;
-    const _targetVer = (_bootstrap && _bootstrap.bridge_version) || null;
-    if (_hostVer && _targetVer && _cmpVer(_hostVer, _targetVer) < 0) {
+    if (_upgrade) {
       connSetPermanent(t("conn.bridgeUpdate").replace("{v}", _targetVer));
-      setConnButton(connSecondary, t("conn.copyTerminal"), "terminal");
+      setConnButton(connSecondary, t("conn.copyTerminalUpgrade"), "terminal");
     }
   }
   async function connDo(action, btn) {
