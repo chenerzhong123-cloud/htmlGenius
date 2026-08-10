@@ -78,9 +78,16 @@ export function assertMacOS(platform = process.platform) {
   }
 }
 
-// 单 origin host manifest(硬边界:只允许传入的那一个扩展,无 wildcard)。
-export function buildManifest({ extensionId, launcherPath }) {
-  validateExtensionId(extensionId);
+// origin <-> extension id 互转 + 去重(保序)。多扩展支持:测试机同时装商店版+开发版。
+function originFor(id) { return "chrome-extension://" + id + "/"; }
+function idFromOrigin(o) { const m = /^chrome-extension:\/\/([a-p]{32})\//i.exec(String(o || "")); return m ? m[1] : null; }
+function uniqueOrdered(arr) { const seen = new Set(); const out = []; for (const x of arr) { if (x && !seen.has(x)) { seen.add(x); out.push(x); } } return out; }
+
+// host manifest(硬边界:只允许显式传入的扩展 id,无 wildcard)。支持单/多 id(多 id = 测试机多扩展)。
+export function buildManifest({ extensionId, extensionIds, launcherPath }) {
+  const ids = (Array.isArray(extensionIds) && extensionIds.length ? extensionIds.slice() : (extensionId ? [extensionId] : []));
+  if (!ids.length) { const err = new Error("extensionId(s) required"); err.code = "INVALID_EXTENSION_ID"; throw err; }
+  ids.forEach(validateExtensionId);
   if (!path.isAbsolute(launcherPath)) {
     const err = new Error("launcher path must be absolute"); err.code = "PATH_NOT_ABSOLUTE"; throw err;
   }
@@ -89,7 +96,7 @@ export function buildManifest({ extensionId, launcherPath }) {
     description: "HTML Genius Local Bridge (local AI agent handoff)",
     path: launcherPath,
     type: "stdio",
-    allowed_origins: ["chrome-extension://" + extensionId + "/"]
+    allowed_origins: ids.map(originFor)
   };
 }
 
@@ -242,9 +249,10 @@ export function inspectExistingManifest({ hostsDir, extensionId }) {
   let m = null;
   try { m = JSON.parse(raw); } catch (_) { m = null; }
   if (!m || m.name !== HOST_NAME) return { state: "foreign", manifestPath: mp };
-  const expected = "chrome-extension://" + extensionId + "/";
+  const expected = originFor(extensionId);
   const origins = Array.isArray(m.allowed_origins) ? m.allowed_origins : [];
-  if (origins.length === 1 && origins[0] === expected) return { state: "ours_match", manifestPath: mp, manifest: m };
+  // 包含即匹配:本扩展 id 在 allowed_origins 里就算 ours_match(支持测试机多扩展合并注册)。
+  if (origins.includes(expected)) return { state: "ours_match", manifestPath: mp, manifest: m };
   return { state: "ours_mismatch", manifestPath: mp, manifest: m };
 }
 
@@ -261,7 +269,17 @@ export function hostFilePaths(hostsDir) {
 export function ensureHostRegistration({ hostsDir, extensionId, launcherSource }) {
   const { manifestPath, launcherPath } = hostFilePaths(hostsDir);
   const launcherExpected = launcherSource;
-  const manifestExpected = JSON.stringify(buildManifest({ extensionId, launcherPath }), null, 2) + "\n";
+  // 合并注册:读现有 manifest 的 allowed_origins(若 ours),把本次 extensionId 去重追加。
+  // 支持测试机同时装商店版+开发版:各跑各的 setup --extension-id,合并到同一 host,不互相覆盖。
+  let existingIds = [];
+  try {
+    const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    if (m && m.name === HOST_NAME && Array.isArray(m.allowed_origins)) {
+      existingIds = m.allowed_origins.map(idFromOrigin).filter(Boolean);
+    }
+  } catch (_) { /* 无 manifest 或非本工具 → 全新注册 */ }
+  const mergedIds = uniqueOrdered([...existingIds, extensionId]);
+  const manifestExpected = JSON.stringify(buildManifest({ extensionIds: mergedIds, launcherPath }), null, 2) + "\n";
   let sameLauncher = false, sameManifest = false;
   try { sameLauncher = fs.readFileSync(launcherPath, "utf8") === launcherExpected; } catch (_) {}
   try { sameManifest = fs.readFileSync(manifestPath, "utf8") === manifestExpected; } catch (_) {}
