@@ -100,13 +100,21 @@ export function discoverLocalCopilotCli({ env = process.env, fsImpl = fs, platfo
   };
   String(env.PATH || "").split(":").forEach(push);
   COMMON_CLI_DIRS.forEach(push);
+  // v0.9.x:nvm 装的 copilot 在 ~/.nvm/versions/node/<ver>/bin/(Chrome 启动的 bridge 拿不到 .zshrc 的 PATH);
+  // bridge 自己跑在 process.execPath 的 node 上,其 bin 目录通常与 copilot 同目录。
+  push(path.dirname(process.execPath || ""));
+  try { const nvmBase = path.join(home, ".nvm", "versions", "node"); for (const v of fsImpl.readdirSync(nvmBase)) push(path.join(nvmBase, v, "bin")); } catch (_) {}
   for (const dir of dirs) {
     const candidate = path.join(dir, "copilot");
     let st;
     try { st = fsImpl.lstatSync(candidate); } catch (_) { continue; }
-    if (st.isSymbolicLink()) continue; // 拒绝 symlink
-    if (!st.isFile()) continue;        // 拒绝目录等
+    // v0.9.x:允许 symlink(homebrew/npm/nvm 装的 copilot 常是 symlink→npm-loader.js 这种 node 脚本;
+    // Agent 工具的路径围栏才是真安全边界,不靠拒绝 symlink——否则合法安装全部找不到,只能用 bundled 兜底)。
+    if (!st.isFile() && !st.isSymbolicLink()) continue;
     try { fsImpl.accessSync(candidate, fsImpl.constants ? fsImpl.constants.X_OK : 1); } catch (_) { continue; }
+    // copilot 是 node 脚本(shebang #!/usr/bin/env node);bridge 由 Chrome 启动、PATH 可能不含 node
+    // → 把它所在目录注入 env.PATH,使后续 spawn(版本读取 / SDK forStdio)的 shebang 能在同目录找到 node。
+    try { const p = String(env.PATH || ""); if (!p.split(":").includes(dir)) env.PATH = dir + ":" + p; } catch (_) {}
     return candidate;
   }
   return null;

@@ -184,15 +184,16 @@ test("probe: 意外异常不外抛 → status error(不影响其它 provider 的
 
 // —— 本地 CLI 发现 ——
 
-test("discoverLocalCopilotCli: 拒绝 symlink / 目录 / 不可执行;只返回合法普通文件", async () => {
+test("discoverLocalCopilotCli: 接受可执行文件 + 指向可执行文件的 symlink;拒目录/不可执行/坏 symlink", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hg-copilot-discover-"));
   try {
-    const dirA = path.join(tmp, "a"), dirB = path.join(tmp, "b"), dirC = path.join(tmp, "c"), dirD = path.join(tmp, "d");
-    fs.mkdirSync(dirA); fs.mkdirSync(dirB); fs.mkdirSync(dirC); fs.mkdirSync(dirD);
-    // a: symlink(应拒绝)
+    const dirA = path.join(tmp, "a"), dirB = path.join(tmp, "b"), dirC = path.join(tmp, "c"), dirD = path.join(tmp, "d"), dirE = path.join(tmp, "e");
+    fs.mkdirSync(dirA); fs.mkdirSync(dirB); fs.mkdirSync(dirC); fs.mkdirSync(dirD); fs.mkdirSync(dirE);
+    // a: symlink → 可执行文件(应接受:v0.9.x 放宽,nvm/homebrew 装的 copilot 常是 symlink→npm-loader.js)
     const realBin = path.join(tmp, "real-copilot");
     fs.writeFileSync(realBin, "#!/bin/sh\n", { mode: 0o755 });
-    fs.symlinkSync(realBin, path.join(dirA, "copilot"));
+    const symGood = path.join(dirA, "copilot");
+    fs.symlinkSync(realBin, symGood);
     // b: 目录(应拒绝)
     fs.mkdirSync(path.join(dirB, "copilot"));
     // c: 不可执行文件(应拒绝)
@@ -200,10 +201,16 @@ test("discoverLocalCopilotCli: 拒绝 symlink / 目录 / 不可执行;只返回�
     // d: 合法可执行普通文件
     const good = path.join(dirD, "copilot");
     fs.writeFileSync(good, "#!/bin/sh\n", { mode: 0o755 });
+    // e: symlink → 不可执行文件(应拒绝)
+    fs.writeFileSync(path.join(tmp, "noexec"), "x", { mode: 0o644 });
+    fs.symlinkSync(path.join(tmp, "noexec"), path.join(dirE, "copilot"));
 
-    assert.equal(discoverLocalCopilotCli({ env: { PATH: [dirA, dirB, dirC, dirD].join(":"), HOME: tmp }, platform: "darwin" }), good);
-    // 只有 symlink 时 → null
-    assert.equal(discoverLocalCopilotCli({ env: { PATH: dirA, HOME: tmp }, platform: "darwin" }), null);
+    // a 排最前 → 返回 symlink(指向可执行文件)
+    assert.equal(discoverLocalCopilotCli({ env: { PATH: [dirA, dirB, dirC, dirD, dirE].join(":"), HOME: tmp }, platform: "darwin" }), symGood);
+    // 只有"symlink→不可执行"时 → null
+    assert.equal(discoverLocalCopilotCli({ env: { PATH: dirE, HOME: tmp }, platform: "darwin" }), null);
+    // 只有目录时 → null
+    assert.equal(discoverLocalCopilotCli({ env: { PATH: dirB, HOME: tmp }, platform: "darwin" }), null);
     // 非 darwin → null
     assert.equal(discoverLocalCopilotCli({ env: { PATH: dirD, HOME: tmp }, platform: "linux" }), null);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
