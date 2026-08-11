@@ -489,7 +489,8 @@ function readTaskJson(runsDir, runId) {
 // claude(单条 resultText)/ codex·copilot(多条 messages)的 patch preview 共用同一条解析与校验链,
 // 状态语义永远一致;坏 JSON 抛 PATCH_EDITS_INVALID(供 background 回落 candidate),写盘失败抛 PREPARE_FAILED。
 export function persistPatchPreview({ runsDir, runId, snapshotHtml, task, taskSha256, resultText, messages }) {
-  const edits = (messages != null ? extractEditsFromMessages(messages) : parseEditsJson(resultText)).edits;
+  const _parsed = (messages != null ? extractEditsFromMessages(messages) : parseEditsJson(resultText));
+  const edits = _parsed.edits;
   const dry = applyEdits(snapshotHtml, edits, task);
   const skipById = new Map(dry.skipped.map((s) => [s.id, s]));
   const annotated = edits.map((ed) => {
@@ -502,7 +503,8 @@ export function persistPatchPreview({ runsDir, runId, snapshotHtml, task, taskSh
     out_of_scope: dry.skipped.filter((s) => s.status === "out_of_scope").length,
     not_found: dry.skipped.filter((s) => s.status === "not_found").length,
     ambiguous: dry.skipped.filter((s) => s.status === "ambiguous").length,
-    conflict: dry.skipped.filter((s) => s.status === "conflict").length
+    conflict: dry.skipped.filter((s) => s.status === "conflict").length,
+    note: _parsed.note || null
   };
   try {
     const ep = path.join(runsDir, "edits.json");

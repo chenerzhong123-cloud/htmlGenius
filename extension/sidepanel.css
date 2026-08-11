@@ -1023,6 +1023,7 @@ button {
 .diag-report-btn:hover { border-color: var(--brand); }
 .diag-sheet .diag-list { max-height: 220px; overflow: auto; background: var(--bg-input); border: 1px solid var(--line-subtle); border-radius: var(--r-sm); padding: 6px; margin: 8px 0; }
 .diag-empty { padding: 14px 8px; text-align: center; color: var(--text-muted); font-size: 11.5px; }
+.pp-note { margin: 8px 0 0; padding: 7px 9px; background: var(--bg-input); border: 1px solid var(--line-subtle); border-left: 3px solid var(--brand, #6b8afd); border-radius: var(--r-sm); font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); word-break: break-word; }
 .diag-row { display: flex; align-items: flex-start; gap: 6px; padding: 5px 4px; border-bottom: 1px solid var(--line-subtle); font-size: 11px; color: var(--text-secondary); }
 .diag-row:last-child { border-bottom: 0; }
 .diag-row .diag-check { margin-top: 2px; flex: 0 0 auto; }

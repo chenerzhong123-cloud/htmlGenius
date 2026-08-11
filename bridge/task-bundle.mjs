@@ -257,11 +257,12 @@ export function buildPatchPrompt({ runId, task }) {
     '      "locator": { "prefix": "…", "exact": "<text inside the target element>", "suffix": "…" },',
     '      "property": "font-size", "value": "18px" }',
     "  ]",
+    '  "note": "<optional short reason; required when edits is empty>"',
     "}",
     "```",
     "- action is one of: replace_text (set replacement) or set_style (set property/value on the element containing the located text).",
     "- locator.exact must be copied verbatim from source.html; prefix/suffix are the surrounding text used to disambiguate.",
-    '- If no edit is needed, return {"schema_version":1,"edits":[]}.'
+    '- If no edit is needed, return {"schema_version":1,"edits":[],"note":"<one short sentence: why no change>"} (e.g. target already satisfied / cannot uniquely locate / out of scope). The note is shown to the user so they understand the no-change outcome.'
   ].join("\n");
   return prelude + schema + "\n\n## Change Contract (produce edits strictly within its boundaries)\n" + ChangeContract.renderPrompt(task);
 }

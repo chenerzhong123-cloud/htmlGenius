@@ -1595,12 +1595,17 @@
   //     发 bridge-patch-apply(仅勾选的 ok 编辑)→ background 另起 host 落 candidate(复用 completeCandidate)。===
   const PATCH_STATUS_KEY = { out_of_scope: "patch.outOfScope", not_found: "patch.notFound", ambiguous: "patch.ambiguous", conflict: "patch.conflict" };
   function patchStatusText(st) { const k = PATCH_STATUS_KEY[st]; return k ? t(k) : String(st); }
+  function _patchNoteHtml(compliance) {
+    // Agent 在 patch JSON note 字段给的"无变更/跳过理由";无则不显示。
+    if (compliance && compliance.note) return '<div class="pp-note">' + esc(t("patch.agentNote")) + " " + esc(String(compliance.note)) + "</div>";
+    return "";
+  }
   function renderPatchPreview(edits, compliance) {
     if (!patchEditList) return;
     const items = (edits || []).slice().sort((a, b) => ((a.status === "ok" ? 0 : 1) - (b.status === "ok" ? 0 : 1)));
     if (items.length === 0) {
-      // 空编辑:Agent 判定无需修改(目标已满足评论要求,或无法唯一定位)。给明确说明,避免用户以为坏掉。
-      patchEditList.innerHTML = '<div class="pp-empty">' + esc(t("patch.noneNeeded")) + "</div>";
+      // 空编辑:Agent 判定无需修改(目标已满足评论要求,或无法唯一定位)。给明确说明 + Agent 的 note 理由。
+      patchEditList.innerHTML = '<div class="pp-empty">' + esc(t("patch.noneNeeded")) + "</div>" + _patchNoteHtml(compliance);
     } else {
     patchEditList.innerHTML = items.map((e) => {
       const isOk = e.status === "ok";
@@ -1616,7 +1621,7 @@
       return '<div class="pp-item' + (isOk ? "" : " pp-problem") + '">' + checkbox +
         '<div class="pp-body"><div class="pp-action">' + esc(actionLabel) + (e.comment_ref ? " · " + esc(String(e.comment_ref)) : "") + "</div>" +
         '<div class="pp-detail">' + detail + "</div>" + badge + "</div></div>";
-    }).join("");
+    }).join("") + _patchNoteHtml(compliance);
     }
     if (patchBadge && compliance) {
       const skip = (compliance.total || 0) - (compliance.applicable || 0);
