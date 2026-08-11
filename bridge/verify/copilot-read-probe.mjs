@@ -34,7 +34,9 @@ function parseArgs() {
 async function main() {
   const args = parseArgs();
   // 1. 临时工作目录 + 测试文件(模拟 htmlgenius 的 run workspace:source.html 就在工作目录里)
+  //    --working-dir 给定时自动创建(用于测试隐藏目录等不同路径形态)。
   const cwd = args.workdir || fs.mkdtempSync(path.join(os.tmpdir(), "hg-copilot-probe-"));
+  fs.mkdirSync(cwd, { recursive: true });
   const helloPath = path.join(cwd, "hello.txt");
   fs.writeFileSync(helloPath, "The secret token is " + WATERMARK + ".\n", { mode: 0o600 });
   const baseDirectory = path.join(cwd, ".copilot-home-probe");
@@ -81,11 +83,13 @@ async function main() {
     const prompt = "Read the file hello.txt in the current directory using your read tool, then reply with its exact content verbatim.";
     console.log("[probe] sending prompt...");
     const reply = await session.sendAndWait({ prompt }, TIMEOUT_MS);
-    const replyText = String((reply && (reply.text || reply.message || reply)) || texts.join(" "));
+    // reply 对象形状因 SDK 版本而异;统一用 assistant 消息文本(texts)做水印判定,最可靠。
+    const replyText = String((reply && (reply.text || reply.message || JSON.stringify(reply))) || "");
+    const allText = texts.join("\n") + "\n" + replyText;
     console.log("\n[probe] === RESULT ===");
-    console.log("[probe] reply   :", replyText.slice(0, 500));
+    console.log("[probe] reply   :", (texts.join(" ").slice(0, 500)) || replyText.slice(0, 500));
     console.log("[probe] denials :", JSON.stringify(denials));
-    const ok = replyText.includes(WATERMARK);
+    const ok = allText.includes(WATERMARK);
     console.log("\n[probe] " + (ok ? "✅ SUCCESS — Copilot 读到了文件(水印命中)。" : "❌ FAIL — Copilot 没读到文件(水印缺失)。"));
     if (!ok) {
       console.log("[probe] 判定:");
