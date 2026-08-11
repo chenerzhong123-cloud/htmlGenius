@@ -1450,7 +1450,7 @@
     if (code === "PLAN_MISSING" || code === "PLAN_INVALID" || code === "PLAN_TOO_LARGE" || code === "PLAN_SYMLINK" || code === "PLAN_OUTPUT_PATH_INVALID") return t("bridge.planInvalid");
     if (code === "CLAUDE_PLAN_FAILED" || code === "CLAUDE_PLAN_TIMEOUT" || code === "CODEX_PLAN_FAILED" || code === "CODEX_PLAN_TIMEOUT") return t("bridge.planFailed");
     if (code === "CANDIDATE_MISSING" || code === "CANDIDATE_INVALID_HTML" || code === "CANDIDATE_EMPTY"
-      || code === "CANDIDATE_SYMLINK" || code === "CANDIDATE_NOT_FILE" || code === "CANDIDATE_TOO_LARGE" || code === "CANDIDATE_NOT_UTF8") return t("bridge.candidateInvalid");
+      || code === "CANDIDATE_SYMLINK" || code === "CANDIDATE_NOT_FILE" || code === "CANDIDATE_TOO_LARGE" || code === "CANDIDATE_NOT_UTF8") return t("bridge.candidateInvalid").replace("{agent}", providerLabel(_provider));
     if (code === "BRIDGE_NOT_INSTALLED") return t("bridge.notInstalled");
     if (code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED" || code === "CODEX_AUTH_REQUIRED") return t("bridge.notLoggedIn");
     if (code === "SESSION_MODE_NOT_ALLOWED") return t("bridge.sessionModeNotAllowed");
