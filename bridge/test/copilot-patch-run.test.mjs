@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { executeCopilotPatchPreviewRun, executeCopilotPatchApplyRun } from "../copilot-adapter.mjs";
+import { executeCopilotPatchPreviewRun, executeCopilotPatchApplyRun, copilotWorkspacePathFor } from "../copilot-adapter.mjs";
 import { COPILOT_RUNTIMES } from "../copilot-runtime.mjs";
 import { makeFakeSdk } from "./fake-copilot-sdk.mjs";
 import { generateRunId, sha256File } from "../task-bundle.mjs";
@@ -62,7 +62,7 @@ test("copilot patch preview: reply(带围栏/prose)→ patch-preview-ready,edits
   assert.equal(ready.edits.length, 1);
   assert.equal(ready.edits[0].status, "ok");
   assert.equal(ready.compliance.applicable, 1);
-  const runsDir = path.join(path.dirname(p), ".htmlgenius-bridge", "copilot", "hgd_test", "runs", runId);
+  const runsDir = path.join(copilotWorkspacePathFor({ sourcePath: p, logicalDocumentId: "hgd_test" }), "runs", runId);
   const ep = path.join(runsDir, "edits.json");
   assert.ok(fs.existsSync(ep), "edits.json 落盘于 copilot 子目录");
   assert.equal(fs.statSync(ep).mode & 0o777, 0o600);
@@ -131,7 +131,7 @@ test("copilot patch apply: sibling = source + 且仅 + 确认编辑,manifest 署
   const html = fs.readFileSync(candPath, "utf8");
   assert.ok(html.includes("New Title") && html.includes("keep me") && !html.includes("CHANGED"), "仅应用确认编辑");
   assert.equal(ready.patch, undefined, "candidate-ready 不得携带 patch 清单(禁止私自样式变更)");
-  const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(p), ".htmlgenius-bridge", "copilot", "hgd_test", "runs", runId, "candidate-manifest.json"), "utf8"));
+  const manifest = JSON.parse(fs.readFileSync(path.join(copilotWorkspacePathFor({ sourcePath: p, logicalDocumentId: "hgd_test" }), "runs", runId, "candidate-manifest.json"), "utf8"));
   assert.equal(manifest.provider, "github_copilot");
   assert.equal(manifest.session, null, "Copilot 永不持久化 session");
   assert.equal(fs.readFileSync(p, "utf8"), SRC, "原文件未改");

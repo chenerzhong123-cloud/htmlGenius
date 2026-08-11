@@ -309,12 +309,15 @@ test('BR-1: copilotWorkspacePathFor 拒绝穿越/非法 logical_document_id → 
   }
 });
 
-test('BR-1: copilotWorkspacePathFor 接受合法 logical_document_id,返回 .htmlgenius-bridge/copilot/<id>', () => {
+test('BR-1: copilotWorkspacePathFor 接受合法 logical_document_id,workspace 落 tmpdir(非隐藏,v0.9.x)', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-copilot-ws-ok-'));
   const src = path.join(dir, 'report.html');
   fs.writeFileSync(src, '<!doctype html><html></html>');
   for (const id of ['ok_id', 'hgd_abc']) {
     const p = copilotWorkspacePathFor({ sourcePath: src, logicalDocumentId: id });
-    assert.equal(p, path.join(dir, '.htmlgenius-bridge', 'copilot', id));
+    // v0.9.x:workspace 改放 os.tmpdir() 下(非隐藏);原 .htmlgenius-bridge 隐藏目录会让 Copilot 读不到源。
+    assert.ok(p.startsWith(path.join(os.tmpdir(), 'htmlgenius-bridge', 'copilot')), 'workspace 在 <tmpdir>/htmlgenius-bridge/copilot 下');
+    assert.ok(p.endsWith(id), '以 logical_id 结尾');
+    assert.ok(!p.includes('.htmlgenius-bridge'), '不得再使用隐藏目录 .htmlgenius-bridge');
   }
 });

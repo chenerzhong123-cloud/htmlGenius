@@ -10,6 +10,8 @@
 // 不采信模型 response 文本:成功与否只看受控输出文件 + hash 校验(§5.3)。
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import {
   resolveSourcePath, prepareCandidateRun, writeManifest, validateCandidate,
@@ -41,7 +43,14 @@ export function copilotWorkspacePathFor({ sourcePath, logicalDocumentId }) {
     e.code = 'BAD_LOGICAL_ID';
     throw e;
   }
-  return path.join(path.dirname(sourcePath), BRIDGE_DIR_NAME, PROVIDER_DIR_NAME, logicalDocumentId);
+  // v0.9.x:workspace 放 os.tmpdir() 下(非隐藏目录)。原放源文件旁的 .htmlgenius-bridge(隐藏),
+  // Copilot bundled CLI 会忽略该 workingDirectory → 读不到 source.html(mac pro 实测)。tmpdir 下可正常读。
+  // 用 sourcePath 的 realpath 的 sha256 做隔离键:不同源文件 → 不同 workspace(等价于原来"挨着源文件"
+  // 的隔离语义);realpath 消解 macOS /var→/private/var 符号链接,保证代码端(已 realpath)与调用方一致。
+  let realSrc;
+  try { realSrc = fs.realpathSync(String(sourcePath)); } catch (_) { realSrc = String(sourcePath); }
+  const sourceKey = crypto.createHash('sha256').update(realSrc).digest('hex').slice(0, 24);
+  return path.join(os.tmpdir(), 'htmlgenius-bridge', PROVIDER_DIR_NAME, sourceKey, logicalDocumentId);
 }
 
 // COPILOT_HOME 放在 provider 目录下、run workspace 围栏之外(Agent 的文件工具读不到自己的会话态;§7)。
