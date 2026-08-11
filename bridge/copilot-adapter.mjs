@@ -58,6 +58,21 @@ function copilotHomeFor(workspace, runId, kind) {
   return path.join(workspace, '.copilot-home', (kind === 'plan' ? 'plan-' : 'run-') + runId);
 }
 
+// Copilot bundled CLI 的 workingDirectory 生效不稳定(mac pro 实测:同一 tmpdir workspace,
+// 1.0.7 时找到 source.html、1.0.8 时找不到、改搜 /tmp///Users)。→ 不依赖"当前目录",
+// 直接在 prompt 里给出 workspace 内文件的绝对路径(source.html / task / 输出文件),让 Copilot 按绝对路径读写。
+// 这些是 workspace 快照路径(在 tmpdir),非用户真实文件;暴露给模型无风险,且 onPreToolUse 路径围栏仍只准 workspace 内。
+function withAbsPaths(promptText, runsDir, runId, outFile) {
+  const lines = [
+    'Your working directory is: ' + runsDir,
+    'The authoritative source snapshot is at this ABSOLUTE path: ' + path.join(runsDir, 'source.html'),
+    'The task files are at these ABSOLUTE paths: ' + path.join(runsDir, 'task-' + runId + '.md') + '  /  ' + path.join(runsDir, 'task-' + runId + '.json')
+  ];
+  if (outFile) lines.push('Write your output to this ABSOLUTE path: ' + outFile);
+  lines.push('If "the current directory" or relative paths do not resolve, USE THESE ABSOLUTE PATHS to read/write the files.');
+  return lines.join('\n') + '\n\n' + promptText;
+}
+
 function truncateMsg(s) { const t = String(s || ''); return t.length > 400 ? t.slice(0, 400) + '…' : t; }
 
 // manifest 失败 status(§5.5 / §3.3)
@@ -186,7 +201,7 @@ export async function executeCopilotCandidateRun(msg, { emit, selectRuntime, sdk
     run = await runCopilotSession({
       sdk: sel.sdk, runtime: sel.runtime, cliPath: sel.cliPath,
       cwd: prep.runsDir, baseDirectory: home,
-      prompt: buildCandidatePrompt({ runId, task }) + (msg.approved_plan ? approvedPlanPreamble(msg.approved_plan.edited_plan_markdown) : ''),
+      prompt: withAbsPaths(buildCandidatePrompt({ runId, task }) + (msg.approved_plan ? approvedPlanPreamble(msg.approved_plan.edited_plan_markdown) : ''), prep.runsDir, runId, path.join(prep.runsDir, 'candidate.html')),
       timeoutMs: CANDIDATE_TIMEOUT_MS,
       writableFiles: [prep.candidatePath],
       runKind: 'candidate',
@@ -467,7 +482,7 @@ export async function executeCopilotPatchPreviewRun(msg, { emit, selectRuntime, 
     run = await runCopilotSession({
       sdk: sel.sdk, runtime: sel.runtime, cliPath: sel.cliPath,
       cwd: prep.runsDir, baseDirectory: home,
-      prompt: buildPatchPrompt({ runId, task }),
+      prompt: withAbsPaths(buildPatchPrompt({ runId, task }), prep.runsDir, runId),
       timeoutMs: COPILOT_PATCH_TIMEOUT_MS,
       writableFiles: [],          // 空允许写清单 → 任何写工具都被拒(patch 只读 source,输出在 reply 文本)
       runKind: 'patch',

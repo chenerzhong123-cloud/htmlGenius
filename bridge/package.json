@@ -1,6 +1,6 @@
 {
   "name": "@htmlgenius/bridge",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "HTML Genius Local Bridge — Chrome Native Messaging host that hands a Change Contract to the user's locally signed-in AI agent (Claude Code CLI / Codex App Server / GitHub Copilot via @github/copilot-sdk). One provider-neutral host; writes only candidate/plan files, never the source HTML.",
   "author": "chenerzhong123-cloud",
   "repository": {
