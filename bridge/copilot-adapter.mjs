@@ -86,7 +86,9 @@ function makeCopilotStreamer(runId, emit) {
       if (!e) return;
       if (e.kind === 'text') emit({ type: 'bridge_stream', run_id: runId, kind: 'delta', text: String(e.text || '') });
       else if (e.kind === 'tool') emit({ type: 'bridge_stream', run_id: runId, kind: 'info', text: 'tool: ' + String(e.name || '') });
-      else if (e.kind === 'tool_denied') emit({ type: 'bridge_stream', run_id: runId, kind: 'info', text: 'denied: ' + String(e.tool || '') + ' (' + String(e.category || '') + ')' });
+      // tool_denied 用结构化 kind(tool/category 字段),不再拍平成 info 文本 ——
+      // background 透传 + 累积进诊断 denials,定位 Copilot 读源被哪条规则挡(tool_not_allowed / path_outside_workspace…)。
+      else if (e.kind === 'tool_denied') emit({ type: 'bridge_stream', run_id: runId, kind: 'tool_denied', text: 'denied: ' + String(e.tool || '') + ' (' + String(e.category || '') + ')', tool: String(e.tool || ''), category: String(e.category || '') });
     } catch (_) { /* 非关键 */ }
   };
 }
@@ -460,7 +462,7 @@ export async function executeCopilotPatchPreviewRun(msg, { emit, selectRuntime, 
       timeoutMs: COPILOT_PATCH_TIMEOUT_MS,
       writableFiles: [],          // 空允许写清单 → 任何写工具都被拒(patch 只读 source,输出在 reply 文本)
       runKind: 'patch',
-      onEvent: null,              // patch 预览不流式(与 claude patch 同口径)
+      onEvent: makeCopilotStreamer(runId, emit), // v0.9.x:patch 开流式(让无变更理由进流式窗口 + 诊断)
       fsImpl
     });
   } catch (e) { failed(e.code || COPILOT_ERRORS.RUN_FAILED, e.message, prep.runsDir, ctxBase); return; }

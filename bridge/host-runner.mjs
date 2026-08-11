@@ -520,7 +520,7 @@ export async function executePatchPreviewRun(msg, { emit: rawEmit, claude } = {}
   if (typeof rawEmit !== "function") throw new Error("emit is required");
   const cli = claude || realClaude;
   const runId = msg && msg.run_id;
-  const emit = wrapEmit(rawEmit, { runId, allowStream: false }); // patch 无流式;模型文本不进 bridge_stream
+  const emit = wrapEmit(rawEmit, { runId, allowStream: true }); // v0.9.x:patch 开流式(让"无变更理由"等推理进流式窗口 + 诊断 agent_stream)
   const status = (s) => emit({ type: "bridge_status", run_id: runId, status: s });
   const failed = (code, message, runsDir, ctx) => {
     if (runsDir) {
@@ -575,9 +575,10 @@ export async function executePatchPreviewRun(msg, { emit: rawEmit, claude } = {}
   // 5. 驱动 Claude 输出编辑 JSON(只读工具,不写文件)
   status("running");
   const promptText = buildPatchPrompt({ runId, task });
+  const claudeStream = (ev) => { try { emit({ type: "bridge_stream", run_id: runId, kind: ev.kind, text: ev.text, starting: !!ev.starting }); } catch (_) {} };
   let resultText;
   try {
-    const r = await cli.runPatch({ cwd: prep.runsDir, promptText, timeoutMs: PATCH_TIMEOUT_MS });
+    const r = await cli.runPatch({ cwd: prep.runsDir, promptText, timeoutMs: PATCH_TIMEOUT_MS, onStream: claudeStream });
     resultText = r.resultText;
   } catch (e) { failed(e.code || "CLAUDE_RUN_FAILED", e.message, prep.runsDir, ctxBase); return; }
 

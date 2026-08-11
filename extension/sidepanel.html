@@ -217,8 +217,8 @@
 <div id="diag-sheet" class="sheet diag-sheet" role="dialog" aria-modal="true" aria-labelledby="diag-title">
   <button id="diag-close" class="feedback-close" type="button" aria-label="✕">✕</button>
   <div id="diag-title" class="sheet-title" data-i18n="diag.title">报告问题</div>
-  <div class="sheet-sub" data-i18n="diag.sub">将收集以下信息用于排障（不含登录凭证/密钥）。确认后上传，或复制后手动发送。</div>
-  <pre id="diag-preview" class="diag-preview"></pre>
+  <div class="sheet-sub" data-i18n="diag.sub">以下是最近捕获的诊断记录（任务失败 / 未修改）。勾选后上传，或复制后手动发送。不含登录凭证/密钥；agent_stream 可能含页面内容，上传前可展开审视。</div>
+  <div id="diag-preview" class="diag-list"></div>
   <label class="diag-auto-row"><input id="diag-auto-toggle" type="checkbox" /><span data-i18n="diag.autoOpt">以后出错自动上报</span></label>
   <div class="diag-actions">
     <button id="diag-upload-btn" type="button" data-i18n="diag.upload">上传到服务器</button>

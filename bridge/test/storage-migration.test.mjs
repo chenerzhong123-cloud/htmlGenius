@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const storage = fs.readFileSync(path.resolve(__dirname, "..", "..", "extension", "storage.js"), "utf8");
 
-test("DB_VERSION = 5", () => {
-  assert.match(storage, /DB_VERSION\s*=\s*5/);
+test("DB_VERSION = 6", () => {
+  assert.match(storage, /DB_VERSION\s*=\s*6/);
 });
 
 test("bridge_plans store:keyPath=plan_id + 4 索引(logical_document_id/tab_id/status/plan_run_id)", () => {
@@ -44,6 +44,23 @@ test("LocalStore + facade 提供 bridge_plans CRUD(spec §5.5)", () => {
   for (const m of ["saveBridgePlan", "getBridgePlan", "updateBridgePlan", "markDraftPlansStaleForDocument"]) {
     assert.ok(storage.indexOf(m + "(") > -1, "LocalStore 缺方法: " + m);
     // facade 转发也存在
+    assert.ok(storage.indexOf(m + "(") !== storage.lastIndexOf(m + "("), "facade 未转发: " + m);
+  }
+});
+
+test("bridge_diagnostics store(v6 新增,只新增不删):keyPath=id + autoIncrement + at 索引", () => {
+  const start = storage.indexOf('createObjectStore("bridge_diagnostics"');
+  assert.ok(start > -1, "缺 bridge_diagnostics store 创建");
+  const block = storage.slice(start, start + 400);
+  assert.match(block, /keyPath:\s*"id"/);
+  assert.match(block, /autoIncrement:\s*true/);
+  assert.match(block, /createIndex\("at"/);
+  assert.match(storage, /if \(!db\.objectStoreNames\.contains\("bridge_diagnostics"\)\)/, "bridge_diagnostics 创建须由 !contains 守卫(幂等)");
+});
+
+test("LocalStore + facade 提供诊断队列 CRUD(enqueue/list/clear/delete)", () => {
+  for (const m of ["enqueueDiagnostic", "listDiagnostics", "clearDiagnostics", "deleteDiagnostic"]) {
+    assert.ok(storage.indexOf(m + "(") > -1, "LocalStore 缺方法: " + m);
     assert.ok(storage.indexOf(m + "(") !== storage.lastIndexOf(m + "("), "facade 未转发: " + m);
   }
 });

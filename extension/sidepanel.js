@@ -1411,7 +1411,8 @@
     if (msg.kind === "command") return msg.starting ? ("🔧 " + t("run.command")) : null;
     if (msg.kind === "reasoning") return msg.starting ? ("💭 " + t("run.reasoning")) : null;
     if (msg.kind === "tokens") return "⚡ " + msg.text + " tokens";
-    if (msg.kind === "info") return "· " + String(msg.text || "");  // Copilot tool/denied 等(info 流):可见以便排障
+    if (msg.kind === "tool_denied") return "⛔ " + t("diag.toolDenied") + ": " + String(msg.tool || "?") + " (" + String(msg.category || "") + ")";
+    if (msg.kind === "info") return "· " + String(msg.text || "");  // Copilot tool 等(info 流):可见以便排障
     return null;
   }
   function renderStreamText() {
@@ -2237,7 +2238,7 @@
       setContractRunning(false); stopRunTimer();
       if (_contractStep === "plan-running") setContractStep("compose");
       _lastFailed = { code: msg.code || null, message: msg.message || "", provider: _provider, run_kind: _contractRunKind || null, at: new Date().toISOString() };
-      maybeAutoReportDiag(); // B:opt-in 则自动上报诊断
+      // v0.9.x:自动上报改由 background captureDiag 在 failRun 终态负责(sidepanel 关闭也能报);此处不再重复上报。
       const failText = tBridgeFailed(msg.code, msg);
       setBridgeStatus(failText, bridgeFailClass(msg.code));
       pushProgress(failText);
@@ -2383,24 +2384,25 @@
     if (fbClose) fbClose.addEventListener("click", closeFeedbackSheet);
   }
   // === 诊断上报(A 一键报告 + B opt-in 自动):环境 + 最近错误 + Agent 流式 → 可审视 → 上传/复制 ===
-  let _lastDiagBundle = null;
-  function collectDiagnostics(mode) {
+  let _diagQueue = []; // 最近捕获的诊断记录(background 终态写入 IndexedDB,sidepanel 读出)
+  // sidepanel 侧环境快照(上传时 enrich 进队列记录;background SW 无 navigator,故在此补)
+  function _diagEnvSnapshot() {
     const manifest = chrome.runtime.getManifest();
     const ua = navigator.userAgent || "";
     return {
-      mode, at: new Date().toISOString(),
-      app_version: manifest.version,
       chrome_version: (ua.match(/Chrome\/([\d.]+)/) || [])[1] || "",
       platform: navigator.platform || "",
-      os_hint: (ua.match(/\(([^)]+)\)/) || [])[1] || "",
       backend: BACKEND,
       bridge: (_health && _health.bridge) ? { status: _health.bridge.status, version: _health.bridge.version } : null,
       providers: (_health && _health.providers) || [],
       provider_selected: _provider,
-      last_error: _lastFailed,
-      agent_stream: (_streamText || "").slice(-8000), // 最近会话(可能含页面内容 → 上报前用户可审视)
       active_team: _sessionTeam ? { id: _sessionTeam.id, name: _sessionTeam.name } : null,
+      app_version: manifest.version,
     };
+  }
+  // 队列记录 → 上传 bundle(叠加 sidepanel 环境快照 + mode)
+  function _diagBundleForUpload(rec, uploadMode) {
+    return Object.assign({ mode: uploadMode }, _diagEnvSnapshot(), rec);
   }
   async function uploadDiagnostics(bundle) {
     const r = await fetch(BACKEND + "/api/diagnostics", {
@@ -2408,20 +2410,37 @@
     }).catch(() => null);
     return (r && r.ok) ? r.json() : null;
   }
-  function openDiagSheet() {
-    _lastDiagBundle = collectDiagnostics("manual");
-    const pre = document.getElementById("diag-preview");
-    if (pre) pre.textContent = JSON.stringify(_lastDiagBundle, null, 2);
-    const sheet = document.getElementById("diag-sheet");
-    if (!sheet) return;
-    sheet.classList.add("show"); // .sheet 默认 display:none,统一用 .show 显隐(与 feedback/account sheet 一致;此前用 hidden=false 无效 → 点了没反应)
-    getCfg(["hgAutoDiag"]).then((c) => { const cb = document.getElementById("diag-auto-toggle"); if (cb) cb.checked = !!c.hgAutoDiag; });
+  function _diagSummary(rec) {
+    const time = String(rec.at || "").replace("T", " ").slice(5, 19); // MM-DD HH:MM:SS
+    const oc = rec.outcome === "no_change" ? t("diag.noChange")
+      : (rec.outcome === "failed" ? t("diag.failed") : String(rec.outcome || ""));
+    const prov = rec.provider || "?";
+    const detail = rec.outcome === "no_change"
+      ? (rec.compliance ? ("applicable " + (rec.compliance.applicable || 0) + "/" + (rec.compliance.total || 0)) : "")
+      : (rec.error_code || "");
+    return time + " · " + oc + " · " + prov + (detail ? " · " + detail : "");
   }
-  async function maybeAutoReportDiag() {
-    let c; try { c = await getCfg(["hgAutoDiag"]); } catch (_) { return; }
-    if (!c || !c.hgAutoDiag) return; // opt-in 默认关
-    const r = await uploadDiagnostics(collectDiagnostics("auto"));
-    try { showToast(r && r.id != null ? t("diag.autoOk") : t("diag.autoFail")); } catch (_) {}
+  async function openDiagSheet() {
+    try { _diagQueue = await Storage.listDiagnostics(10); } catch (_) { _diagQueue = []; }
+    const sheet = document.getElementById("diag-sheet");
+    if (sheet) sheet.classList.add("show"); // .sheet 默认 display:none,统一用 .show 显隐(与 feedback/account sheet 一致)
+    getCfg(["hgAutoDiag"]).then((c) => { const cb = document.getElementById("diag-auto-toggle"); if (cb) cb.checked = !!(c && c.hgAutoDiag); });
+    const box = document.getElementById("diag-preview");
+    if (!box) return;
+    if (!_diagQueue.length) { box.innerHTML = '<div class="diag-empty">' + esc(t("diag.queueEmpty")) + "</div>"; return; }
+    // 每条:勾选框 + 摘要 + <details> 展开完整 JSON(上报前可审视,含 agent_stream 可能的页面内容)
+    box.innerHTML = _diagQueue.map((rec) => {
+      const id = (rec.id != null) ? String(rec.id) : "";
+      const json = esc(JSON.stringify(rec, null, 2));
+      return '<label class="diag-row"><input type="checkbox" class="diag-check" data-id="' + esc(id) + '" checked>'
+        + '<span class="diag-oc diag-oc-' + esc(rec.outcome || "failed") + '">' + esc(_diagSummary(rec)) + '</span></label>'
+        + '<details class="diag-detail"><summary>' + esc(t("diag.viewDetail")) + '</summary><pre>' + json + '</pre></details>';
+    }).join("");
+  }
+  function _diagCheckedIds() {
+    const box = document.getElementById("diag-preview");
+    if (!box) return [];
+    return Array.from(box.querySelectorAll(".diag-check:checked")).map((el) => el.getAttribute("data-id"));
   }
   const diagReportBtn = document.getElementById("diag-report-btn");
   if (diagReportBtn) diagReportBtn.addEventListener("click", openDiagSheet);
@@ -2430,17 +2449,29 @@
   if (diagClose) diagClose.addEventListener("click", () => { if (diagSheetEl) diagSheetEl.classList.remove("show"); });
   const diagUpload = document.getElementById("diag-upload-btn");
   if (diagUpload) diagUpload.addEventListener("click", async () => {
-    if (!_lastDiagBundle) return;
+    const ids = _diagCheckedIds();
+    const picked = _diagQueue.filter((r) => ids.indexOf(String(r.id)) !== -1);
+    const toUpload = picked.length ? picked : _diagQueue; // 未勾选任何 → 全部上报
+    if (!toUpload.length) return;
     diagUpload.disabled = true;
-    const r = await uploadDiagnostics(_lastDiagBundle);
+    let ok = 0, lastId = null;
+    for (const rec of toUpload) {
+      const r = await uploadDiagnostics(_diagBundleForUpload(rec, "manual"));
+      if (r && r.id != null) { ok++; lastId = r.id; }
+    }
     diagUpload.disabled = false;
-    showToast(r && r.id != null ? t("diag.uploadOk").replace("{id}", r.id) : t("diag.uploadFail"));
-    if (r && r.id != null && diagSheetEl) diagSheetEl.classList.remove("show");
+    let msg = t("diag.uploadFail");
+    if (ok) { msg = t("diag.uploadOk").replace("{id}", lastId); if (ok > 1) msg += " · " + ok; }
+    showToast(msg);
+    if (ok) { try { await Storage.clearDiagnostics(); } catch (_) {} if (diagSheetEl) diagSheetEl.classList.remove("show"); }
   });
   const diagCopy = document.getElementById("diag-copy-btn");
   if (diagCopy) diagCopy.addEventListener("click", () => {
-    if (!_lastDiagBundle) return;
-    try { navigator.clipboard.writeText(JSON.stringify(_lastDiagBundle, null, 2)); showToast(t("diag.copied")); } catch (_) {}
+    const ids = _diagCheckedIds();
+    const picked = _diagQueue.filter((r) => ids.indexOf(String(r.id)) !== -1);
+    const toCopy = picked.length ? picked : _diagQueue;
+    if (!toCopy.length) return;
+    try { navigator.clipboard.writeText(JSON.stringify(toCopy.map((r) => _diagBundleForUpload(r, "manual")), null, 2)); showToast(t("diag.copied")); } catch (_) {}
   });
   const diagAuto = document.getElementById("diag-auto-toggle");
   if (diagAuto) diagAuto.addEventListener("change", () => setCfg({ hgAutoDiag: !!diagAuto.checked }));

@@ -1021,7 +1021,17 @@ button {
 /* === 诊断上报(A 一键报告 + B opt-in)=== */
 .diag-report-btn { margin-top: 10px; width: 100%; height: 30px; background: var(--bg-surface-raised); color: var(--text-secondary); border: 1px solid var(--line-default); border-radius: var(--r-sm); font-size: 11px; cursor: pointer; font-family: var(--font-sans); }
 .diag-report-btn:hover { border-color: var(--brand); }
-.diag-sheet .diag-preview { max-height: 180px; overflow: auto; background: var(--bg-input); border: 1px solid var(--line-subtle); border-radius: var(--r-sm); padding: 8px; font: 10px/1.5 var(--font-mono, ui-monospace, monospace); color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; user-select: text; margin: 8px 0; }
+.diag-sheet .diag-list { max-height: 220px; overflow: auto; background: var(--bg-input); border: 1px solid var(--line-subtle); border-radius: var(--r-sm); padding: 6px; margin: 8px 0; }
+.diag-empty { padding: 14px 8px; text-align: center; color: var(--text-muted); font-size: 11.5px; }
+.diag-row { display: flex; align-items: flex-start; gap: 6px; padding: 5px 4px; border-bottom: 1px solid var(--line-subtle); font-size: 11px; color: var(--text-secondary); }
+.diag-row:last-child { border-bottom: 0; }
+.diag-row .diag-check { margin-top: 2px; flex: 0 0 auto; }
+.diag-oc { word-break: break-word; line-height: 1.45; }
+.diag-oc-no_change { color: var(--text-muted); }
+.diag-oc-failed { color: var(--warn, #d97706); }
+.diag-detail { margin: 0 0 6px 22px; }
+.diag-detail > summary { cursor: pointer; font-size: 10.5px; color: var(--text-muted); }
+.diag-detail > pre { max-height: 160px; overflow: auto; margin: 4px 0 0; padding: 6px; background: var(--bg-surface); border: 1px solid var(--line-subtle); border-radius: var(--r-sm); font: 10px/1.5 var(--font-mono, ui-monospace, monospace); color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; user-select: text; }
 .diag-auto-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); margin: 6px 0; }
 .diag-actions { display: flex; gap: 6px; }
 .diag-actions button { flex: 1; height: 30px; background: var(--bg-surface-raised); color: var(--text-primary); border: 1px solid var(--line-default); border-radius: var(--r-sm); font-size: 12px; cursor: pointer; font-family: var(--font-sans); }
