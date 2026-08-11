@@ -157,8 +157,10 @@ export function buildCopilotClientOptions({ sdk, runtime, cliPath, cwd, baseDire
   return options;
 }
 
-export function buildAvailableTools() {
-  return [...READ_TOOLS, ...WRITE_TOOLS].map((n) => "builtin:" + n);
+export function buildAvailableTools({ write = true } = {}) {
+  // patch run 只读(Agent 输出 edits JSON,host 确定性应用)→ 不暴露写工具,否则 Copilot 会试图 edit
+  // 源文件而被 onPreToolUse 拒(write_without_path)→ COPILOT_PERMISSION_DENIED(mac pro 实测)。
+  return [...READ_TOOLS, ...(write ? WRITE_TOOLS : [])].map((n) => "builtin:" + n);
 }
 export function buildExcludedTools() {
   return DENIED_BUILTIN_TOOLS.map((n) => "builtin:" + n);
@@ -395,7 +397,7 @@ export async function runCopilotSession({
     await client.start();
     session = await client.createSession({
       clientName: "htmlgenius-bridge",
-      availableTools: buildAvailableTools(),
+      availableTools: buildAvailableTools({ write: runKind !== "patch" }),
       excludedTools: buildExcludedTools(),
       hooks: { onPreToolUse: handler }
     });

@@ -234,7 +234,7 @@ export function buildPatchPrompt({ runId, task }) {
     "",
     "- Read source.html and task-" + runId + ".md / task-" + runId + ".json in the current directory. Read source.html exactly once; do not re-read files to double-check.",
     "- The original document path in the Change Contract is reference-only and may be OUTSIDE your accessible workspace; do NOT open it. source.html in the current directory is the authoritative snapshot placed there for you.",
-    "- Do NOT modify any file. Do NOT write candidate.html. Do not use shell, network, MCP, plugins, or the browser.",
+    "- Do NOT modify any file. Do NOT write candidate.html. Do NOT output or rewrite the full HTML document — respond with ONLY the edits JSON (the host applies the edits deterministically). Do not use shell, network, MCP, plugins, or the browser.",
     "- For each selected comment in the Change Contract, decide the minimal precise edit that satisfies it.",
     "- If a comment's requested change is ALREADY satisfied in source.html (the target text already matches the comment's intent), do NOT emit a no-op edit whose replacement equals the located text — return an empty edits array instead. Whenever you return an empty edits array or omit an edit (already satisfied / cannot uniquely locate / out of scope), briefly explain WHY in your reasoning text so the user understands the no-change outcome.",
     "- Your FINAL response must be a single UTF-8 JSON object matching the schema below. You may explain your reasoning in text before it; the final response itself is pure JSON — no Markdown, no code fences.",
