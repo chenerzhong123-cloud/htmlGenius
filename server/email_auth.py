@@ -111,7 +111,7 @@ def verify(email: str, code: str, invite_code: str | None = None, team_name: str
         c.close()
     user_id = teams.create_email_user(email, name, password_hash)
     team_id = _resolve_team(user_id, invite_code, team_name)
-    display = name or email.split("@")[0]
+    display = name or email
     token = sessions.create_session(user_id, display, team_id)
     return {"token": token, "user": {"id": user_id, "name": display}, "team_id": team_id}
 

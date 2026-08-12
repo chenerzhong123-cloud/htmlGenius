@@ -43,7 +43,7 @@ def create_email_user(email: str, name: str, password_hash: str) -> str:
         c.execute(
             "INSERT INTO users(user_id, provider, subject, email, name, picture, "
             "password_hash, email_verified, first_seen, last_seen) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (user_id, "email", email, email.strip(), (name or email.split("@")[0])[:100],
+            (user_id, "email", email, email.strip(), (name or email)[:100],
              "", password_hash, 1, now, now),
         )
     finally:
