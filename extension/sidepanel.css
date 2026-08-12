@@ -1047,6 +1047,46 @@ button {
 .team-collapsible { padding-top: 6px; }
 .account-primary { background: var(--brand); color: #fff; border: none; font-weight: 500; }
 .email-branch { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+/* === 账号工作区流程(account-flow)=== */
+.account-flow-host { padding: 4px 0; }
+.af-page { display: flex; flex-direction: column; gap: 8px; }
+.af-eyebrow { margin: 0; font-size: 11px; color: var(--text-muted); }
+.af-h2 { margin: 0; font-size: 19px; font-weight: 650; color: var(--text-primary); letter-spacing: -.01em; }
+.af-copy { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text-secondary); }
+.af-label { font-size: 12px; color: var(--text-secondary); }
+.af-input { height: 38px; width: 100%; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface-raised); color: var(--text-primary); padding: 0 11px; font: inherit; font-size: 13px; box-sizing: border-box; }
+.af-input::placeholder { color: var(--text-faint); }
+.af-primary { height: 38px; width: 100%; border: 0; border-radius: var(--r-md); background: var(--brand); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font-sans); }
+.af-primary:hover { filter: brightness(1.08); }
+.af-primary:disabled { opacity: .55; cursor: default; }
+.af-secondary { height: 38px; width: 100%; border: 1px solid var(--line-default); border-radius: var(--r-md); background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer; font-family: var(--font-sans); }
+.af-secondary:hover { background: rgba(255,255,255,.06); }
+.af-link { align-self: flex-start; background: transparent; border: 0; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 0; font-family: var(--font-sans); }
+.af-link:hover { color: var(--text-primary); }
+.af-workspace { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface-raised); }
+.af-mark { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--brand); color: #fff; font-weight: 700; font-size: 14px; flex: none; }
+.af-wtext { flex: 1; min-width: 0; }
+.af-wname { font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.af-chevron { border: 0; background: transparent; color: var(--text-muted); font-size: 18px; cursor: pointer; padding: 4px; }
+.af-list { margin-top: 6px; border-top: 1px solid var(--line-subtle); }
+.af-row { display: flex; align-items: center; justify-content: space-between; width: 100%; border: 0; border-bottom: 1px solid var(--line-subtle); background: transparent; color: var(--text-primary); text-align: left; padding: 12px 2px; font-size: 13px; cursor: pointer; font-family: var(--font-sans); }
+.af-row:last-child { border-bottom: 0; }
+.af-row small { color: var(--text-muted); }
+.af-danger, .af-danger span { color: #cb5260; }
+.af-toast { padding: 10px; border-radius: var(--r-md); background: rgba(60,160,100,.14); color: #4ea372; font-size: 12px; }
+.af-note { margin: 4px 0 0; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
+.af-error { font-size: 12px; color: #cb5260; }
+.af-choice { display: flex; align-items: center; gap: 11px; width: 100%; border: 0; border-bottom: 1px solid var(--line-subtle); background: transparent; color: var(--text-primary); text-align: left; padding: 13px 2px; cursor: pointer; font-family: var(--font-sans); }
+.af-choice:last-child { border-bottom: 0; }
+.af-choice-icon { width: 30px; height: 30px; flex: none; border-radius: var(--r-sm); display: grid; place-items: center; background: var(--bg-surface); color: var(--brand); font-size: 15px; }
+.af-choice-text b { display: block; font-size: 13px; margin-bottom: 2px; }
+.af-choice-text span { font-size: 11.5px; color: var(--text-muted); }
+.af-member { display: flex; align-items: center; gap: 9px; padding: 9px 0; border-bottom: 1px solid var(--line-subtle); }
+.af-member:last-child { border-bottom: 0; }
+.af-avatar { width: 27px; height: 27px; border-radius: 50%; display: grid; place-items: center; background: var(--bg-surface); color: var(--brand); font-size: 11px; font-weight: 600; flex: none; }
+.af-mtext { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-primary); }
+.af-mtext small { display: block; color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+.af-confirm { display: flex; gap: 8px; align-items: center; }
 .account-primary:hover { filter: brightness(1.08); }
 #gen-invite-btn, #add-email-btn, #copy-invite-btn {
   background: var(--bg-surface-raised); color: var(--text-primary); border: 1px solid var(--line-default);

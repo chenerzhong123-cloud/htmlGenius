@@ -1987,24 +1987,9 @@
 
   // === 协同登录(Google 档3,后端地址烤在 config.js;飞书登录 UX 已下线,后端 /auth/lark/* 保留) ===
   const BACKEND = (window.HG_CONFIG && window.HG_CONFIG.backend) || "";
-  const googleBtn = document.getElementById("google-login-btn");
-  const loginState = document.getElementById("login-state");
-  const teamSetup = document.getElementById("team-setup");
-  const inviteInput = document.getElementById("invite-code-input");
-  // 邮箱登录表单元素
-  const emailInput = document.getElementById("email-input");
-  const emailContinueBtn = document.getElementById("email-continue-btn");
-  const emailLoginFields = document.getElementById("email-login-fields");
-  const emailRegisterFields = document.getElementById("email-register-fields");
-  const emailPwInput = document.getElementById("email-pw-input");
-  const emailRegPwInput = document.getElementById("email-reg-pw-input");
-  const emailInviteInput = document.getElementById("email-invite-input");
-  const emailCodeInput = document.getElementById("email-code-input");
-  const emailSendCodeBtn = document.getElementById("email-send-code-btn");
-  const emailLoginBtn = document.getElementById("email-login-btn");
-  const emailRegisterBtn = document.getElementById("email-register-btn");
-  let _sessionTeam = null; // {id, name}:当前团队(注册可见);Google 登录后置位
-  let _sessionTeams = []; // 用户全部团队(下拉切换用);Google 登录 / /auth/me 回填
+  const accountHost = document.getElementById("account-flow-host");
+  let _sessionTeam = null;  // {id, name}:当前工作区
+  let _sessionTeams = [];   // 用户全部工作区
 
   // SUP-5:session_token 走 storage.local(每设备独立,不随 Chrome sync 跨设备外泄);
   // 其余配置(mode/backend/user/team_id/team_name)仍在 sync。getCfg/setCfg 透明拆分。
@@ -2041,134 +2026,300 @@
     const teamName = (tm && tm.name) || "";
     _sessionTeam = r.team_id ? { id: r.team_id, name: teamName } : null;
     await setCfg({ mode: "synced", backend: BACKEND, session_token: r.token, user: r.user, team_id: r.team_id || "", team_name: teamName });
-    showLoggedIn(r.user);
-    if (teamSetup) teamSetup.hidden = true;
+    _sessionUser = r.user;
+    // 登录/加入/创建/切换后回首页;若带着 join-code 完成认证,直接进加入页
+    setAccountFlow(_pendingJoinCode ? "join" : "home");
+    _pendingJoinCode = "";
     if (reload) {
       const tab = await getActiveTab();
       if (tab && tab.id) { try { await chrome.tabs.reload(tab.id); } catch (e) { /* 非关键 */ } }
     }
   }
-  function showLoggedIn(user) {
-    _sessionUser = user;
-    let txt = t("state.loggedIn") + (user.name || user.id) + " ";
-    if (_sessionTeam && _sessionTeam.name) txt += "· " + t("team.current") + _sessionTeam.name + " ";
-    loginState.textContent = txt;
-    renderLogoutBtn();
-    renderTeamPanel();
+  // === 账号工作区流程(状态机:一次一个任务;渲染进 #account-flow-host)===
+  let _accountFlow = "home";      // auth|email-login|email-register|home|invite|members|switch|join-or-create|join|create
+  let _authEmailOpen = false;      // auth 首屏是否展开邮箱输入
+  let _accountEmail = "";          // 邮箱(跨 auth 子状态)
+  let _accountError = "";          // 当前页错误文案
+  let _inviteCopied = false;       // invite 页"已复制"
+  let _membersCache = null;        // members 页:{items, isOwner} 或 null(未加载)
+  let _confirmRemoveSub = "";      // 成员移除二次确认
+  let _accountBusy = false;        // 防重复提交(switch/join/create)
+  let _emailCodeSent = false;      // 注册:验证码已发送
+  let _emailCooldown = 0;          // 发送验证码倒计时(秒)
+  let _emailCooldownTimer = null;
+  let _pendingJoinCode = "";       // join-code 消息预填的邀请码
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
-  function refreshLoginState() { if (_sessionUser) showLoggedIn(_sessionUser); }
-  function renderLogoutBtn() {
-    let b = document.getElementById("logout-btn");
-    if (!b) { b = document.createElement("button"); b.id = "logout-btn"; b.addEventListener("click", doLogout); loginState.appendChild(b); }
-    b.textContent = t("state.logout");
+  function hostField(name) {
+    const e = accountHost && accountHost.querySelector('[data-field="' + name + '"]');
+    return e ? (e.value || "") : "";
   }
-  let _teamPanelWired = false;
-  let _inviteLinkUrl = "";
-  // 团队管理面板:下拉切换 + 邀请链接 + 按邮箱加 + 成员列表(owner 可移除)
-  function renderTeamPanel() {
-    const panel = document.getElementById("team-panel");
-    if (!panel) return;
-    panel.hidden = false;
-    const sel = document.getElementById("team-select");
-    const swRow = document.getElementById("team-switch-row");
-    if (sel && swRow) {
-      sel.innerHTML = "";
-      for (const tm of _sessionTeams) {
-        const o = document.createElement("option");
-        o.value = tm.team_id; o.textContent = tm.name || tm.team_id;
-        if (_sessionTeam && tm.team_id === _sessionTeam.id) o.selected = true;
-        sel.appendChild(o);
+  const FLOW_TITLE = {
+    home: "ws.t.home", invite: "ws.t.invite", members: "ws.t.members", switch: "ws.t.switch",
+    "join-or-create": "ws.t.joc", join: "ws.t.join", create: "ws.t.create",
+    auth: "ws.t.account", "email-login": "ws.t.account", "email-register": "ws.t.account",
+  };
+  function setAccountFlow(flow, opts) {
+    _accountFlow = flow;
+    if (flow !== "invite") _inviteCopied = false;
+    if (flow !== "members") _confirmRemoveSub = "";
+    _accountError = (opts && opts.error) ? opts.error : (flow === _accountFlow ? _accountError : "");
+    const titleEl = document.querySelector("#account-sheet .account-header-title");
+    if (titleEl) titleEl.textContent = t(FLOW_TITLE[flow] || "ws.t.home");
+    const back = document.getElementById("account-back-btn");
+    if (back) back.style.visibility = (!_sessionUser || flow === "home" || flow === "auth") ? "hidden" : "visible";
+    renderAccountFlow();
+    const f = accountHost && accountHost.querySelector("input, .af-primary");
+    if (f) { try { f.focus(); } catch (e) {} }
+  }
+  function renderAccountFlow() {
+    if (!accountHost) return;
+    const out = !_sessionUser;
+    let flow = _accountFlow;
+    if (out && ["auth", "email-login", "email-register"].indexOf(flow) < 0) flow = "auth";
+    if (!out && ["auth", "email-login", "email-register"].indexOf(flow) >= 0) flow = "home";
+    _accountFlow = flow;
+    const views = {
+      auth: viewAuth, "email-login": viewEmailLogin, "email-register": viewEmailRegister,
+      home: viewHome, invite: viewInvite, members: viewMembers, switch: viewSwitch,
+      "join-or-create": viewJoinOrCreate, join: viewJoin, create: viewCreate,
+    };
+    accountHost.innerHTML = (views[flow] || viewHome)();
+  }
+  function afErr() { return _accountError ? '<div class="af-error">' + esc(_accountError) + "</div>" : ""; }
+  // --- 未登录 ---
+  function viewAuth() {
+    if (!_authEmailOpen) {
+      return '<div class="af-page"><h2 class="af-h2">' + t("ws.auth.title") + "</h2>"
+        + '<p class="af-copy">' + t("ws.auth.copy") + "</p>"
+        + '<button class="af-primary" data-action="google-login">' + t("login.google") + "</button>"
+        + '<button class="af-secondary" data-action="open-email">' + t("ws.auth.email") + "</button>" + afErr() + "</div>";
+    }
+    return '<div class="af-page"><h2 class="af-h2">' + t("ws.auth.title") + "</h2>"
+      + '<label class="af-label">' + t("login.emailPh") + "</label>"
+      + '<input class="af-input" type="email" data-field="email" placeholder="' + t("login.emailPh") + '" value="' + esc(_accountEmail) + '">'
+      + '<button class="af-primary" data-action="email-continue">' + t("login.continue") + "</button>"
+      + '<button class="af-link" data-action="back-auth">‹ ' + t("ws.auth.back") + "</button>" + afErr() + "</div>";
+  }
+  function viewEmailLogin() {
+    return '<div class="af-page"><p class="af-eyebrow">' + esc(_accountEmail) + "</p>"
+      + '<h2 class="af-h2">' + t("ws.login.title") + "</h2>"
+      + '<input class="af-input" type="password" data-field="password" placeholder="' + t("login.pwPh") + '">'
+      + '<button class="af-primary" data-action="email-login">' + t("login.emailLogin") + "</button>" + afErr() + "</div>";
+  }
+  function viewEmailRegister() {
+    let body;
+    if (_emailCodeSent) {
+      body = '<input class="af-input" type="text" inputmode="numeric" maxlength="6" data-field="code" placeholder="' + t("login.codePh") + '">'
+        + '<button class="af-primary" data-action="email-register">' + t("login.emailRegister") + "</button>"
+        + '<button class="af-link" data-action="resend-code">' + (_emailCooldown > 0 ? t("login.resendIn").replace("{n}", _emailCooldown) : t("ws.register.resend")) + "</button>";
+    } else {
+      body = '<input class="af-input" type="password" data-field="password" placeholder="' + t("login.pwPh") + '">'
+        + '<input class="af-input" type="text" data-field="invite_code" placeholder="' + t("login.invitePh") + '">'
+        + '<button class="af-primary" data-action="send-code">' + t("login.sendCode") + "</button>";
+    }
+    return '<div class="af-page"><p class="af-eyebrow">' + esc(_accountEmail) + "</p>"
+      + '<h2 class="af-h2">' + t("ws.register.title") + "</h2>"
+      + '<p class="af-copy">' + t("ws.register.copy") + "</p>" + body + afErr() + "</div>";
+  }
+  // --- 已登录 ---
+  function viewHome() {
+    const u = _sessionUser || {}, team = _sessionTeam || {};
+    const initial = esc((team.name || u.name || "?").trim().charAt(0).toUpperCase() || "?");
+    const multi = _sessionTeams.length > 1;
+    const card = '<div class="af-workspace"><div class="af-mark">' + initial + "</div>"
+      + '<div class="af-wtext"><div class="af-wname">' + esc(team.name || t("ws.unnamed")) + "</div></div>"
+      + (multi ? '<button class="af-chevron" data-action="go-switch" aria-label="' + t("ws.t.switch") + '">›</button>' : "") + "</div>";
+    return '<div class="af-page"><p class="af-eyebrow">' + esc(u.name || u.id || "") + "</p>"
+      + '<h2 class="af-h2">' + t("ws.home.title") + "</h2>"
+      + '<p class="af-copy">' + t("ws.home.copy") + "</p>" + card
+      + '<button class="af-primary" data-action="go-invite">' + t("ws.home.invite") + "</button>"
+      + '<div class="af-list">'
+      + '<button class="af-row" data-action="go-members"><span>' + t("ws.t.members") + "</span><small>›</small></button>"
+      + '<button class="af-row" data-action="go-joc"><span>' + t("ws.home.joc") + "</span><small>›</small></button>"
+      + '<button class="af-row af-danger" data-action="logout"><span>' + t("state.logout") + "</span><small>›</small></button>"
+      + "</div></div>";
+  }
+  function viewInvite() {
+    const team = _sessionTeam || {};
+    const toast = _inviteCopied ? '<div class="af-toast">' + t("ws.invite.copied") + "</div>" : "";
+    return '<div class="af-page"><p class="af-eyebrow">' + esc(team.name || "") + "</p>"
+      + '<h2 class="af-h2">' + t("ws.t.invite") + "</h2>"
+      + '<p class="af-copy">' + t("ws.invite.copy") + "</p>" + toast
+      + '<button class="af-primary" data-action="gen-invite">' + t("ws.invite.gen") + "</button>"
+      + '<p class="af-note">' + t("ws.invite.note") + "</p></div>";
+  }
+  function viewMembers() {
+    const team = _sessionTeam || {};
+    if (_membersCache === null) return '<div class="af-page"><h2 class="af-h2">' + t("ws.t.members") + '</h2><p class="af-copy">' + t("ws.loading") + "</p></div>";
+    const items = (_membersCache && _sessionMembers_items()) || [];
+    if (!items.length) return '<div class="af-page"><p class="af-eyebrow">' + esc(team.name || "") + '</p><h2 class="af-h2">' + t("ws.t.members") + '</h2><p class="af-copy">' + t("ws.members.empty") + "</p></div>";
+    const meId = _sessionUser && _sessionUser.id;
+    const rows = items.map(function (m) {
+      const name = esc(m.name || m.sub), role = m.role === "owner" ? t("ws.members.owner") : t("ws.members.member");
+      const initial = esc((m.name || m.sub || "?").charAt(0).toUpperCase());
+      let right = "";
+      if (_membersCache.isOwner && m.sub !== meId) {
+        right = (_confirmRemoveSub === m.sub)
+          ? '<span class="af-confirm"><button class="af-link af-danger" data-action="confirm-remove" data-sub="' + esc(m.sub) + '">' + t("ws.members.confirmRemove") + "</button>"
+            + '<button class="af-link" data-action="cancel-remove">' + t("ws.members.cancel") + "</button></span>"
+          : '<button class="af-link af-danger" data-action="remove-member" data-sub="' + esc(m.sub) + '">' + t("ws.members.remove") + "</button>";
       }
-      swRow.hidden = _sessionTeams.length < 2; // 单团队不显示切换
-    }
-    if (!_teamPanelWired) {
-      _teamPanelWired = true;
-      const gen = document.getElementById("gen-invite-btn"); if (gen) gen.addEventListener("click", genInviteLink);
-      const cp = document.getElementById("copy-invite-btn"); if (cp) cp.addEventListener("click", copyInviteLink);
-      const add = document.getElementById("add-email-btn"); if (add) add.addEventListener("click", addMemberByEmail);
-      if (sel) sel.addEventListener("change", () => { if (sel.value) switchTeam(sel.value); });
-      const mt = document.getElementById("members-toggle");
-      if (mt) mt.addEventListener("click", () => {
-        const c = document.getElementById("members-collapsible");
-        if (!c) return;
-        const willOpen = c.hidden;
-        c.hidden = !willOpen;
-        mt.setAttribute("aria-expanded", String(willOpen));
-        if (willOpen) loadMembers(); // 展开时刷新成员
-      });
-    }
-    loadMembers();
+      return '<div class="af-member"><span class="af-avatar">' + initial + "</span>"
+        + '<div class="af-mtext">' + name + "<small>" + role + "</small></div>" + right + "</div>";
+    }).join("");
+    return '<div class="af-page"><p class="af-eyebrow">' + esc(team.name || "") + '</p><h2 class="af-h2">' + t("ws.t.members") + '</h2>'
+      + '<p class="af-copy">' + t("ws.members.count").replace("{n}", items.length) + "</p>" + rows + "</div>";
   }
+  function _sessionMembers_items() { return (_membersCache && _membersCache.items) || []; }
+  function viewSwitch() {
+    const rows = _sessionTeams.map(function (tm) {
+      const cur = _sessionTeam && tm.team_id === _sessionTeam.id;
+      return '<button class="af-choice" data-action="switch-team" data-team="' + esc(tm.team_id) + '"' + (_accountBusy ? " disabled" : "") + ">"
+        + '<span class="af-choice-icon">' + esc((tm.name || "?").charAt(0).toUpperCase()) + "</span>"
+        + '<span class="af-choice-text"><b>' + esc(tm.name || tm.team_id) + "</b>"
+        + (cur ? "<span>" + t("ws.switch.current") + "</span>" : "") + "</span></button>";
+    }).join("");
+    return '<div class="af-page"><p class="af-eyebrow">' + t("ws.switch.eyebrow") + '</p><h2 class="af-h2">' + t("ws.t.switch") + "</h2>" + rows
+      + '<button class="af-row" data-action="go-joc"><span>' + t("ws.home.joc") + "</span><small>›</small></button></div>";
+  }
+  function viewJoinOrCreate() {
+    return '<div class="af-page"><p class="af-eyebrow">' + t("ws.t.home") + '</p><h2 class="af-h2">' + t("ws.joc.title") + "</h2>"
+      + '<button class="af-choice" data-action="go-join"><span class="af-choice-icon">↗</span><span class="af-choice-text"><b>' + t("ws.join.title") + '</b><span>' + t("ws.join.sub") + "</span></span></button>"
+      + '<button class="af-choice" data-action="go-create"><span class="af-choice-icon">＋</span><span class="af-choice-text"><b>' + t("ws.create.title") + '</b><span>' + t("ws.create.sub") + "</span></span></button></div>";
+  }
+  function viewJoin() {
+    return '<div class="af-page"><p class="af-eyebrow">' + t("ws.t.join") + '</p><h2 class="af-h2">' + t("ws.join.title") + '</h2><p class="af-copy">' + t("ws.join.copy") + "</p>"
+      + '<input class="af-input" type="text" data-field="invite_code" placeholder="' + t("ws.join.ph") + '" value="' + esc(_pendingJoinCode) + '">'
+      + '<button class="af-primary" data-action="join-workspace"' + (_accountBusy ? " disabled" : "") + ">" + t("ws.join.action") + "</button>" + afErr() + "</div>";
+  }
+  function viewCreate() {
+    return '<div class="af-page"><p class="af-eyebrow">' + t("ws.t.create") + '</p><h2 class="af-h2">' + t("ws.create.title") + '</h2><p class="af-copy">' + t("ws.create.copy") + "</p>"
+      + '<input class="af-input" type="text" data-field="team_name" placeholder="' + t("ws.create.ph") + '">'
+      + '<button class="af-primary" data-action="create-workspace"' + (_accountBusy ? " disabled" : "") + ">" + t("ws.create.action") + "</button>" + afErr() + "</div>";
+  }
+  function showLoggedIn(user) { _sessionUser = user; setAccountFlow("home"); }
+  function refreshLoginState() { if (_sessionUser) renderAccountFlow(); }
   async function _authFetch(path, init) {
     const cfg = await getCfg(["session_token"]);
     const headers = Object.assign({ Authorization: "Bearer " + cfg.session_token }, (init && init.headers) || {});
     return fetch(BACKEND + path, Object.assign({}, init, { headers }));
   }
-  async function genInviteLink() {
+  // --- flow 动作 / 数据 ---
+  async function genInviteAndCopy() {
     try {
       const r = await _authFetch("/auth/invites", { method: "POST" });
       const j = await r.json();
-      if (j.join_url) {
-        const base = BACKEND || "https://deuce.monster";
-        _inviteLinkUrl = new URL(j.join_url, base).href; // join_url 是 /htmlgenius/join?code= 路径 → 绝对
-        const box = document.getElementById("invite-link-row");
-        const u = document.getElementById("invite-link-url");
-        if (box && u) { u.textContent = _inviteLinkUrl.replace(/^https?:\/\//, ""); box.hidden = false; }
-      } else { showToast(t("team.inviteFail")); }
+      if (!j.join_url) { showToast(t("team.inviteFail")); return; }
+      const url = new URL(j.join_url, BACKEND || "https://deuce.monster").href;
+      try { await navigator.clipboard.writeText(url); _inviteCopied = true; _accountError = ""; }
+      catch (e) { _accountError = url; }  // 剪贴板失败 → fallback 显示只读链接
+      renderAccountFlow();
     } catch (e) { showToast(t("team.inviteFail")); }
   }
-  async function copyInviteLink() {
-    if (!_inviteLinkUrl) return;
-    try { await navigator.clipboard.writeText(_inviteLinkUrl); showToast(t("team.linkCopied")); } catch (e) {}
-  }
-  async function addMemberByEmail() {
-    const email = ((document.getElementById("add-email-input") || {}).value || "").trim();
-    if (!email) return;
+  async function loadMembersInto() {
     const teamId = _sessionTeam && _sessionTeam.id;
-    try {
-      const r = await _authFetch("/auth/teams/" + teamId + "/members/by-email",
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
-      if (r.ok) { showToast(t("team.addedOk")); (document.getElementById("add-email-input") || {}).value = ""; loadMembers(); }
-      else if (r.status === 404) showToast(t("team.addNotFound"));
-      else if (r.status === 403) showToast(t("team.ownerOnly"));
-      else showToast(t("team.addFail"));
-    } catch (e) { showToast(t("team.addFail")); }
-  }
-  async function loadMembers() {
-    const teamId = _sessionTeam && _sessionTeam.id;
-    const list = document.getElementById("member-list");
-    const cnt = document.getElementById("member-count");
-    if (!teamId || !list) return;
+    _membersCache = null; renderAccountFlow();
+    if (!teamId) return;
     try {
       const r = await _authFetch("/auth/teams/" + teamId + "/members");
-      if (!r.ok) { list.textContent = ""; if (cnt) cnt.textContent = ""; return; }
+      if (!r.ok) { _membersCache = { items: [], isOwner: false }; renderAccountFlow(); return; }
       const items = (await r.json()).items || [];
-      if (cnt) cnt.textContent = "(" + items.length + ")";
       const meId = _sessionUser && _sessionUser.id;
-      const isOwner = items.some((m) => m.sub === meId && m.role === "owner");
-      const addRow = document.getElementById("add-email-row");
-      if (addRow) addRow.hidden = !isOwner; // 按邮箱加人仅 owner 可见
-      list.innerHTML = "";
-      for (const m of items) {
-        const row = document.createElement("div"); row.className = "member-row";
-        const nm = document.createElement("span"); nm.className = "member-name";
-        nm.textContent = (m.name || m.sub) + " · " + (m.role === "owner" ? "owner" : "member");
-        row.appendChild(nm);
-        if (isOwner && m.sub !== meId) {
-          const rm = document.createElement("button"); rm.className = "member-remove"; rm.textContent = t("team.remove");
-          rm.addEventListener("click", () => removeMember(m.sub));
-          row.appendChild(rm);
-        }
-        list.appendChild(row);
-      }
-    } catch (e) { /* 非关键 */ }
+      _membersCache = { items: items, isOwner: items.some((m) => m.sub === meId && m.role === "owner") };
+    } catch (e) { _membersCache = { items: [], isOwner: false }; }
+    renderAccountFlow();
   }
-  async function removeMember(sub) {
+  async function removeMemberInline(sub) {
     const teamId = _sessionTeam && _sessionTeam.id;
     try {
       const r = await _authFetch("/auth/teams/" + teamId + "/members/" + encodeURIComponent(sub), { method: "DELETE" });
-      if (r.ok) loadMembers(); else showToast(t("team.removeFail"));
+      if (r.ok) { _confirmRemoveSub = ""; await loadMembersInto(); }
+      else { showToast(t("team.removeFail")); }
     } catch (e) { showToast(t("team.removeFail")); }
+  }
+  async function joinWorkspace() {
+    if (_accountBusy) return;
+    const code = hostField("invite_code").trim();
+    if (!code) { setAccountFlow("join", { error: t("ws.join.fillCode") }); return; }
+    _accountBusy = true; renderAccountFlow();
+    try {
+      const r = await _authFetch("/auth/teams/join",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ invite_code: code }) });
+      const j = await r.json();
+      if (!r.ok) { _accountBusy = false; setAccountFlow("join", { error: (j && j.detail) || t("ws.join.fail") }); return; }
+      _pendingJoinCode = "";
+      await applySession({ token: j.token, user: j.user, team_id: j.team_id, teams: j.teams }, false);
+      _accountBusy = false; showToast(t("ws.join.ok")); broadcastTeamChanged();
+    } catch (e) { _accountBusy = false; setAccountFlow("join", { error: t("ws.join.fail") }); }
+  }
+  async function createWorkspace() {
+    if (_accountBusy) return;
+    const name = hostField("team_name").trim();
+    if (!name) { setAccountFlow("create", { error: t("ws.create.fillName") }); return; }
+    _accountBusy = true; renderAccountFlow();
+    try {
+      const r = await _authFetch("/auth/teams",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name }) });
+      const j = await r.json();
+      if (!r.ok) { _accountBusy = false; setAccountFlow("create", { error: (j && j.detail) || t("ws.create.fail") }); return; }
+      await applySession({ token: j.token, user: j.user, team_id: j.team_id, teams: j.teams }, false);
+      _accountBusy = false; showToast(t("ws.create.ok")); broadcastTeamChanged();
+    } catch (e) { _accountBusy = false; setAccountFlow("create", { error: t("ws.create.fail") }); }
+  }
+  async function doGoogleLogin() {
+    setAccountFlow("auth", { error: t("login.googleLoading") });
+    try {
+      const r = await Login.googleStart({ interactive: true });
+      if (r.token) { await applySession(r); showToast(t("login.googleSuccess")); }
+      else { setAccountFlow("auth", { error: t("login.okJoinCreate") }); }
+    } catch (e) { setAccountFlow("auth", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
+  }
+  async function emailContinue() {
+    _accountEmail = hostField("email").trim();
+    if (!_accountEmail || _accountEmail.indexOf("@") < 0) { setAccountFlow("auth", { error: t("login.emailFillEmail") }); return; }
+    try {
+      const p = await Login.emailProbe(BACKEND, _accountEmail);
+      setAccountFlow(p && p.exists ? "email-login" : "email-register");
+    } catch (e) { setAccountFlow("auth", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
+  }
+  async function emailLoginAction() {
+    const pw = hostField("password");
+    if (!pw) { setAccountFlow("email-login", { error: t("login.emailFillPw") }); return; }
+    try {
+      const r = await Login.emailLogin(BACKEND, _accountEmail, pw);
+      await applySession(r); showToast(t("login.emailSuccess"));
+    } catch (e) { setAccountFlow("email-login", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
+  }
+  function startEmailCooldown(n) {
+    _emailCooldown = n;
+    if (_emailCooldownTimer) clearInterval(_emailCooldownTimer);
+    _emailCooldownTimer = setInterval(() => {
+      _emailCooldown -= 1;
+      if (_emailCooldown <= 0) { clearInterval(_emailCooldownTimer); _emailCooldownTimer = null; }
+      if (_accountFlow === "email-register") renderAccountFlow();
+    }, 1000);
+  }
+  async function sendCodeAction() {
+    const pw = hostField("password");
+    if (pw.length < 8) { setAccountFlow("email-register", { error: t("login.emailFillPw") }); return; }
+    try {
+      await Login.emailRegister(BACKEND, _accountEmail, pw);
+      _emailCodeSent = true; _accountError = ""; startEmailCooldown(60); renderAccountFlow();
+      showToast(t("login.codeSent"));
+    } catch (e) { setAccountFlow("email-register", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
+  }
+  async function emailRegisterAction() {
+    const code = hostField("code").trim();
+    if (!code) { setAccountFlow("email-register", { error: t("login.emailFillCode") }); return; }
+    const inv = hostField("invite_code").trim();
+    try {
+      const r = await Login.emailVerify(BACKEND, _accountEmail, code, inv, "");
+      await applySession(r); showToast(t("login.emailSuccess"));
+    } catch (e) { setAccountFlow("email-register", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
   }
   async function switchTeam(teamId) {
     try {
@@ -2200,111 +2351,47 @@
     });
     _sessionUser = null;
     _sessionTeam = null; _sessionTeams = [];
-    loginState.textContent = t("state.loggedOut");
-    ["logout-btn", "invite-btn"].forEach((id) => { const e = document.getElementById(id); if (e) e.remove(); });
-    const tp = document.getElementById("team-panel"); if (tp) tp.hidden = true;
-    const lr = document.getElementById("invite-link-row"); if (lr) lr.hidden = true;
+    _authEmailOpen = false; _accountEmail = ""; _emailCodeSent = false; _membersCache = null; _pendingJoinCode = "";
     renderPresence([]); // 登出:清掉在线人数
+    setAccountFlow("auth");
   }
 
-  // Google 登录(交互)
-  googleBtn.addEventListener("click", async () => {
-    loginState.textContent = t("login.googleLoading");
-    try {
-      const r = await Login.googleStart({ interactive: true });
-      if (r.token) { await applySession(r); showToast(t("login.googleSuccess")); }
-      else { loginState.textContent = t("login.okJoinCreate"); if (teamSetup) teamSetup.hidden = false; }
-    } catch (e) { loginState.textContent = t("login.fail") + (e && e.message ? e.message : e); }
+  // flow 事件代理(单一 handler:data-go 路由 + data-action 动作)
+  if (accountHost) accountHost.addEventListener("click", (e) => {
+    const go = e.target.closest("[data-go]");
+    if (go) { setAccountFlow(go.dataset.go); return; }
+    const actEl = e.target.closest("[data-action]");
+    if (!actEl) return;
+    const a = actEl.dataset.action;
+    const GOTO = { "go-invite": "invite", "go-members": "members", "go-switch": "switch",
+      "go-joc": "join-or-create", "go-join": "join", "go-create": "create" };
+    if (GOTO[a]) { setAccountFlow(GOTO[a]); if (a === "go-members" && _membersCache === null) loadMembersInto(); return; }
+    switch (a) {
+      case "google-login": doGoogleLogin(); break;
+      case "open-email": _authEmailOpen = true; setAccountFlow("auth"); break;
+      case "back-auth": _authEmailOpen = false; setAccountFlow("auth"); break;
+      case "email-continue": emailContinue(); break;
+      case "email-login": emailLoginAction(); break;
+      case "send-code":
+      case "resend-code": sendCodeAction(); break;
+      case "email-register": emailRegisterAction(); break;
+      case "gen-invite": genInviteAndCopy(); break;
+      case "remove-member": _confirmRemoveSub = actEl.dataset.sub || ""; renderAccountFlow(); break;
+      case "cancel-remove": _confirmRemoveSub = ""; renderAccountFlow(); break;
+      case "confirm-remove": removeMemberInline(actEl.dataset.sub || ""); break;
+      case "switch-team": switchTeam(actEl.dataset.team || ""); break;
+      case "join-workspace": joinWorkspace(); break;
+      case "create-workspace": createWorkspace(); break;
+      case "logout": doLogout(); break;
+    }
   });
-
-  // 邮箱登录:登录/注册 tab 切换 + 发送验证码 + 提交
-  let emailCooldownTimer = null;
-  function startEmailCooldown(n) {
-    if (!emailSendCodeBtn) return;
-    emailSendCodeBtn.disabled = true;
-    let left = n;
-    emailSendCodeBtn.textContent = t("login.resendIn").replace("{n}", left);
-    if (emailCooldownTimer) clearInterval(emailCooldownTimer);
-    emailCooldownTimer = setInterval(() => {
-      left -= 1;
-      if (left <= 0) {
-        clearInterval(emailCooldownTimer); emailCooldownTimer = null;
-        emailSendCodeBtn.disabled = false;
-        emailSendCodeBtn.textContent = t("login.sendCode");
-      } else {
-        emailSendCodeBtn.textContent = t("login.resendIn").replace("{n}", left);
-      }
-    }, 1000);
-  }
-  // 继续:探测邮箱 → 已存在显示登录分支 / 新邮箱显示注册分支(合一入口)
-  if (emailContinueBtn) emailContinueBtn.addEventListener("click", async () => {
-    const email = (emailInput && emailInput.value || "").trim();
-    if (!email || email.indexOf("@") < 0) { showToast(t("login.emailFillEmail")); return; }
-    if (loginState) loginState.textContent = "";
-    try {
-      const p = await Login.emailProbe(BACKEND, email);
-      const exists = !!(p && p.exists);
-      if (emailLoginFields) emailLoginFields.hidden = !exists;
-      if (emailRegisterFields) emailRegisterFields.hidden = exists;
-      if (exists && emailPwInput) emailPwInput.focus();
-      else if (!exists && emailRegPwInput) emailRegPwInput.focus();
-    } catch (e) { if (loginState) loginState.textContent = t("login.fail") + (e && e.message ? e.message : e); }
-  });
-  // 登录分支
-  if (emailLoginBtn) emailLoginBtn.addEventListener("click", async () => {
-    const email = (emailInput && emailInput.value || "").trim();
-    const pw = (emailPwInput && emailPwInput.value) || "";
-    if (!pw) { showToast(t("login.emailFillPw")); return; }
-    if (loginState) loginState.textContent = "";
-    try {
-      const r = await Login.emailLogin(BACKEND, email, pw);
-      await applySession(r); showToast(t("login.emailSuccess"));
-    } catch (e) { if (loginState) loginState.textContent = t("login.fail") + (e && e.message ? e.message : e); }
-  });
-  // 注册分支:发送验证码(不传昵称;用户名即邮箱)
-  if (emailSendCodeBtn) emailSendCodeBtn.addEventListener("click", async () => {
-    const email = (emailInput && emailInput.value || "").trim();
-    const pw = (emailRegPwInput && emailRegPwInput.value) || "";
-    if (pw.length < 8) { showToast(t("login.emailFillPw")); return; }
-    if (loginState) loginState.textContent = "";
-    try {
-      await Login.emailRegister(BACKEND, email, pw);
-      showToast(t("login.codeSent"));
-      startEmailCooldown(60);
-    } catch (e) { if (loginState) loginState.textContent = t("login.fail") + (e && e.message ? e.message : e); }
-  });
-  // 注册分支:完成注册(校验验证码)
-  if (emailRegisterBtn) emailRegisterBtn.addEventListener("click", async () => {
-    const email = (emailInput && emailInput.value || "").trim();
-    const code = ((emailCodeInput && emailCodeInput.value || "").trim());
-    if (!code) { showToast(t("login.emailFillCode")); return; }
-    const inv = ((emailInviteInput && emailInviteInput.value || "").trim());
-    if (loginState) loginState.textContent = "";
-    try {
-      const r = await Login.emailVerify(BACKEND, email, code, inv, "");
-      await applySession(r); showToast(t("login.emailSuccess"));
-    } catch (e) { if (loginState) loginState.textContent = t("login.fail") + (e && e.message ? e.message : e); }
-  });
-
-  // 加入团队(凭码)
-  document.getElementById("join-btn").addEventListener("click", async () => {
-    const code = (inviteInput.value || "").trim();
-    if (!code) { showToast(t("team.fillInvite")); return; }
-    loginState.textContent = t("team.joining");
-    try {
-      const r = await Login.googleStart({ interactive: true, action: "join", code });
-      if (r.token) { await applySession(r); showToast(t("team.joinSuccess")); }
-      else { loginState.textContent = t("team.joinFail"); }
-    } catch (e) { loginState.textContent = t("team.joinFailMsg") + (e && e.message ? e.message : e); }
-  });
-  // 新建团队
-  document.getElementById("create-team-btn").addEventListener("click", async () => {
-    const teamName = ((document.getElementById("team-name-input") || {}).value || "").trim();
-    loginState.textContent = t("team.creating");
-    try {
-      const r = await Login.googleStart({ interactive: true, action: "create", team_name: teamName });
-      if (r.token) { await applySession(r); showToast(t("team.createSuccess")); }
-    } catch (e) { loginState.textContent = t("team.createFail"); }
+  // join-code 消息 → 预填邀请码进加入页(未登录先认证,applySession 认证后带入 join)
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.type === "join-code" && msg.code) {
+      _pendingJoinCode = msg.code;
+      enterAccountView();
+      if (_sessionUser) setAccountFlow("join");
+    }
   });
 
   // === bridge 事件处理(抽成函数,供「实时分发」与「切 tab 后回放缓存的终态事件」复用)===
@@ -2348,13 +2435,8 @@
     }
   }
 
-  // join 链接页(/hg/join?code=)content-script 发来的码 → 预填 + 展开
+  // bridge 终态/预览事件:发给非当前 tab → 缓存,切回该 tab 回放(join-code 已在账号 flow 监听里处理)
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === "join-code" && inviteInput) {
-      inviteInput.value = msg.code;
-      if (teamSetup) teamSetup.hidden = false;
-      loginState.textContent = t("team.invitePrefill");
-    }
     // bridge:终态/预览事件发给了非当前 tab → 缓存,切回该 tab 时回放(修「生成中切 tab 丢失结果/失败原因」)
     if (msg && msg.tab_id && msg.tab_id !== currentTabId && PASS_THROUGH_EVENTS.has(msg.type)) {
       _pendingTabEvents.set(msg.tab_id, msg);
@@ -2369,7 +2451,7 @@
     try {
       const r = await Login.googleStart({ interactive: false });
       if (r.token) { await applySession(r, false); return; } // 静默重登不刷页(否则冲掉编辑确认窗)
-      if (r.teams && r.teams.length === 0) { loginState.textContent = t("team.needTeam"); if (teamSetup) teamSetup.hidden = false; return; }
+      if (r && r.teams && r.teams.length === 0) { _sessionUser = r.user || _sessionUser; setAccountFlow("join-or-create"); return; }
     } catch (e) { /* 无 Google token,落到 storage 检查 */ }
     const cfg = await getCfg(["mode", "session_token", "team_id", "team_name"]);
     if (cfg.mode === "synced" && cfg.session_token) {
@@ -2385,7 +2467,7 @@
           return;
         }
       } catch (e) {}
-      loginState.textContent = t("state.expired");
+      setAccountFlow("auth", { error: t("state.expired") });
     }
   }
   silentReauth();
@@ -2444,6 +2526,8 @@
     accountSheet.hidden = false;
     accountSheet.classList.add("show");
     avatarBtn.classList.add("active");
+    _authEmailOpen = false;
+    setAccountFlow(_sessionUser ? "home" : "auth");
   }
   function exitAccountView() {
     accountSheet.classList.remove("show");
