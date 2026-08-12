@@ -16,14 +16,14 @@ def upsert_user(sub: str, email: str, name: str, picture: str) -> None:
     c = _connect()
     try:
         now = _now()
-        if c.execute("SELECT 1 FROM users WHERE google_sub=?", (sub,)).fetchone():
+        if c.execute("SELECT 1 FROM users WHERE user_id=?", (sub,)).fetchone():
             c.execute(
-                "UPDATE users SET email=?, name=?, picture=?, last_seen=? WHERE google_sub=?",
+                "UPDATE users SET email=?, name=?, picture=?, last_seen=? WHERE user_id=?",
                 (email, name, picture, now, sub),
             )
         else:
             c.execute(
-                "INSERT INTO users(google_sub, email, name, picture, first_seen, last_seen) VALUES(?,?,?,?,?,?)",
+                "INSERT INTO users(user_id, email, name, picture, first_seen, last_seen) VALUES(?,?,?,?,?,?)",
                 (sub, email, name, picture, now, now),
             )
     finally:
@@ -49,16 +49,16 @@ def create_team(name: str, creator_sub: str) -> str:
         c.execute("BEGIN IMMEDIATE")
         try:
             owned = c.execute(
-                "SELECT COUNT(*) AS n FROM teams WHERE created_by_sub=?", (creator_sub,)
+                "SELECT COUNT(*) AS n FROM teams WHERE created_by=?", (creator_sub,)
             ).fetchone()["n"]
             if owned >= _max_teams_per_user():
                 raise TeamLimitExceeded(f"team limit reached: {owned}")
             c.execute(
-                "INSERT INTO teams(team_id, name, created_by_sub, created_at) VALUES(?,?,?,?)",
+                "INSERT INTO teams(team_id, name, created_by, created_at) VALUES(?,?,?,?)",
                 (team_id, name or "未命名团队", creator_sub, _now()),
             )
             c.execute(
-                "INSERT OR IGNORE INTO memberships(google_sub, team_id, joined_at, role) VALUES(?,?,?,?)",
+                "INSERT OR IGNORE INTO memberships(user_id, team_id, joined_at, role) VALUES(?,?,?,?)",
                 (creator_sub, team_id, _now(), "owner"),
             )
             c.execute("COMMIT")
@@ -74,7 +74,7 @@ def add_membership(sub: str, team_id: str) -> None:
     c = _connect()
     try:
         c.execute(
-            "INSERT OR IGNORE INTO memberships(google_sub, team_id, joined_at) VALUES(?,?,?)",
+            "INSERT OR IGNORE INTO memberships(user_id, team_id, joined_at) VALUES(?,?,?)",
             (sub, team_id, _now()),
         )
     finally:
@@ -86,12 +86,12 @@ def user_by_email(email: str) -> "dict | None":
     c = _connect()
     try:
         r = c.execute(
-            "SELECT google_sub, name FROM users WHERE lower(email)=lower(?) LIMIT 1",
+            "SELECT user_id, name FROM users WHERE lower(email)=lower(?) LIMIT 1",
             (email.strip(),),
         ).fetchone()
     finally:
         c.close()
-    return {"google_sub": r["google_sub"], "name": r["name"]} if r else None
+    return {"user_id": r["user_id"], "name": r["name"]} if r else None
 
 
 def user_teams(sub: str) -> "list[dict]":
@@ -100,7 +100,7 @@ def user_teams(sub: str) -> "list[dict]":
     try:
         rows = c.execute(
             "SELECT t.team_id, t.name FROM teams t JOIN memberships m ON t.team_id=m.team_id "
-            "WHERE m.google_sub=? ORDER BY m.joined_at DESC",
+            "WHERE m.user_id=? ORDER BY m.joined_at DESC",
             (sub,),
         ).fetchall()
     finally:
@@ -112,7 +112,7 @@ def is_member(sub: str, team_id: str) -> bool:
     c = _connect()
     try:
         r = c.execute(
-            "SELECT 1 FROM memberships WHERE google_sub=? AND team_id=?", (sub, team_id)
+            "SELECT 1 FROM memberships WHERE user_id=? AND team_id=?", (sub, team_id)
         ).fetchone()
     finally:
         c.close()
@@ -124,7 +124,7 @@ def create_invite(team_id: str, creator_sub: str, max_uses: int = 50) -> str:
     c = _connect()
     try:
         c.execute(
-            "INSERT INTO invites(code, team_id, created_by_sub, created_at, max_uses, used_count, expires_at) "
+            "INSERT INTO invites(code, team_id, created_by, created_at, max_uses, used_count, expires_at) "
             "VALUES(?,?,?,?,?,?,NULL)",
             (code, team_id, creator_sub, _now(), max_uses, 0),
         )
@@ -152,7 +152,7 @@ def redeem_invite(code: str, sub: str) -> "str | None":
                 c.execute("ROLLBACK")
                 return None
             c.execute(
-                "INSERT OR IGNORE INTO memberships(google_sub, team_id, joined_at) VALUES(?,?,?)",
+                "INSERT OR IGNORE INTO memberships(user_id, team_id, joined_at) VALUES(?,?,?)",
                 (sub, r["team_id"], _now()),
             )
             c.execute("UPDATE invites SET used_count=used_count+1 WHERE code=?", (code,))
@@ -170,7 +170,7 @@ def member_role(sub: str, team_id: str) -> "str | None":
     c = _connect()
     try:
         r = c.execute(
-            "SELECT role FROM memberships WHERE google_sub=? AND team_id=?", (sub, team_id)
+            "SELECT role FROM memberships WHERE user_id=? AND team_id=?", (sub, team_id)
         ).fetchone()
     finally:
         c.close()
@@ -182,8 +182,8 @@ def team_members(team_id: str) -> "list[dict]":
     c = _connect()
     try:
         rows = c.execute(
-            "SELECT m.google_sub AS sub, u.name AS name, m.role AS role "
-            "FROM memberships m LEFT JOIN users u ON m.google_sub=u.google_sub "
+            "SELECT m.user_id AS sub, u.name AS name, m.role AS role "
+            "FROM memberships m LEFT JOIN users u ON m.user_id=u.user_id "
             "WHERE m.team_id=? ORDER BY m.role DESC, m.joined_at",
             (team_id,),
         ).fetchall()
@@ -201,7 +201,7 @@ def remove_member(team_id: str, target_sub: str, actor_sub: str) -> None:
     c = _connect()
     try:
         c.execute(
-            "DELETE FROM memberships WHERE google_sub=? AND team_id=?", (target_sub, team_id)
+            "DELETE FROM memberships WHERE user_id=? AND team_id=?", (target_sub, team_id)
         )
     finally:
         c.close()

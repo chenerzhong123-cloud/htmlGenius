@@ -322,7 +322,7 @@ class MemberByEmailIn(BaseModel):
 
 @app.post("/auth/teams/{team_id}/members/by-email")
 def add_member_by_email(team_id: str, payload: MemberByEmailIn, session: Session = Depends(require_session)):
-    """owner 按邮箱直接加人:查已注册用户(google_sub) → add_membership(幂等)。
+    """owner 按邮箱直接加人:查已注册用户(user_id) → add_membership(幂等)。
     比"分享邀请码"更强的动作(对方无需同意即入团),故限 owner。非 owner → 403;未注册 → 404。"""
     if teams.member_role(session.open_id, team_id) != "owner":
         raise HTTPException(status_code=403, detail="only owner can add members by email")
@@ -332,10 +332,10 @@ def add_member_by_email(team_id: str, payload: MemberByEmailIn, session: Session
     u = teams.user_by_email(email)
     if not u:
         raise HTTPException(status_code=404, detail="用户尚未用该 Google 账号登录过本工具，请让对方先登录一次")
-    if u["google_sub"] == session.open_id:
+    if u["user_id"] == session.open_id:
         raise HTTPException(status_code=400, detail="不能添加自己")
-    teams.add_membership(u["google_sub"], team_id)  # INSERT OR IGNORE → 已是成员则幂等
-    return {"ok": True, "sub": u["google_sub"], "name": u["name"]}
+    teams.add_membership(u["user_id"], team_id)  # INSERT OR IGNORE → 已是成员则幂等
+    return {"ok": True, "sub": u["user_id"], "name": u["name"]}
 
 
 @app.delete("/auth/teams/{team_id}/members/{sub}")

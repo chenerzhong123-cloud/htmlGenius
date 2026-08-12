@@ -71,32 +71,45 @@ def init_db(path: Path) -> None:
             CREATE TABLE IF NOT EXISTS teams (
                 team_id TEXT PRIMARY KEY,
                 name TEXT,
-                created_by_sub TEXT,
+                created_by TEXT,
                 created_at TEXT
             );
             CREATE TABLE IF NOT EXISTS users (
-                google_sub TEXT PRIMARY KEY,
+                user_id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL DEFAULT 'google',
+                subject TEXT,
                 email TEXT,
                 name TEXT,
                 picture TEXT,
+                password_hash TEXT,
+                email_verified INTEGER NOT NULL DEFAULT 1,
                 first_seen TEXT,
                 last_seen TEXT
             );
             CREATE TABLE IF NOT EXISTS memberships (
-                google_sub TEXT,
+                user_id TEXT,
                 team_id TEXT,
                 joined_at TEXT,
                 role TEXT NOT NULL DEFAULT 'member',
-                PRIMARY KEY (google_sub, team_id)
+                PRIMARY KEY (user_id, team_id)
             );
             CREATE TABLE IF NOT EXISTS invites (
                 code TEXT PRIMARY KEY,
                 team_id TEXT,
-                created_by_sub TEXT,
+                created_by TEXT,
                 created_at TEXT,
                 max_uses INTEGER,
                 used_count INTEGER DEFAULT 0,
                 expires_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS email_verifications (
+                email TEXT PRIMARY KEY,
+                code_hash TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                name TEXT,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS diagnostics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,6 +167,27 @@ def init_db(path: Path) -> None:
                 "UPDATE memberships SET role='owner' WHERE (google_sub, team_id) IN "
                 "(SELECT created_by_sub, team_id FROM teams WHERE created_by_sub IS NOT NULL)"
             )
+        # 邮箱登录迁移:身份模型统一 google_sub->user_id、created_by_sub->created_by;
+        # users 加 provider/subject/password_hash/email_verified。对老 Google 数据 user_id==google_sub,
+        # 故纯改名+加列,零数据改写,幂等。sessions.open_id 列名保留(值即 user_id)。
+        # 必须排在上面 v0.9.x membership 迁移之后(那条仍用 google_sub/created_by_sub 列名)。
+        cu = {row["name"] for row in c.execute("PRAGMA table_info(users)")}
+        if cu and "google_sub" in cu and "user_id" not in cu:
+            c.execute("ALTER TABLE users RENAME COLUMN google_sub TO user_id")
+            c.execute("ALTER TABLE users ADD COLUMN provider TEXT NOT NULL DEFAULT 'google'")
+            c.execute("ALTER TABLE users ADD COLUMN subject TEXT")
+            c.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+            c.execute("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1")
+            c.execute("UPDATE users SET subject=user_id WHERE subject IS NULL")
+        cm2 = {row["name"] for row in c.execute("PRAGMA table_info(memberships)")}
+        if cm2 and "google_sub" in cm2 and "user_id" not in cm2:
+            c.execute("ALTER TABLE memberships RENAME COLUMN google_sub TO user_id")
+        ct2 = {row["name"] for row in c.execute("PRAGMA table_info(teams)")}
+        if ct2 and "created_by_sub" in ct2 and "created_by" not in ct2:
+            c.execute("ALTER TABLE teams RENAME COLUMN created_by_sub TO created_by")
+        ci2 = {row["name"] for row in c.execute("PRAGMA table_info(invites)")}
+        if ci2 and "created_by_sub" in ci2 and "created_by" not in ci2:
+            c.execute("ALTER TABLE invites RENAME COLUMN created_by_sub TO created_by")
     finally:
         c.close()
 
