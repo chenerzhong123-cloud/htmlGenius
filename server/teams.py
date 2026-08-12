@@ -30,6 +30,41 @@ def upsert_user(sub: str, email: str, name: str, picture: str) -> None:
         c.close()
 
 
+def create_email_user(email: str, name: str, password_hash: str) -> str:
+    """建 email 用户(provider=email, email_verified=1),返回 user_id。已存在则 ValueError。"""
+    user_id = "usr_" + secrets.token_hex(12)
+    c = _connect()
+    try:
+        if c.execute(
+            "SELECT 1 FROM users WHERE lower(email)=lower(?) AND provider='email'", (email,)
+        ).fetchone():
+            raise ValueError("email already registered")
+        now = _now()
+        c.execute(
+            "INSERT INTO users(user_id, provider, subject, email, name, picture, "
+            "password_hash, email_verified, first_seen, last_seen) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (user_id, "email", email, email.strip(), (name or email.split("@")[0])[:100],
+             "", password_hash, 1, now, now),
+        )
+    finally:
+        c.close()
+    return user_id
+
+
+def get_email_user(email: str) -> "dict | None":
+    """登录用:按邮箱+provider=email 查已验证用户。"""
+    c = _connect()
+    try:
+        r = c.execute(
+            "SELECT user_id, name, password_hash FROM users "
+            "WHERE lower(email)=lower(?) AND provider='email' AND email_verified=1",
+            (email.strip(),),
+        ).fetchone()
+    finally:
+        c.close()
+    return {"user_id": r["user_id"], "name": r["name"], "password_hash": r["password_hash"]} if r else None
+
+
 class TeamLimitExceeded(Exception):
     """用户拥有的团队数已达 HG_MAX_TEAMS_PER_USER 上限。"""
 

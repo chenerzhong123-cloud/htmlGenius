@@ -9,9 +9,9 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from . import google, lark, sessions, storage, teams
+from . import email_auth, google, lark, sessions, storage, teams
 from .envutil import is_dev_env
 from .auth import (
     Session,
@@ -272,6 +272,69 @@ def auth_google_session(payload: GoogleSessionIn):
         "user": {"id": info["sub"], "name": info["name"]},
         "team_id": payload.team_id,
     }
+
+
+# === 邮箱 + 密码登录(带邮箱验证码;与 Google/飞书 并存的第三个 provider)===
+
+
+class EmailRegisterIn(BaseModel):
+    email: str = Field(max_length=200)
+    password: str = Field(min_length=8, max_length=256)
+    name: Optional[str] = Field(None, max_length=100)
+
+
+class EmailVerifyIn(BaseModel):
+    email: str = Field(max_length=200)
+    code: str = Field(min_length=6, max_length=6)
+    invite_code: Optional[str] = Field(None, max_length=64)
+    team_name: Optional[str] = Field(None, max_length=100)
+
+
+class EmailLoginIn(BaseModel):
+    email: str = Field(max_length=200)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class EmailResendIn(BaseModel):
+    email: str = Field(max_length=200)
+
+
+@app.post("/auth/email/register")
+def email_register(payload: EmailRegisterIn):
+    """注册:校验 → 生成验证码 → 发邮件(未配 HG_SMTP_HOST 走日志模式)。"""
+    try:
+        email_auth.start_registration(payload.email, payload.password, payload.name)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    return {"verify_required": True}
+
+
+@app.post("/auth/email/verify")
+def email_verify(payload: EmailVerifyIn):
+    """校验验证码 → 建用户 → team 归属(邀请码加入 / 新建 / 默认)→ 发 session。"""
+    try:
+        return email_auth.verify(payload.email, payload.code, payload.invite_code, payload.team_name)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+
+
+@app.post("/auth/email/login")
+def email_login(payload: EmailLoginIn):
+    """邮箱+密码登录。失败不区分"邮箱不存在 / 密码错误"。"""
+    try:
+        return email_auth.login(payload.email, payload.password)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+
+
+@app.post("/auth/email/resend")
+def email_resend(payload: EmailResendIn):
+    """重发验证码(受 60s 冷却限制)。"""
+    try:
+        email_auth.resend(payload.email)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    return {"verify_required": True}
 
 
 class SwitchTeamIn(BaseModel):
