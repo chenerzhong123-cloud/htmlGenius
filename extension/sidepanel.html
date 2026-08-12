@@ -157,9 +157,13 @@
   <button class="lang-opt" data-lang="ja"><span class="lang-opt-name">日本語</span></button>
 </div>
 
-<!-- 账号浮层(点头像展开) -->
-<div id="account-sheet" class="sheet">
-  <div class="sheet-title" data-i18n="sheet.title">登录后开启团队协作</div>
+<!-- 账号视图(点头像进入;整面板视图,非小浮层) -->
+<div id="account-sheet" class="view account-view">
+  <div class="account-header">
+    <button id="account-back-btn" class="account-back" type="button" aria-label="返回" data-i18n-title="account.back">‹</button>
+    <span class="account-header-title" data-i18n="account.title">账号与团队</span>
+  </div>
+  <div class="account-inner">
   <div class="sheet-sub" data-i18n="sheet.sub">实时共享评论 · 作者身份绑定账号 · 仅本人可删自己的评论</div>
   <div id="login-area" class="collab-row">
     <button id="google-login-btn" data-i18n="login.google">Google 登录</button>
@@ -215,6 +219,7 @@
     </div>
   </div>
   <div id="presence-count" class="presence-count" hidden></div>
+  </div><!-- /.account-inner -->
 </div>
 
 <!-- v0.9.6 问题反馈浮层(点 header 反馈按钮展开):引导文案 + 小红书二维码。二维码位待替换。 -->

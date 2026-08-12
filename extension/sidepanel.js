@@ -761,8 +761,7 @@
     _plan = null; _planStale = false;
   }
   function showContractSheet() {
-    accountSheet.classList.remove("show");
-    avatarBtn.classList.remove("active");
+    exitAccountView();
     closeLangSheet();
     contractSheet.hidden = false;
     contractSheet.classList.add("show");
@@ -2372,8 +2371,10 @@
   }
   silentReauth();
 
-  // === Tab 切换 + 头像浮层(方案1:编辑默认主视图,批注次级,账号收头像) ===
+  // === Tab 切换 + 账号视图(编辑默认主视图,批注次级,账号点头像进入整面板视图) ===
+  let _activeMainTab = "edit"; // 进入账号视图前记住的主视图,退出时恢复
   function switchTab(name) {
+    _activeMainTab = name;
     const editActive = name === "edit";
     const editView = document.getElementById("view-edit");
     const commentView = document.getElementById("view-comment");
@@ -2412,12 +2413,32 @@
 
   const avatarBtn = document.getElementById("avatar");
   const accountSheet = document.getElementById("account-sheet");
+  const accountBackBtn = document.getElementById("account-back-btn");
+  const tabbarEl = document.getElementById("tabbar");
+  // 账号视图:点头像进入整面板视图(非小浮层),隐藏 edit/comment + tabbar;返回时恢复原主视图。
+  function enterAccountView() {
+    const ev = document.getElementById("view-edit");
+    const cv = document.getElementById("view-comment");
+    ev.classList.remove("show"); cv.classList.remove("show");
+    ev.hidden = true; cv.hidden = true;
+    if (tabbarEl) tabbarEl.hidden = true;
+    accountSheet.hidden = false;
+    accountSheet.classList.add("show");
+    avatarBtn.classList.add("active");
+  }
+  function exitAccountView() {
+    accountSheet.classList.remove("show");
+    accountSheet.hidden = true;
+    avatarBtn.classList.remove("active");
+    if (tabbarEl) tabbarEl.hidden = false;
+    switchTab(_activeMainTab || "edit");
+  }
   avatarBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    const open = accountSheet.classList.toggle("show");
-    avatarBtn.classList.toggle("active", open);
-    if (open) closeLangSheet();
+    if (accountSheet.classList.contains("show")) exitAccountView();
+    else { enterAccountView(); closeLangSheet(); }
   });
+  if (accountBackBtn) accountBackBtn.addEventListener("click", exitAccountView);
 
   // === 语言切换(中/英/日;跟随浏览器,默认英文,可手动切换,本地存储) ===
   const langBtn = document.getElementById("lang-btn");
@@ -2441,7 +2462,6 @@
     e.stopPropagation();
     const open = langSheet.classList.toggle("show");
     langBtn.classList.toggle("active", open);
-    if (open) { accountSheet.classList.remove("show"); avatarBtn.classList.remove("active"); }
   });
   langSheet.addEventListener("click", (e) => {
     const opt = e.target.closest(".lang-opt");
@@ -2461,7 +2481,7 @@
       e.stopPropagation();
       const open = feedbackSheet.classList.toggle("show");
       feedbackBtn.setAttribute("aria-expanded", String(open));
-      if (open) { closeLangSheet(); accountSheet.classList.remove("show"); avatarBtn.classList.remove("active"); }
+      if (open) closeLangSheet();
     });
     const fbClose = document.getElementById("feedback-close");
     if (fbClose) fbClose.addEventListener("click", closeFeedbackSheet);
@@ -2569,10 +2589,6 @@
 
   // 点击外部关三个浮层
   document.addEventListener("click", (e) => {
-    if (!accountSheet.contains(e.target) && e.target !== avatarBtn) {
-      accountSheet.classList.remove("show");
-      avatarBtn.classList.remove("active");
-    }
     if (langSheet && !langSheet.contains(e.target) && e.target !== langBtn) closeLangSheet();
     if (feedbackSheet && !feedbackSheet.contains(e.target) && e.target !== feedbackBtn) closeFeedbackSheet();
   });

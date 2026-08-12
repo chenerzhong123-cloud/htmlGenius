@@ -191,6 +191,14 @@ body {
 /* v0.9.6: 编辑视图同改列布局 —— 内容在 .edit-scroll 内滚动,底部动作栏固定第一屏(镜像评论区) */
 #view-edit.show { display: flex; flex-direction: column; overflow: hidden; }
 .edit-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+/* 账号视图(整面板;点头像进入,非小浮层) */
+#account-sheet.account-view { padding: 0; }
+#account-sheet.account-view.show { display: flex; flex-direction: column; overflow: hidden; }
+.account-header { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line-subtle); }
+.account-back { background: transparent; border: none; color: var(--text-secondary); font-size: 24px; line-height: 1; cursor: pointer; padding: 0 8px; border-radius: var(--r-sm); font-family: var(--font-sans); height: 30px; }
+.account-back:hover { background: rgba(255,255,255,.07); color: var(--text-primary); }
+.account-header-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.account-inner { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; max-width: 420px; margin: 0 auto; width: 100%; box-sizing: border-box; }
 /* #7: 底部操作区 —— 固定在第一屏(不被评论数量挤出);之后要加按钮直接放这个容器里 */
 .comment-actions { flex: none; padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--line-subtle); display: flex; flex-direction: column; gap: 8px; }
 
