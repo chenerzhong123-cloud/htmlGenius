@@ -337,6 +337,19 @@ def email_resend(payload: EmailResendIn):
     return {"verify_required": True}
 
 
+class EmailProbeIn(BaseModel):
+    email: str = Field(max_length=200)
+
+
+@app.post("/auth/email/probe")
+def email_probe(payload: EmailProbeIn):
+    """探测邮箱是否已注册(登录/注册分支用;暴露账号是否存在,已知权衡)。"""
+    try:
+        return email_auth.probe(payload.email)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+
+
 class SwitchTeamIn(BaseModel):
     team_id: str
 

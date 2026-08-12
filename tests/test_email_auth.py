@@ -87,3 +87,15 @@ def test_verify_creates_default_team(tmp_path, monkeypatch, capture_code):
     _reg()
     v = client.post("/auth/email/verify", json={"email": "a@x.com", "code": capture_code["code"]})
     assert v.status_code == 200 and v.json()["team_id"]
+
+
+def test_probe_existing_vs_new(tmp_path, monkeypatch, capture_code):
+    _init(tmp_path, monkeypatch)
+    _reg()  # a@x.com 待激活(未验证)
+    # 未验证 → 不算已存在(仍可重新注册)
+    assert client.post("/auth/email/probe", json={"email": "a@x.com"}).json()["exists"] is False
+    # 激活后 → 已存在
+    client.post("/auth/email/verify", json={"email": "a@x.com", "code": capture_code["code"]})
+    assert client.post("/auth/email/probe", json={"email": "a@x.com"}).json()["exists"] is True
+    # 全新邮箱 → 不存在
+    assert client.post("/auth/email/probe", json={"email": "new@x.com"}).json()["exists"] is False

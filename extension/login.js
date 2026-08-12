@@ -130,5 +130,14 @@ window.Login = (function () {
     return j;
   }
 
-  return { start: start, googleStart: googleStart, emailRegister: emailRegister, emailVerify: emailVerify, emailLogin: emailLogin, parseCallbackUrl: parseCallbackUrl, buildCallbackBody: buildCallbackBody };
+  async function emailProbe(backend, email) {
+    var r = await fetch(backend + "/auth/email/probe", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email }),
+    });
+    var j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw new Error((j && j.detail) || ("probe failed " + r.status));
+    return j;
+  }
+
+  return { start: start, googleStart: googleStart, emailRegister: emailRegister, emailVerify: emailVerify, emailLogin: emailLogin, emailProbe: emailProbe, parseCallbackUrl: parseCallbackUrl, buildCallbackBody: buildCallbackBody };
 })();

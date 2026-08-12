@@ -1046,6 +1046,7 @@ button {
 .team-block-toggle[aria-expanded="true"] .team-caret { transform: rotate(180deg); }
 .team-collapsible { padding-top: 6px; }
 .account-primary { background: var(--brand); color: #fff; border: none; font-weight: 500; }
+.email-branch { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .account-primary:hover { filter: brightness(1.08); }
 #gen-invite-btn, #add-email-btn, #copy-invite-btn {
   background: var(--bg-surface-raised); color: var(--text-primary); border: 1px solid var(--line-default);

@@ -128,6 +128,24 @@ def login(email: str, password: str) -> dict:
     return {"token": token, "user": {"id": u["user_id"], "name": u["name"]}, "team_id": team_id}
 
 
+def probe(email: str) -> dict:
+    """探测邮箱是否已是已验证 email 用户(登录/注册分支用)。
+
+    会暴露"该邮箱是否已注册"(账号枚举)——已知权衡,换取登录/注册合一的简洁 UX。
+    未验证的待激活注册不算"已存在"(仍可重新注册)。
+    """
+    email = _validate_email(email)
+    c = _connect()
+    try:
+        exists = c.execute(
+            "SELECT 1 FROM users WHERE lower(email)=lower(?) AND provider=? AND email_verified=1",
+            (email, "email"),
+        ).fetchone() is not None
+    finally:
+        c.close()
+    return {"exists": exists}
+
+
 def resend(email: str) -> None:
     """重发验证码(保留原 password_hash;同 start_registration 的查重/冷却)。"""
     email = _validate_email(email)

@@ -1993,14 +1993,16 @@
   const inviteInput = document.getElementById("invite-code-input");
   // 邮箱登录表单元素
   const emailInput = document.getElementById("email-input");
+  const emailContinueBtn = document.getElementById("email-continue-btn");
+  const emailLoginFields = document.getElementById("email-login-fields");
+  const emailRegisterFields = document.getElementById("email-register-fields");
   const emailPwInput = document.getElementById("email-pw-input");
-  const emailNameInput = document.getElementById("email-name-input");
+  const emailRegPwInput = document.getElementById("email-reg-pw-input");
   const emailInviteInput = document.getElementById("email-invite-input");
   const emailCodeInput = document.getElementById("email-code-input");
   const emailSendCodeBtn = document.getElementById("email-send-code-btn");
-  const emailSubmitBtn = document.getElementById("email-submit-btn");
-  const emailTabLogin = document.getElementById("email-tab-login");
-  const emailTabRegister = document.getElementById("email-tab-register");
+  const emailLoginBtn = document.getElementById("email-login-btn");
+  const emailRegisterBtn = document.getElementById("email-register-btn");
   let _sessionTeam = null; // {id, name}:当前团队(注册可见);Google 登录后置位
   let _sessionTeams = []; // 用户全部团队(下拉切换用);Google 登录 / /auth/me 回填
 
@@ -2216,18 +2218,7 @@
   });
 
   // 邮箱登录:登录/注册 tab 切换 + 发送验证码 + 提交
-  let emailMode = "login"; // "login" | "register"
   let emailCooldownTimer = null;
-  function setEmailMode(mode) {
-    emailMode = mode;
-    const isReg = mode === "register";
-    if (emailTabLogin) emailTabLogin.classList.toggle("active", !isReg);
-    if (emailTabRegister) emailTabRegister.classList.toggle("active", isReg);
-    document.querySelectorAll("#email-login-area .email-register-only").forEach((el) => { el.hidden = !isReg; });
-    if (emailSubmitBtn) emailSubmitBtn.textContent = t(isReg ? "login.emailRegister" : "login.emailLogin");
-  }
-  if (emailTabLogin) emailTabLogin.addEventListener("click", () => setEmailMode("login"));
-  if (emailTabRegister) emailTabRegister.addEventListener("click", () => setEmailMode("register"));
   function startEmailCooldown(n) {
     if (!emailSendCodeBtn) return;
     emailSendCodeBtn.disabled = true;
@@ -2245,36 +2236,53 @@
       }
     }, 1000);
   }
-  if (emailSendCodeBtn) emailSendCodeBtn.addEventListener("click", async () => {
+  // 继续:探测邮箱 → 已存在显示登录分支 / 新邮箱显示注册分支(合一入口)
+  if (emailContinueBtn) emailContinueBtn.addEventListener("click", async () => {
     const email = (emailInput && emailInput.value || "").trim();
-    const pw = (emailPwInput && emailPwInput.value) || "";
-    if (!email) { showToast(t("login.emailFillEmail")); return; }
-    if (pw.length < 8) { showToast(t("login.emailFillPw")); return; }
-    const name = emailMode === "register" ? ((emailNameInput && emailNameInput.value || "").trim()) : "";
+    if (!email || email.indexOf("@") < 0) { showToast(t("login.emailFillEmail")); return; }
     if (loginState) loginState.textContent = "";
     try {
-      await Login.emailRegister(BACKEND, email, pw, name);
+      const p = await Login.emailProbe(BACKEND, email);
+      const exists = !!(p && p.exists);
+      if (emailLoginFields) emailLoginFields.hidden = !exists;
+      if (emailRegisterFields) emailRegisterFields.hidden = exists;
+      if (exists && emailPwInput) emailPwInput.focus();
+      else if (!exists && emailRegPwInput) emailRegPwInput.focus();
+    } catch (e) { if (loginState) loginState.textContent = t("login.fail") + (e && e.message ? e.message : e); }
+  });
+  // 登录分支
+  if (emailLoginBtn) emailLoginBtn.addEventListener("click", async () => {
+    const email = (emailInput && emailInput.value || "").trim();
+    const pw = (emailPwInput && emailPwInput.value) || "";
+    if (!pw) { showToast(t("login.emailFillPw")); return; }
+    if (loginState) loginState.textContent = "";
+    try {
+      const r = await Login.emailLogin(BACKEND, email, pw);
+      await applySession(r); showToast(t("login.emailSuccess"));
+    } catch (e) { if (loginState) loginState.textContent = t("login.fail") + (e && e.message ? e.message : e); }
+  });
+  // 注册分支:发送验证码(不传昵称;用户名即邮箱)
+  if (emailSendCodeBtn) emailSendCodeBtn.addEventListener("click", async () => {
+    const email = (emailInput && emailInput.value || "").trim();
+    const pw = (emailRegPwInput && emailRegPwInput.value) || "";
+    if (pw.length < 8) { showToast(t("login.emailFillPw")); return; }
+    if (loginState) loginState.textContent = "";
+    try {
+      await Login.emailRegister(BACKEND, email, pw);
       showToast(t("login.codeSent"));
       startEmailCooldown(60);
     } catch (e) { if (loginState) loginState.textContent = t("login.fail") + (e && e.message ? e.message : e); }
   });
-  if (emailSubmitBtn) emailSubmitBtn.addEventListener("click", async () => {
+  // 注册分支:完成注册(校验验证码)
+  if (emailRegisterBtn) emailRegisterBtn.addEventListener("click", async () => {
     const email = (emailInput && emailInput.value || "").trim();
-    const pw = (emailPwInput && emailPwInput.value) || "";
-    if (!email) { showToast(t("login.emailFillEmail")); return; }
-    if (!pw) { showToast(t("login.emailFillPw")); return; }
+    const code = ((emailCodeInput && emailCodeInput.value || "").trim());
+    if (!code) { showToast(t("login.emailFillCode")); return; }
+    const inv = ((emailInviteInput && emailInviteInput.value || "").trim());
     if (loginState) loginState.textContent = "";
     try {
-      if (emailMode === "login") {
-        const r = await Login.emailLogin(BACKEND, email, pw);
-        await applySession(r); showToast(t("login.emailSuccess"));
-      } else {
-        const code = ((emailCodeInput && emailCodeInput.value || "").trim());
-        if (!code) { showToast(t("login.emailFillCode")); return; }
-        const inv = ((emailInviteInput && emailInviteInput.value || "").trim());
-        const r = await Login.emailVerify(BACKEND, email, code, inv, "");
-        await applySession(r); showToast(t("login.emailSuccess"));
-      }
+      const r = await Login.emailVerify(BACKEND, email, code, inv, "");
+      await applySession(r); showToast(t("login.emailSuccess"));
     } catch (e) { if (loginState) loginState.textContent = t("login.fail") + (e && e.message ? e.message : e); }
   });
 
