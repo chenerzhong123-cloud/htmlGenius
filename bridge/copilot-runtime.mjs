@@ -89,6 +89,14 @@ function resolveDir(d, home) {
 // 拒绝:symlink(lstat 判断,防指向不受控二进制)、目录、不可执行文件。不执行未验证路径。
 export function discoverLocalCopilotCli({ env = process.env, fsImpl = fs, platform = process.platform } = {}) {
   if (platform !== "darwin") return null; // host 仅 macOS
+  // v1.0.11: 默认禁用本地 CLI runtime,强制走 bundled SDK。
+  // 根因:打包的 @github/copilot-sdk 1.0.7 与本地 copilot CLI(实测 1.0.79)的 session 创建不兼容——
+  //   轻量 probe(start + getAuthStatus)能过(假阳性),但真正 createSession(带 availableTools/hooks)
+  //   + sendAndWait 失败 → COPILOT_RUN_FAILED、stream 全空(目标 Mac id=17 实测,session=null)。
+  //   bundled runtime 无此问题(Copilot 能跑,见 id=15/16)。本地 CLI 仍保留供用户完成 GitHub 登录认证,
+  //   只是 bridge 不把它当 runtime。重启本地 CLI 路径前,须先让 probe 做真实 session 校验(消除假阳性)。
+  // 临时恢复(仅调试):env 设 HG_COPILOT_ALLOW_LOCAL_CLI=1。
+  if (!/^(1|true|yes|on)$/i.test(String((env && env.HG_COPILOT_ALLOW_LOCAL_CLI) || ""))) return null;
   const home = env.HOME || os.homedir() || "";
   const dirs = [];
   const seen = new Set();
@@ -151,7 +159,7 @@ export async function loadCopilotSdk({ sdkLoader } = {}) {
 
 // 每个 run 一份客户端配置(§5.1/§5.2):empty 模式(telemetry 默认关、强制 availableTools)、
 // workingDirectory = run workspace、baseDirectory = workspace 内受控 COPILOT_HOME。
-export function buildCopilotClientOptions({ sdk, runtime, cliPath, cwd, baseDirectory }) {
+export function buildCopilotClientOptions({ sdk, runtime, cliPath, cwd, baseDirectory, gitHubToken }) {
   const options = {
     mode: "empty",
     workingDirectory: cwd,
@@ -162,6 +170,7 @@ export function buildCopilotClientOptions({ sdk, runtime, cliPath, cwd, baseDire
     if (!cliPath) throw copilotError(COPILOT_ERRORS.CLI_NOT_FOUND, "local Copilot CLI path is required for local_cli runtime");
     options.connection = sdk.RuntimeConnection.forStdio({ path: cliPath });
   }
+  if (gitHubToken) options.gitHubToken = gitHubToken;
   return options;
 }
 
@@ -172,6 +181,32 @@ export function buildAvailableTools({ write = true } = {}) {
 }
 export function buildExcludedTools() {
   return DENIED_BUILTIN_TOOLS.map((n) => "builtin:" + n);
+}
+
+// v1.011 Copilot 鉴权兜底。NM-host 进程里 SDK 的 useLoggedInUser 读不到 CLI 存的 token
+// (CLI 1.0.79 存在钥匙串 service=copilot-cli,SDK 没去找/读不到)→ session 报
+// "Session was not created with authentication info"。此处主动取 token 作 gitHubToken 传 SDK:
+// ① env: COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN;② macOS 钥匙串 copilot-cli 项。
+// token 只传 SDK,绝不进日志/诊断/manifest。非 darwin 或读不到 → null(回退 useLoggedInUser)。
+export function readCopilotKeychainToken({ execFileImpl = execFile } = {}) {
+  if (process.platform !== "darwin") return null;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    try {
+      execFileImpl("security", ["find-generic-password", "-s", "copilot-cli", "-w"], { timeout: 8000, maxBuffer: 8192 }, (err, stdout) => {
+        if (err || typeof stdout !== "string") return finish(null);
+        const tok = stdout.trim();
+        finish(tok.length > 0 ? tok : null);
+      });
+    } catch (_) { finish(null); }
+  });
+}
+export async function resolveCopilotToken({ env = process.env, execFileImpl = execFile, platform = process.platform } = {}) {
+  const envTok = env && (env.COPILOT_GITHUB_TOKEN || env.GH_TOKEN || env.GITHUB_TOKEN);
+  if (envTok) return String(envTok);
+  if (platform !== "darwin") return null;
+  return readCopilotKeychainToken({ execFileImpl });
 }
 
 // ———————————————————————— probe(§6.2:只读,不建 session)————————————————————————
@@ -191,13 +226,14 @@ function probeResult({ status, runtime = null, version = null }) {
 // 尝试用 SDK 启动一种 runtime 并读 auth/status。返回 { ok, runtime, authed, version } 或 { ok:false }。
 // 全程不 createSession / send / listSessions。finally 里 stop。probe 与执行期 runtime 选择共用。
 export async function attemptRuntimeStart({ sdk, runtime, cliPath }) {
+  const gitHubToken = await resolveCopilotToken();
   let client = null;
   try {
-    client = new sdk.CopilotClient(
-      runtime === COPILOT_RUNTIMES.LOCAL_CLI
-        ? { connection: sdk.RuntimeConnection.forStdio({ path: cliPath }) }
-        : {}
-    );
+    const ctorOpts = runtime === COPILOT_RUNTIMES.LOCAL_CLI
+      ? { connection: sdk.RuntimeConnection.forStdio({ path: cliPath }) }
+      : {};
+    if (gitHubToken) ctorOpts.gitHubToken = gitHubToken;
+    client = new sdk.CopilotClient(ctorOpts);
     await client.start();
     const auth = await client.getAuthStatus();
     let version = null;
@@ -399,7 +435,8 @@ export async function runCopilotSession({
     }
   });
 
-  const client = new sdk.CopilotClient(buildCopilotClientOptions({ sdk, runtime, cliPath, cwd, baseDirectory }));
+  const gitHubToken = await resolveCopilotToken();
+  const client = new sdk.CopilotClient(buildCopilotClientOptions({ sdk, runtime, cliPath, cwd, baseDirectory, gitHubToken }));
   let session = null;
   try {
     await client.start();

@@ -812,6 +812,8 @@ button {
   100% { box-shadow: 0 0 0 3px var(--success-soft), 0 0 0 8px transparent; }
 }
 .agent-dot.warn { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-soft); }
+.agent-dot.checking { width: 9px; height: 9px; margin-top: 4px; background: transparent; border: 1.5px solid var(--text-faint); border-top-color: transparent; animation: hg-spin .7s linear infinite; }
+@keyframes hg-spin { to { transform: rotate(360deg); } }
 .agent b { display: block; font-size: 12px; font-weight: 700; }
 .agent-note, .agent small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10px; line-height: 1.35; }
 /* 右侧状态 chip:使用中(品牌实心) / 切换(描边,悬停点亮,提示整行可点切换) */

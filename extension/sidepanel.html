@@ -274,7 +274,7 @@
         </div>
         <div class="advanced-field">
           <label class="advanced-label" data-i18n="patch.modeLabel">精确修改的应用方式</label>
-          <p class="field-hint" data-i18n="patch.modeHint">仅对「精准修补」且已连接 Claude Code 生效；其余情况仍生成完整候选。</p>
+          <p class="field-hint" data-i18n="patch.modeHint">仅对「精准修补」生效：Claude Code / Codex 支持逐条编辑预览；Copilot 不支持此项，会直接生成完整候选。</p>
           <div class="patch-apply-modes">
             <label class="patch-apply-mode"><input type="radio" name="patch-apply-mode" value="preview_confirm"><span data-i18n="patch.modePreview">先预览，确认后再应用</span></label>
             <label class="patch-apply-mode"><input type="radio" name="patch-apply-mode" value="apply_then_review" checked><span data-i18n="patch.modeApply">直接应用，事后审阅</span></label>
@@ -303,9 +303,9 @@
                 <div class="menu-setup-cmd"><code id="contract-send-setup-cmd"></code><button class="menu-setup-copy" id="contract-send-setup-copy" type="button" data-i18n="bridge.copyCmd">复制</button></div>
                 <div class="menu-setup-step"><b>2</b><span data-i18n="bridge.setupStep2">安装并登录你要用的 Agent(Claude Code / Codex / Copilot),回来点「检查连接」。</span></div>
               </div>
-              <button class="agent" data-provider="claude_code_cli" type="button"><i class="agent-dot"></i><span><b>Claude Code</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span><span class="agent-chip" hidden></span></button>
-              <button class="agent" data-provider="codex_app_server" type="button"><i class="agent-dot"></i><span><b>Codex</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span><span class="agent-chip" hidden></span></button>
-              <button class="agent" data-provider="github_copilot" type="button"><i class="agent-dot"></i><span><b>GitHub Copilot</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span><span class="agent-chip" hidden></span></button>
+              <button class="agent" data-provider="claude_code_cli" type="button"><i class="agent-dot"></i><span><b>Claude Code</b><small class="agent-note" data-i18n="provider.checking">正在连接…</small></span><span class="agent-chip" hidden></span></button>
+              <button class="agent" data-provider="codex_app_server" type="button"><i class="agent-dot"></i><span><b>Codex</b><small class="agent-note" data-i18n="provider.checking">正在连接…</small></span><span class="agent-chip" hidden></span></button>
+              <button class="agent" data-provider="github_copilot" type="button"><i class="agent-dot"></i><span><b>GitHub Copilot</b><small class="agent-note" data-i18n="provider.checking">正在连接…</small></span><span class="agent-chip" hidden></span></button>
               <div id="conn-center" class="conn-center" hidden>
                 <div class="conn-body" id="conn-body">
                   <div class="conn-checking" id="conn-checking" role="status" aria-live="polite" hidden>

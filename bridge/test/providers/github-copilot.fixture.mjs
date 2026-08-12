@@ -95,9 +95,10 @@ export const fixture = {
         return { invoke: () => probeCopilot({ sdkLoader: async () => makeFakeSdk({ bundled: { auth: { isAuthenticated: false } } }), env: NO_CLI_ENV, fsImpl: NO_CLI_FS }) };
       case "incompatible":
         // 本地 CLI 存在但 SDK 起不来 + bundled 也起不来 → incompatible
+        // (v1.0.11: 本地 CLI 默认禁用,此处显式开启以真正走到 local 路径)
         return { invoke: () => probeCopilot({
           sdkLoader: async () => makeFakeSdk({ local: { startError: new Error("protocol mismatch") }, bundled: { startError: new Error("runtime missing") } }),
-          execFileImpl: fakeCliExec, env: { PATH: FAKE_CLI_DIR, HOME: "/nonexistent-home" }, fsImpl: fakeCliFs
+          execFileImpl: fakeCliExec, env: { HG_COPILOT_ALLOW_LOCAL_CLI: "1", PATH: FAKE_CLI_DIR, HOME: "/nonexistent-home" }, fsImpl: fakeCliFs
         }) };
       case "probe_error":
         return { invoke: () => probeCopilot({ sdkLoader: async () => { throw new Error("boom"); }, env: NO_CLI_ENV, fsImpl: NO_CLI_FS }) };

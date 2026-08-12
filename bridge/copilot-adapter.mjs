@@ -218,6 +218,15 @@ export async function executeCopilotCandidateRun(msg, { emit, selectRuntime, sdk
     failed('SOURCE_MUTATED_DURING_CANDIDATE', 'source 在 copilot run 期间变化,candidate 未采用', prep.runsDir, { ...ctxBase, sourceSha256After }); return;
   }
 
+  // 6.5 兜底:Copilot 常不调 write 工具,改把整页 HTML 当聊天文本 dump(id=16)。
+  //      candidate.html 缺失时,从回复文本抢救 HTML 落盘,再交给下面 validateCandidate 正常复核。
+  if (!fs.existsSync(prep.candidatePath)) {
+    const recovered = extractHtmlFromReply(copilotReplyText(run && run.reply));
+    if (recovered) {
+      try { fs.writeFileSync(prep.candidatePath, recovered, { mode: 0o600 }); } catch (_) {}
+    }
+  }
+
   // 7. 校验 candidate 形态;若期间有越权工具被拒且无输出 → 归因 PERMISSION_DENIED(§5.5)
   let cand;
   try { cand = validateCandidate(prep.candidatePath, prep.sourceByteLength); }
@@ -410,6 +419,24 @@ function copilotReplyText(reply) {
     return reply.content.map((p) => (p && typeof p.text === "string") ? p.text : "").join("");
   }
   try { return JSON.stringify(reply); } catch (_) { return ""; }
+}
+
+// Copilot(尤其 bundled SDK 的 empty 模式)常不调用 write 工具落 candidate.html,
+// 而是把整页 HTML 当聊天文本回复 dump 出来(目标 Mac id=16 实测:读完源后直接吐整页 HTML)。
+// 此处从回复文本里抢救出完整 HTML 文档,仅作 candidate 兜底:找到才写 candidate.html,
+// 找不到返回 null,交回原 CANDIDATE_MISSING 流程(后续 validateCandidate 仍会复核形态)。
+export function extractHtmlFromReply(text) {
+  if (typeof text !== "string" || text.length === 0) return null;
+  // 1) 优先取 ```html … ``` 代码围栏里的内容(模型常把整页 HTML 包在围栏里)
+  const fence = text.match(/```(?:html|HTML)?\s*([\s\S]*?)```/);
+  const haystack = fence ? fence[1] : text;
+  // 2) 匹配完整文档:<!DOCTYPE html>…</html> 或 <html …>…</html>(非贪婪到首个闭合 </html>)
+  const m = haystack.match(/(<!DOCTYPE[^>]*>\s*<html[\s\S]*?<\/html>|<html[\s\S]*?<\/html>)/i);
+  if (!m) return null;
+  const html = m[1].trim();
+  // 必须闭合 + 足够长(真实候选是整页,>=256B);零碎提及的 <html> 标签不在此列
+  if (html.length < 256 || !/<\/html>/i.test(html)) return null;
+  return html;
 }
 
 export async function executeCopilotPatchPreviewRun(msg, { emit, selectRuntime, sdkLoader, execFileImpl, env, fsImpl } = {}) {

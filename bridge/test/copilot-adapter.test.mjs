@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { makeFakeSdk } from './fake-copilot-sdk.mjs';
-import { executeCopilotCandidateRun, executeCopilotPlanRun, copilotWorkspacePathFor } from '../copilot-adapter.mjs';
+import { executeCopilotCandidateRun, executeCopilotPlanRun, copilotWorkspacePathFor, extractHtmlFromReply } from '../copilot-adapter.mjs';
 import { sha256File } from '../candidate-workspace.mjs';
 import { COPILOT_RUNTIMES, COPILOT_ERRORS } from '../copilot-runtime.mjs';
 
@@ -200,6 +200,36 @@ test('copilot candidate:写越界路径被 hook 拒(write 只认 candidate.html)
   assert.equal(evilDenied.permissionDecision, 'deny');
   assert.ok(events.some((e) => e.type === 'candidate-ready'), '合法输出仍成功(拒绝的是越权写)');
   assert.ok(!fs.existsSync(path.join(fix.dir, 'evil.html')));
+});
+
+// ———————————————————————— Fix 2:Copilot 不调 write、把整页 HTML 当文本 dump 的兜底 ———
+
+test('extractHtmlFromReply: 从纯文本/围栏/prose 中抽出完整 HTML 文档;无文档或过短/未闭合 → null', () => {
+  const doc = '<!doctype html><html lang="zh"><head><title>x</title></head><body><p>' + 'a'.repeat(300) + '</p></body></html>';
+  assert.equal(extractHtmlFromReply(doc), doc, '纯 HTML 原样返回');
+  assert.equal(extractHtmlFromReply('已完成。\n```html\n' + doc + '\n```'), doc, '围栏包裹 → 取围栏内');
+  assert.equal(extractHtmlFromReply('我重写了页面:\n' + doc + '\n以上为新版。'), doc, 'prose 夹杂 → 仍取出');
+  const noDoctype = '<html><head><title>y</title></head><body>' + 'b'.repeat(300) + '</body></html>';
+  assert.equal(extractHtmlFromReply(noDoctype), noDoctype, '无 doctype 但有 <html>…</html>');
+  assert.equal(extractHtmlFromReply('抱歉,我无法生成编辑。'), null, '无 HTML → null');
+  assert.equal(extractHtmlFromReply('<html><body>短</body></html>'), null, '<256B → null');
+  assert.equal(extractHtmlFromReply('<html><body>未闭合' + 'x'.repeat(300)), null, '未闭合 </html> → null');
+  assert.equal(extractHtmlFromReply(null), null);
+  assert.equal(extractHtmlFromReply(''), null);
+});
+
+test('copilot candidate:Copilot 把整页 HTML 当文本 dump(未写 candidate.html)→ 兜底抽取落盘 → candidate-ready', async () => {
+  const fix = mkFix();
+  const dumped = '<!doctype html><html lang="zh"><head><title>RAG</title></head><body><h1>' + '重写后的内容'.repeat(40) + '</h1></body></html>';
+  // reply 带 prose + 围栏 HTML,不设 writer → candidate.html 不会产生(模拟 id=16 的 dump 行为)
+  const sdk = makeFakeSdk({ session: { reply: '已按评论重写整页:\n```html\n' + dumped + '\n```' } });
+  const { events, emit } = collect();
+  await executeCopilotCandidateRun(baseMsg(fix), { emit, selectRuntime: makeSelector(sdk) });
+  const ready = events.find((e) => e.type === 'candidate-ready');
+  assert.ok(ready, '兜底抽取成功 → 仍发 candidate-ready');
+  const sib = path.join(fix.dir, 'reportV1.1.html');
+  assert.ok(fs.existsSync(sib), 'sibling candidate 已从兜底 HTML 发布');
+  assert.equal(fs.readFileSync(sib, 'utf8'), dumped, '发布内容 == 抽取出的整页 HTML');
 });
 
 // ———————————————————————— Plan ————————————————————————

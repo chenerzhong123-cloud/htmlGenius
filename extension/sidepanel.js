@@ -1020,7 +1020,12 @@
       btn.classList.toggle("active", inUse);
       btn.disabled = !ready;
       const dot = btn.querySelector(".agent-dot");
-      if (dot) dot.className = "agent-dot" + (ready ? (inUse ? " ready in-use" : " ready") : (p && p.status === "auth_required" ? " warn" : ""));
+      // 默认检查连接期间(!p 或 status=checking):dot 转圈,文案「正在连接」
+      let dotCls = "agent-dot";
+      if (ready) dotCls += inUse ? " ready in-use" : " ready";
+      else if (p && p.status === "auth_required") dotCls += " warn";
+      else if (!p || p.status === "checking") dotCls += " checking";
+      if (dot) dot.className = dotCls;
       const note = btn.querySelector(".agent-note");
       if (note) note.textContent = providerStatusText(p);
       // 右侧 chip:使用中(当前激活) / 切换(已连接未激活,提示整行可点切换) / 未连接不显示

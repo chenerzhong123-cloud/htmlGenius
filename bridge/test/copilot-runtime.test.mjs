@@ -10,6 +10,7 @@ import {
   COPILOT_PROVIDER, COPILOT_RUNTIMES, RUNTIME_LABELS, COPILOT_ERRORS,
   PLAN_TIMEOUT_MS, CANDIDATE_TIMEOUT_MS,
   discoverLocalCopilotCli, readCopilotCliVersion, probeCopilot,
+  resolveCopilotToken, readCopilotKeychainToken,
   buildCopilotClientOptions, createPreToolPolicy, runCopilotSession,
   buildAvailableTools, buildExcludedTools, assertRuntimeConsistency,
   READ_TOOLS, WRITE_TOOLS, DENIED_BUILTIN_TOOLS
@@ -104,7 +105,7 @@ test("probe: 本地 CLI + SDK health 通过 → local_cli ready;路径不出现�
     const res = await probeCopilot({
       sdkLoader: async () => sdk,
       execFileImpl: (f, args, opts, cb) => cb(null, "copilot version 9.9.9\n", ""),
-      env: { PATH: tmp, HOME: "/nonexistent-home" },
+      env: { HG_COPILOT_ALLOW_LOCAL_CLI: "1", PATH: tmp, HOME: "/nonexistent-home" },
       fsImpl: fakeFs
     });
     assert.equal(res.status, "ready");
@@ -131,7 +132,7 @@ test("probe: 本地 CLI 无法被 SDK 启动(不兼容)→ 自动转 bundled;bun
     const res = await probeCopilot({
       sdkLoader: async () => sdk,
       execFileImpl: (f, args, opts, cb) => cb(null, "copilot version 0.1.0-ancient\n", ""),
-      env: { PATH: tmp, HOME: "/nonexistent-home" },
+      env: { HG_COPILOT_ALLOW_LOCAL_CLI: "1", PATH: tmp, HOME: "/nonexistent-home" },
       fsImpl: fakeFs
     });
     assert.equal(res.status, "ready");
@@ -155,7 +156,7 @@ test("probe: 本地不兼容 + bundled 也起不来 → incompatible", async () 
     const res = await probeCopilot({
       sdkLoader: async () => sdk,
       execFileImpl: (f, args, opts, cb) => cb(null, "v\n", ""),
-      env: { PATH: tmp, HOME: "/nonexistent-home" },
+      env: { HG_COPILOT_ALLOW_LOCAL_CLI: "1", PATH: tmp, HOME: "/nonexistent-home" },
       fsImpl: fakeFs
     });
     assert.equal(res.status, "incompatible");
@@ -205,15 +206,43 @@ test("discoverLocalCopilotCli: 接受可执行文件 + 指向可执行文件的 
     fs.writeFileSync(path.join(tmp, "noexec"), "x", { mode: 0o644 });
     fs.symlinkSync(path.join(tmp, "noexec"), path.join(dirE, "copilot"));
 
+    // v1.0.11: 本地 CLI 发现默认禁用(HG_COPILOT_ALLOW_LOCAL_CLI 门控);以下用例显式开启以测发现逻辑本身。
     // a 排最前 → 返回 symlink(指向可执行文件)
-    assert.equal(discoverLocalCopilotCli({ env: { PATH: [dirA, dirB, dirC, dirD, dirE].join(":"), HOME: tmp }, platform: "darwin" }), symGood);
+    assert.equal(discoverLocalCopilotCli({ env: { HG_COPILOT_ALLOW_LOCAL_CLI: "1", PATH: [dirA, dirB, dirC, dirD, dirE].join(":"), HOME: tmp }, platform: "darwin" }), symGood);
     // 只有"symlink→不可执行"时 → null
-    assert.equal(discoverLocalCopilotCli({ env: { PATH: dirE, HOME: tmp }, platform: "darwin" }), null);
+    assert.equal(discoverLocalCopilotCli({ env: { HG_COPILOT_ALLOW_LOCAL_CLI: "1", PATH: dirE, HOME: tmp }, platform: "darwin" }), null);
     // 只有目录时 → null
-    assert.equal(discoverLocalCopilotCli({ env: { PATH: dirB, HOME: tmp }, platform: "darwin" }), null);
+    assert.equal(discoverLocalCopilotCli({ env: { HG_COPILOT_ALLOW_LOCAL_CLI: "1", PATH: dirB, HOME: tmp }, platform: "darwin" }), null);
+    // 门控默认关(无 flag)→ 即使有合法 CLI 也返回 null(强制 bundled)
+    assert.equal(discoverLocalCopilotCli({ env: { PATH: dirD, HOME: tmp }, platform: "darwin" }), null);
     // 非 darwin → null
-    assert.equal(discoverLocalCopilotCli({ env: { PATH: dirD, HOME: tmp }, platform: "linux" }), null);
+    assert.equal(discoverLocalCopilotCli({ env: { HG_COPILOT_ALLOW_LOCAL_CLI: "1", PATH: dirD, HOME: tmp }, platform: "linux" }), null);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+// —— v1.0.11 Copilot 鉴权兜底:resolveCopilotToken / readCopilotKeychainToken ——
+
+test("resolveCopilotToken: env 优先(COPILOT_GITHUB_TOKEN/GH_TOKEN/GITHUB_TOKEN);无 env + darwin 走钥匙串;失败/非 darwin → null", async () => {
+  // env 优先于钥匙串
+  assert.equal(await resolveCopilotToken({ env: { COPILOT_GITHUB_TOKEN: "envtok" }, execFileImpl: (c, a, o, cb) => cb(null, "should_not_be_used\n", ""), platform: "darwin" }), "envtok");
+  assert.equal(await resolveCopilotToken({ env: { GH_TOKEN: "ghtok" }, platform: "darwin" }), "ghtok");
+  assert.equal(await resolveCopilotToken({ env: { GITHUB_TOKEN: "ghtok2" }, platform: "linux" }), "ghtok2");
+  // 无 env + darwin:读钥匙串 copilot-cli(成功取 stdout 去空白)
+  const okExec = (cmd, args, opts, cb) => { assert.equal(cmd, "security"); assert.deepEqual(args, ["find-generic-password", "-s", "copilot-cli", "-w"]); cb(null, "keychain_tok_123\n", ""); };
+  assert.equal(await resolveCopilotToken({ env: {}, execFileImpl: okExec, platform: "darwin" }), "keychain_tok_123");
+  // 钥匙串读失败 → null
+  assert.equal(await resolveCopilotToken({ env: {}, execFileImpl: (c, a, o, cb) => cb(new Error("not found"), "", ""), platform: "darwin" }), null);
+  // 非 darwin 且无 env → null(不调钥匙串)
+  let called = false;
+  assert.equal(await resolveCopilotToken({ env: {}, execFileImpl: () => { called = true; }, platform: "linux" }), null);
+  assert.equal(called, false, "非 darwin 不得调 security");
+});
+
+test("readCopilotKeychainToken: 本机 darwin 下走 execFile;成功去空白/失败→null", async () => {
+  // 本测试机为 darwin → 会调用 execFileImpl;用 fake 注入
+  assert.equal(await readCopilotKeychainToken({ execFileImpl: (c, a, o, cb) => cb(null, "  tok_with_ws  \n", "") }), "tok_with_ws");
+  assert.equal(await readCopilotKeychainToken({ execFileImpl: (c, a, o, cb) => cb(new Error("SecKeychainSearchCopyNext: not found"), "", "") }), null);
+  assert.equal(await readCopilotKeychainToken({ execFileImpl: (c, a, o, cb) => cb(null, "", "") }), null, "空串 → null");
 });
 
 test("readCopilotCliVersion: 正常/超长截断/出错/超时 → 字符串 | ≤64 | null", async () => {
