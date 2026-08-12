@@ -99,3 +99,36 @@ def test_probe_existing_vs_new(tmp_path, monkeypatch, capture_code):
     assert client.post("/auth/email/probe", json={"email": "a@x.com"}).json()["exists"] is True
     # 全新邮箱 → 不存在
     assert client.post("/auth/email/probe", json={"email": "new@x.com"}).json()["exists"] is False
+
+
+def test_email_session_create_and_join_workspace(tmp_path, monkeypatch, capture_code):
+    _init(tmp_path, monkeypatch)
+    _reg(email="a@x.com")
+    v = client.post("/auth/email/verify", json={"email": "a@x.com", "code": capture_code["code"]}).json()
+    assert "teams" in v and len(v["teams"]) >= 1  # verify 响应带 teams
+    H = {"Authorization": "Bearer " + v["token"]}
+    # 创建新工作区(Google/email 通用)
+    r = client.post("/auth/teams", json={"name": "新项目"}, headers=H)
+    assert r.status_code == 201 and r.json()["team_name"] == "新项目"
+    assert len(r.json()["teams"]) >= 2
+    new_tok = r.json()["token"]
+    # 在新工作区生成邀请码 → 另一 email 用户加入
+    invite = client.post("/auth/invites", headers={"Authorization": "Bearer " + new_tok}).json()["code"]
+    _reg(email="b@x.com")
+    vb = client.post("/auth/email/verify", json={"email": "b@x.com", "code": capture_code["code"]}).json()
+    bH = {"Authorization": "Bearer " + vb["token"]}
+    j = client.post("/auth/teams/join", json={"invite_code": invite}, headers=bH)
+    assert j.status_code == 200 and j.json()["team_id"] == r.json()["team_id"]
+    assert "teams" in j.json()
+    # 幂等:重复 join 同一码仍 200
+    assert client.post("/auth/teams/join", json={"invite_code": invite}, headers=bH).status_code == 200
+    # 无效码 → 400
+    assert client.post("/auth/teams/join", json={"invite_code": "inv_nope"}, headers=bH).status_code == 400
+
+
+def test_email_login_returns_teams(tmp_path, monkeypatch, capture_code):
+    _init(tmp_path, monkeypatch)
+    _reg(email="a@x.com")
+    client.post("/auth/email/verify", json={"email": "a@x.com", "code": capture_code["code"]})
+    lg = client.post("/auth/email/login", json={"email": "a@x.com", "password": "pw123456"}).json()
+    assert "teams" in lg and len(lg["teams"]) >= 1

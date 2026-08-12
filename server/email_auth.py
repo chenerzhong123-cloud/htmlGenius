@@ -113,7 +113,8 @@ def verify(email: str, code: str, invite_code: str | None = None, team_name: str
     team_id = _resolve_team(user_id, invite_code, team_name)
     display = name or email
     token = sessions.create_session(user_id, display, team_id)
-    return {"token": token, "user": {"id": user_id, "name": display}, "team_id": team_id}
+    return {"token": token, "user": {"id": user_id, "name": display},
+            "team_id": team_id, "teams": teams.user_teams(user_id)}
 
 
 def login(email: str, password: str) -> dict:
@@ -125,7 +126,8 @@ def login(email: str, password: str) -> dict:
     teams_list = teams.user_teams(u["user_id"])
     team_id = teams_list[0]["team_id"] if teams_list else teams.create_team("我的团队", u["user_id"])
     token = sessions.create_session(u["user_id"], u["name"], team_id)
-    return {"token": token, "user": {"id": u["user_id"], "name": u["name"]}, "team_id": team_id}
+    return {"token": token, "user": {"id": u["user_id"], "name": u["name"]},
+            "team_id": team_id, "teams": teams.user_teams(u["user_id"])}
 
 
 def probe(email: str) -> dict:

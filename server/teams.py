@@ -200,6 +200,33 @@ def redeem_invite(code: str, sub: str) -> "str | None":
         c.close()
 
 
+def join_team(code: str, user_id: str) -> "str | None":
+    """凭邀请码加入团队(幂等:已是成员直接返回 team_id,不消耗名额)。无效/过期/超额 → None。"""
+    c = _connect()
+    try:
+        row = c.execute(
+            "SELECT team_id, max_uses, used_count, expires_at FROM invites WHERE code=?", (code,)
+        ).fetchone()
+        if row is None:
+            return None
+        if c.execute(
+            "SELECT 1 FROM memberships WHERE user_id=? AND team_id=?", (user_id, row["team_id"])
+        ).fetchone():
+            return row["team_id"]  # 已是成员 → 幂等返回
+        if row["max_uses"] is not None and row["used_count"] >= row["max_uses"]:
+            return None
+        if row["expires_at"] and datetime.now(timezone.utc) > datetime.fromisoformat(row["expires_at"]):
+            return None
+        c.execute(
+            "INSERT OR IGNORE INTO memberships(user_id, team_id, joined_at) VALUES(?,?,?)",
+            (user_id, row["team_id"], _now()),
+        )
+        c.execute("UPDATE invites SET used_count=used_count+1 WHERE code=?", (code,))
+        return row["team_id"]
+    finally:
+        c.close()
+
+
 def member_role(sub: str, team_id: str) -> "str | None":
     """'owner' | 'member' | None(非成员)。Lark 团队无 membership 行 → None。"""
     c = _connect()

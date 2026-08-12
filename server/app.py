@@ -374,6 +374,41 @@ def switch_team(payload: SwitchTeamIn, session: Session = Depends(require_sessio
     }
 
 
+class TeamJoinIn(BaseModel):
+    invite_code: str = Field(min_length=1, max_length=64)
+
+
+class TeamCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+@app.post("/auth/teams/join")
+def team_join(payload: TeamJoinIn, session: Session = Depends(require_session)):
+    """已登录用户凭邀请码加入工作区(Google/email 通用,幂等)。无效/过期 → 400。"""
+    team_id = teams.join_team(payload.invite_code, session.open_id)
+    if not team_id:
+        raise HTTPException(status_code=400, detail="邀请码无效或已过期")
+    teams_list = teams.user_teams(session.open_id)
+    team_name = next((t["name"] for t in teams_list if t["team_id"] == team_id), "")
+    token = sessions.create_session(session.open_id, session.name, team_id)
+    return {"token": token, "team_id": team_id, "team_name": team_name,
+            "user": {"id": session.open_id, "name": session.name}, "teams": teams_list}
+
+
+@app.post("/auth/teams", status_code=201)
+def team_create(payload: TeamCreateIn, session: Session = Depends(require_session)):
+    """已登录用户新建工作区(Google/email 通用)。超 HG_MAX_TEAMS_PER_USER → 409。"""
+    try:
+        team_id = teams.create_team(payload.name, session.open_id)
+    except teams.TeamLimitExceeded as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    teams_list = teams.user_teams(session.open_id)
+    token = sessions.create_session(session.open_id, session.name, team_id)
+    return {"token": token, "team_id": team_id,
+            "team_name": payload.name or "未命名团队",
+            "user": {"id": session.open_id, "name": session.name}, "teams": teams_list}
+
+
 @app.post("/auth/invites")
 def create_invite(session: Session = Depends(require_session)):
     """当前 session 的 team 生成邀请码(任意成员可生)。"""
