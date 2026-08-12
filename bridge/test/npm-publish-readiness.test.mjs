@@ -15,7 +15,7 @@ test("npm 可发布:@htmlgenius/bridge,非 private,public access,锁 copilot-sdk
   assert.equal(pkg.name, "@htmlgenius/bridge", "包名须为 scoped @htmlgenius/bridge(与 bootstrap 命令一致)");
   assert.ok(pkg.private !== true, "不得 private:true,否则无法发布");
   assert.equal(pkg.publishConfig && pkg.publishConfig.access, "public", "scoped 包须显式 public");
-  assert.equal(pkg.dependencies["@github/copilot-sdk"], "1.0.7", "copilot-sdk 精确锁版");
+  assert.equal(pkg.dependencies["@github/copilot-sdk"], "1.0.9", "copilot-sdk 精确锁版");
 });
 
 test("npm files 白名单:含 bin/ 与根级 *.mjs,排除 test/verify(发布产物自包含)", () => {

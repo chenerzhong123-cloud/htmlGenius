@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { makeFakeSdk } from './fake-copilot-sdk.mjs';
-import { executeCopilotCandidateRun, executeCopilotPlanRun, copilotWorkspacePathFor } from '../copilot-adapter.mjs';
+import { executeCopilotCandidateRun, executeCopilotPlanRun, copilotWorkspacePathFor, extractHtmlFromReply } from '../copilot-adapter.mjs';
 import { sha256File } from '../candidate-workspace.mjs';
 import { COPILOT_RUNTIMES, COPILOT_ERRORS } from '../copilot-runtime.mjs';
 
@@ -202,6 +202,36 @@ test('copilot candidate:写越界路径被 hook 拒(write 只认 candidate.html)
   assert.ok(!fs.existsSync(path.join(fix.dir, 'evil.html')));
 });
 
+// ———————————————————————— Fix 2:Copilot 不调 write、把整页 HTML 当文本 dump 的兜底 ———
+
+test('extractHtmlFromReply: 从纯文本/围栏/prose 中抽出完整 HTML 文档;无文档或过短/未闭合 → null', () => {
+  const doc = '<!doctype html><html lang="zh"><head><title>x</title></head><body><p>' + 'a'.repeat(300) + '</p></body></html>';
+  assert.equal(extractHtmlFromReply(doc), doc, '纯 HTML 原样返回');
+  assert.equal(extractHtmlFromReply('已完成。\n```html\n' + doc + '\n```'), doc, '围栏包裹 → 取围栏内');
+  assert.equal(extractHtmlFromReply('我重写了页面:\n' + doc + '\n以上为新版。'), doc, 'prose 夹杂 → 仍取出');
+  const noDoctype = '<html><head><title>y</title></head><body>' + 'b'.repeat(300) + '</body></html>';
+  assert.equal(extractHtmlFromReply(noDoctype), noDoctype, '无 doctype 但有 <html>…</html>');
+  assert.equal(extractHtmlFromReply('抱歉,我无法生成编辑。'), null, '无 HTML → null');
+  assert.equal(extractHtmlFromReply('<html><body>短</body></html>'), null, '<256B → null');
+  assert.equal(extractHtmlFromReply('<html><body>未闭合' + 'x'.repeat(300)), null, '未闭合 </html> → null');
+  assert.equal(extractHtmlFromReply(null), null);
+  assert.equal(extractHtmlFromReply(''), null);
+});
+
+test('copilot candidate:Copilot 把整页 HTML 当文本 dump(未写 candidate.html)→ 兜底抽取落盘 → candidate-ready', async () => {
+  const fix = mkFix();
+  const dumped = '<!doctype html><html lang="zh"><head><title>RAG</title></head><body><h1>' + '重写后的内容'.repeat(40) + '</h1></body></html>';
+  // reply 带 prose + 围栏 HTML,不设 writer → candidate.html 不会产生(模拟 id=16 的 dump 行为)
+  const sdk = makeFakeSdk({ session: { reply: '已按评论重写整页:\n```html\n' + dumped + '\n```' } });
+  const { events, emit } = collect();
+  await executeCopilotCandidateRun(baseMsg(fix), { emit, selectRuntime: makeSelector(sdk) });
+  const ready = events.find((e) => e.type === 'candidate-ready');
+  assert.ok(ready, '兜底抽取成功 → 仍发 candidate-ready');
+  const sib = path.join(fix.dir, 'reportV1.1.html');
+  assert.ok(fs.existsSync(sib), 'sibling candidate 已从兜底 HTML 发布');
+  assert.equal(fs.readFileSync(sib, 'utf8'), dumped, '发布内容 == 抽取出的整页 HTML');
+});
+
 // ———————————————————————— Plan ————————————————————————
 
 test('copilot plan 成功 → plan-ready(provider_runtime + plan_sha256),只产 output/plan.json,不产 candidate/sibling', async () => {
@@ -309,12 +339,15 @@ test('BR-1: copilotWorkspacePathFor 拒绝穿越/非法 logical_document_id → 
   }
 });
 
-test('BR-1: copilotWorkspacePathFor 接受合法 logical_document_id,返回 .htmlgenius-bridge/copilot/<id>', () => {
+test('BR-1: copilotWorkspacePathFor 接受合法 logical_document_id,workspace 落 tmpdir(非隐藏,v0.9.x)', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-copilot-ws-ok-'));
   const src = path.join(dir, 'report.html');
   fs.writeFileSync(src, '<!doctype html><html></html>');
   for (const id of ['ok_id', 'hgd_abc']) {
     const p = copilotWorkspacePathFor({ sourcePath: src, logicalDocumentId: id });
-    assert.equal(p, path.join(dir, '.htmlgenius-bridge', 'copilot', id));
+    // v0.9.x:workspace 改放 os.tmpdir() 下(非隐藏);原 .htmlgenius-bridge 隐藏目录会让 Copilot 读不到源。
+    assert.ok(p.startsWith(path.join(os.tmpdir(), 'htmlgenius-bridge', 'copilot')), 'workspace 在 <tmpdir>/htmlgenius-bridge/copilot 下');
+    assert.ok(p.endsWith(id), '以 logical_id 结尾');
+    assert.ok(!p.includes('.htmlgenius-bridge'), '不得再使用隐藏目录 .htmlgenius-bridge');
   }
 });

@@ -265,3 +265,39 @@ test("writeFileAtomic:写入成功且不留临时文件", () => {
     assert.deepEqual(fs.readdirSync(dir), ["f.json"]);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+// === 多扩展 ID 支持(测试机同时装商店版+开发版;普通用户单 ID 不受影响)===
+
+test("buildManifest:extensionIds 多 id → allowed_origins 全列(无 wildcard)", () => {
+  const m = buildManifest({ extensionIds: [ID_A, ID_B], launcherPath: "/tmp/l.sh" });
+  assert.deepEqual(m.allowed_origins, ["chrome-extension://" + ID_A + "/", "chrome-extension://" + ID_B + "/"]);
+});
+
+test("ensureHostRegistration:合并注册——先 A 后 B → [A,B] 不覆盖;再 A → 去重不变", () => {
+  const dir = tmp();
+  try {
+    const src = launcherSrc();
+    ensureHostRegistration({ hostsDir: dir, extensionId: ID_A, launcherSource: src });
+    ensureHostRegistration({ hostsDir: dir, extensionId: ID_B, launcherSource: src });
+    const m = JSON.parse(fs.readFileSync(path.join(dir, HOST_NAME + ".json"), "utf8"));
+    assert.deepEqual(m.allowed_origins, ["chrome-extension://" + ID_A + "/", "chrome-extension://" + ID_B + "/"]);
+    // 再注册 A(已存在)→ 去重,仍 [A,B],且 changed:false
+    const r = ensureHostRegistration({ hostsDir: dir, extensionId: ID_A, launcherSource: src });
+    assert.equal(r.changed, false);
+    const m2 = JSON.parse(fs.readFileSync(path.join(dir, HOST_NAME + ".json"), "utf8"));
+    assert.deepEqual(m2.allowed_origins, ["chrome-extension://" + ID_A + "/", "chrome-extension://" + ID_B + "/"]);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("inspectExistingManifest:[A,B] 时查 A→ours_match;查第三个 ID→ours_mismatch", () => {
+  const dir = tmp();
+  try {
+    ensureHostRegistration({ hostsDir: dir, extensionId: ID_A, launcherSource: launcherSrc() });
+    ensureHostRegistration({ hostsDir: dir, extensionId: ID_B, launcherSource: launcherSrc() });
+    assert.equal(inspectExistingManifest({ hostsDir: dir, extensionId: ID_A }).state, "ours_match");
+    assert.equal(inspectExistingManifest({ hostsDir: dir, extensionId: ID_B }).state, "ours_match");
+    const ID_C = "bcdefghijklmnopabcbcdefghijklmnop"; // 又一个合法 [a-p]{32}
+    assert.equal(inspectExistingManifest({ hostsDir: dir, extensionId: ID_C }).state, "ours_mismatch");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

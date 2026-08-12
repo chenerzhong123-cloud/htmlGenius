@@ -58,7 +58,8 @@ test("JS:诊断复制只输出 health JSON(§5.4);host 缺失用兜底形态", (
 });
 
 test("JS:扁平连接操作与 Copy Prompt 常驻提示由纯函数输出驱动", () => {
-  assert.match(sp, /connHead && st\.collapsed \? " collapsed" : ""/);
+  // v0.9.x:升级提醒钉住展开引入 _collapsed(覆盖 st.collapsed 的自动折叠);断言跟随
+  assert.match(sp, /connHead && _collapsed \? " collapsed" : ""/);
   assert.match(sp, /st\.permanentHintKey \? t\(st\.permanentHintKey\) : ""/);
 });
 

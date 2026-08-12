@@ -470,7 +470,7 @@ export async function executeCodexPatchPreviewRun(msg, { emit, runtime, client, 
       workspaceCwd: prep.runsDir,
       prompt: buildPatchPrompt({ runId, task }),
       timeoutMs: CODEX_PATCH_TIMEOUT_MS,
-      onStream: null,   // patch 预览不流式(与 claude patch 同;UI 只看 bridge_status + 预览面板)
+      onStream: makeStreamer(runId, emit).onStream, // v0.9.x:patch 开流式(让无变更理由进流式窗口 + 诊断)
       readOnly: true
     });
   } catch (e) {

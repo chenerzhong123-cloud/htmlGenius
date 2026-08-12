@@ -623,12 +623,18 @@
   let _contractRunKind = "candidate"; // candidate | plan(sidepanel 本次派发)
   let _contractRunId = null;          // 当前 sidepanel 跟踪的 run id(匹配 bridge-stream/完成事件)
   let _streamText = "";               // Agent 实时输出累积(agentMessage delta)
+  let _lastFailed = null;             // 最近一次 bridge 失败(诊断上报用)
   let _candidateResult = null;      // 最近一次 candidate-ready 结果(只读成功态)
   let _candidateVersionLabel = null;  // 本文档候选版本号标签(来自 host "1.N" 字符串,如 "1.3")
   // v0.8.1 provider probe + plan-first 状态(spec §3.D/§5)
   let _provider = null;             // 当前选中 provider id(仅 ready 可选)
   let _providerStates = {};         // { providerId: probe 记录 }
   let _providerCacheAt = 0;         // probe 缓存时间戳(ms);30s 内不重探
+  // 默认 provider:优先 Codex(用户偏好),Codex 不可用则退第一个 ready。
+  function _pickDefaultProvider() {
+    if (_providerStates["codex_app_server"] && _providerStates["codex_app_server"].status === "ready") return "codex_app_server";
+    return Object.keys(_providerStates).find((id) => _providerStates[id] && _providerStates[id].status === "ready") || null;
+  }
   let _plan = null;                 // 已校验计划记录(bridge-plan-ready):{ plan_id, plan_sha256, plan_markdown, provider, source_artifact_uri, base_artifact_hash, task_sha256 }
   let _planStale = false;           // 计划后改 contract/artifact → true,阻止确认
   let _patchPending = null;         // 方向3:待确认的精确编辑预览 { run_id, edits, compliance }
@@ -976,7 +982,7 @@
       _providerCacheAt = Date.now();
       // 恢复上次选择(仅 ready),否则选第一个 ready
       if (!_provider || !(_providerStates[_provider] && _providerStates[_provider].status === "ready")) {
-        _provider = (Object.keys(_providerStates).find((id) => _providerStates[id].status === "ready")) || null;
+        _provider = _pickDefaultProvider();
       }
       if (_contractOpen) { renderProviderMenu(); refreshContractUI(); }
     }).catch(() => {});
@@ -1014,7 +1020,12 @@
       btn.classList.toggle("active", inUse);
       btn.disabled = !ready;
       const dot = btn.querySelector(".agent-dot");
-      if (dot) dot.className = "agent-dot" + (ready ? (inUse ? " ready in-use" : " ready") : (p && p.status === "auth_required" ? " warn" : ""));
+      // 默认检查连接期间(!p 或 status=checking):dot 转圈,文案「正在连接」
+      let dotCls = "agent-dot";
+      if (ready) dotCls += inUse ? " ready in-use" : " ready";
+      else if (p && p.status === "auth_required") dotCls += " warn";
+      else if (!p || p.status === "checking") dotCls += " checking";
+      if (dot) dot.className = dotCls;
       const note = btn.querySelector(".agent-note");
       if (note) note.textContent = providerStatusText(p);
       // 右侧 chip:使用中(当前激活) / 切换(已连接未激活,提示整行可点切换) / 未连接不显示
@@ -1115,7 +1126,7 @@
       _health.providers.forEach((p) => { if (p && p.id) _providerStates[p.id] = p; });
       _providerCacheAt = Date.now();
       if (!_provider || !(_providerStates[_provider] && _providerStates[_provider].status === "ready")) {
-        _provider = (Object.keys(_providerStates).find((id) => _providerStates[id].status === "ready")) || null;
+        _provider = _pickDefaultProvider();
       }
       renderProviderMenu();
       refreshContractUI();
@@ -1209,6 +1220,15 @@
     return true;
   }
   // §5.2 状态矩阵 → 由纯函数 ConnectionCenterState.connStateFor 驱动(v0.9.1 §9.1,可 node:test 验证)
+  // 语义版本比较(a<b→负,==0,>正);只比数字段。
+  function _cmpVer(a, b) {
+    const pa = String(a || "").split("."), pb = String(b || "").split(".");
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const x = parseInt(pa[i] || "0", 10), y = parseInt(pb[i] || "0", 10);
+      if (x !== y) return x - y;
+    }
+    return 0;
+  }
   function renderConnCenter() {
     if (!connCenter) return;
     if (!_contractOpen) { connCenter.hidden = true; return; }
@@ -1218,8 +1238,17 @@
       userCollapsed: _connCollapsed,
       devOnly: !!(_bootstrap && _bootstrap.dev_only)
     });
-    connCenter.className = "conn-center" + (st.cls ? " " + st.cls : "") + (connHead && st.collapsed ? " collapsed" : "");
-    if (connHead) connHead.setAttribute("aria-expanded", String(!st.collapsed));
+    // Bridge 升级提醒:host bridge 版本 < 目标版本(TARGET_BRIDGE_VERSION,经 _bootstrap.bridge_version 传回)。
+    // 有新版时:① 钉住展开 —— 覆盖 ready 态的自动折叠(connStateFor ready→collapsed=true),否则升级按钮被折进
+    //            display:none 的 body 里、点完「检查连接」就消失;仅在用户未手动折叠过时钉住(尊重用户显式收起)。
+    //         ② 常驻提示 + 露出「复制命令行指令升级」按钮(文案与安装态的「复制 Terminal 命令」区分)。
+    // 未连接态(install_required / repair_required)由 connStateFor 自身露出「复制 Terminal 命令」,不在此覆盖。
+    const _hostVer = (_health && _health.bridge && _health.bridge.version) || null;
+    const _targetVer = (_bootstrap && _bootstrap.bridge_version) || null;
+    const _upgrade = !!(_hostVer && _targetVer && _cmpVer(_hostVer, _targetVer) < 0);
+    const _collapsed = (_upgrade && _connCollapsed === null) ? false : st.collapsed;
+    connCenter.className = "conn-center" + (st.cls ? " " + st.cls : "") + (connHead && _collapsed ? " collapsed" : "");
+    if (connHead) connHead.setAttribute("aria-expanded", String(!_collapsed));
     if (connTitle) {
       connTitle.textContent = (st.titleKey === "conn.titleConnected")
         ? t(st.titleKey).replace("{n}", String(st.readyCount || 0))
@@ -1233,6 +1262,10 @@
     let hint = st.permanentHintKey ? t(st.permanentHintKey) : "";
     if (hint && st.devOnly) hint += " " + t("conn.devOnly");
     connSetPermanent(hint);
+    if (_upgrade) {
+      connSetPermanent(t("conn.bridgeUpdate").replace("{v}", _targetVer));
+      setConnButton(connSecondary, t("conn.copyTerminalUpgrade"), "terminal");
+    }
   }
   async function connDo(action, btn) {
     if (!action) return;
@@ -1383,13 +1416,16 @@
     if (msg.kind === "command") return msg.starting ? ("🔧 " + t("run.command")) : null;
     if (msg.kind === "reasoning") return msg.starting ? ("💭 " + t("run.reasoning")) : null;
     if (msg.kind === "tokens") return "⚡ " + msg.text + " tokens";
+    if (msg.kind === "tool_denied") return "⛔ " + t("diag.toolDenied") + ": " + String(msg.tool || "?") + " (" + String(msg.category || "") + ")";
+    if (msg.kind === "info") return "· " + String(msg.text || "");  // Copilot tool 等(info 流):可见以便排障
     return null;
   }
   function renderStreamText() {
     const el = contractBridgeStatus && contractBridgeStatus.querySelector(".cbs-stream");
     if (!el) return;
-    el.textContent = _streamText.slice(-400);
+    el.textContent = _streamText; // 完整会话(不再只取末尾 400 字符),框可滚动便于排障
     el.classList.toggle("typing", !!_streamText);
+    el.scrollTop = el.scrollHeight; // 自动滚到底,最新输出可见
   }
   function bridgeFailClass(code) {
     if (code === "USER_CANCELLED") return "warn";
@@ -1420,7 +1456,7 @@
     if (code === "PLAN_MISSING" || code === "PLAN_INVALID" || code === "PLAN_TOO_LARGE" || code === "PLAN_SYMLINK" || code === "PLAN_OUTPUT_PATH_INVALID") return t("bridge.planInvalid");
     if (code === "CLAUDE_PLAN_FAILED" || code === "CLAUDE_PLAN_TIMEOUT" || code === "CODEX_PLAN_FAILED" || code === "CODEX_PLAN_TIMEOUT") return t("bridge.planFailed");
     if (code === "CANDIDATE_MISSING" || code === "CANDIDATE_INVALID_HTML" || code === "CANDIDATE_EMPTY"
-      || code === "CANDIDATE_SYMLINK" || code === "CANDIDATE_NOT_FILE" || code === "CANDIDATE_TOO_LARGE" || code === "CANDIDATE_NOT_UTF8") return t("bridge.candidateInvalid");
+      || code === "CANDIDATE_SYMLINK" || code === "CANDIDATE_NOT_FILE" || code === "CANDIDATE_TOO_LARGE" || code === "CANDIDATE_NOT_UTF8") return t("bridge.candidateInvalid").replace("{agent}", providerLabel(_provider));
     if (code === "BRIDGE_NOT_INSTALLED") return t("bridge.notInstalled");
     if (code === "CLAUDE_NOT_LOGGED_IN" || code === "CLAUDE_NOT_INSTALLED" || code === "CODEX_AUTH_REQUIRED") return t("bridge.notLoggedIn");
     if (code === "SESSION_MODE_NOT_ALLOWED") return t("bridge.sessionModeNotAllowed");
@@ -1564,12 +1600,17 @@
   //     发 bridge-patch-apply(仅勾选的 ok 编辑)→ background 另起 host 落 candidate(复用 completeCandidate)。===
   const PATCH_STATUS_KEY = { out_of_scope: "patch.outOfScope", not_found: "patch.notFound", ambiguous: "patch.ambiguous", conflict: "patch.conflict" };
   function patchStatusText(st) { const k = PATCH_STATUS_KEY[st]; return k ? t(k) : String(st); }
+  function _patchNoteHtml(compliance) {
+    // Agent 在 patch JSON note 字段给的"无变更/跳过理由";无则不显示。
+    if (compliance && compliance.note) return '<div class="pp-note">' + esc(t("patch.agentNote")) + " " + esc(String(compliance.note)) + "</div>";
+    return "";
+  }
   function renderPatchPreview(edits, compliance) {
     if (!patchEditList) return;
     const items = (edits || []).slice().sort((a, b) => ((a.status === "ok" ? 0 : 1) - (b.status === "ok" ? 0 : 1)));
     if (items.length === 0) {
-      // 空编辑:Agent 判定无需修改(目标已满足评论要求,或无法唯一定位)。给明确说明,避免用户以为坏掉。
-      patchEditList.innerHTML = '<div class="pp-empty">' + esc(t("patch.noneNeeded")) + "</div>";
+      // 空编辑:Agent 判定无需修改(目标已满足评论要求,或无法唯一定位)。给明确说明 + Agent 的 note 理由。
+      patchEditList.innerHTML = '<div class="pp-empty">' + esc(t("patch.noneNeeded")) + "</div>" + _patchNoteHtml(compliance);
     } else {
     patchEditList.innerHTML = items.map((e) => {
       const isOk = e.status === "ok";
@@ -1585,7 +1626,7 @@
       return '<div class="pp-item' + (isOk ? "" : " pp-problem") + '">' + checkbox +
         '<div class="pp-body"><div class="pp-action">' + esc(actionLabel) + (e.comment_ref ? " · " + esc(String(e.comment_ref)) : "") + "</div>" +
         '<div class="pp-detail">' + detail + "</div>" + badge + "</div></div>";
-    }).join("");
+    }).join("") + _patchNoteHtml(compliance);
     }
     if (patchBadge && compliance) {
       const skip = (compliance.total || 0) - (compliance.applicable || 0);
@@ -1945,23 +1986,46 @@
     }
   }
 
-  // === 协同登录(飞书 + Google 档3,后端地址烤在 config.js) ===
+  // === 协同登录(Google 档3,后端地址烤在 config.js;飞书登录 UX 已下线,后端 /auth/lark/* 保留) ===
   const BACKEND = (window.HG_CONFIG && window.HG_CONFIG.backend) || "";
-  const loginBtn = document.getElementById("lark-login-btn");
   const googleBtn = document.getElementById("google-login-btn");
   const loginState = document.getElementById("login-state");
   const teamSetup = document.getElementById("team-setup");
   const inviteInput = document.getElementById("invite-code-input");
   let _sessionTeam = null; // {id, name}:当前团队(注册可见);Google 登录后置位
+  let _sessionTeams = []; // 用户全部团队(下拉切换用);Google 登录 / /auth/me 回填
 
-  function getCfg(keys) { return new Promise((r) => chrome.storage.sync.get(keys, r)); }
-  function setCfg(obj) { return new Promise((r) => chrome.storage.sync.set(obj, r)); }
+  // SUP-5:session_token 走 storage.local(每设备独立,不随 Chrome sync 跨设备外泄);
+  // 其余配置(mode/backend/user/team_id/team_name)仍在 sync。getCfg/setCfg 透明拆分。
+  function getCfg(keys) {
+    return new Promise((r) => {
+      const wantToken = keys.includes("session_token");
+      const syncKeys = keys.filter((k) => k !== "session_token");
+      const out = {};
+      let pending = (syncKeys.length ? 1 : 0) + (wantToken ? 1 : 0);
+      if (pending === 0) return r(out);
+      if (syncKeys.length) chrome.storage.sync.get(syncKeys, (s) => { Object.assign(out, s); if (--pending === 0) r(out); });
+      if (wantToken) chrome.storage.local.get(["session_token"], (l) => { Object.assign(out, l); if (--pending === 0) r(out); });
+    });
+  }
+  function setCfg(obj) {
+    return new Promise((r) => {
+      if (obj && "session_token" in obj) {
+        const rest = Object.assign({}, obj); const tok = rest.session_token; delete rest.session_token;
+        let pending = 1 + (Object.keys(rest).length ? 1 : 0);
+        chrome.storage.local.set({ session_token: tok }, () => { if (--pending === 0) r(); });
+        if (Object.keys(rest).length) chrome.storage.sync.set(rest, () => { if (--pending === 0) r(); });
+      } else {
+        chrome.storage.sync.set(obj || {}, r);
+      }
+    });
+  }
 
   // reload=true:显式登录后刷页(让 content-script 切到 RemoteStore 加载协同批注)。
   // silentReauth(侧边栏打开时静默重登)传 false —— 不刷页,否则会冲掉刚弹出的编辑确认窗。
   async function applySession(r, reload = true) {
     // 持久化团队身份(team_id + team_name):account sheet 展示当前团队 + 为后续团队切换预留。
-    // r.teams(Google)带名字;Lark 登录无 teams → team_name 空(飞书租户名不在此呈现)。
+    if (Array.isArray(r.teams)) _sessionTeams = r.teams; // Google 登录带全部团队;switch 复用现存列表
     const tm = (r.teams || []).find((x) => x.team_id === r.team_id);
     const teamName = (tm && tm.name) || "";
     _sessionTeam = r.team_id ? { id: r.team_id, name: teamName } : null;
@@ -1979,7 +2043,7 @@
     if (_sessionTeam && _sessionTeam.name) txt += "· " + t("team.current") + _sessionTeam.name + " ";
     loginState.textContent = txt;
     renderLogoutBtn();
-    renderInviteBtn();
+    renderTeamPanel();
   }
   function refreshLoginState() { if (_sessionUser) showLoggedIn(_sessionUser); }
   function renderLogoutBtn() {
@@ -1987,43 +2051,139 @@
     if (!b) { b = document.createElement("button"); b.id = "logout-btn"; b.addEventListener("click", doLogout); loginState.appendChild(b); }
     b.textContent = t("state.logout");
   }
-  function renderInviteBtn() {
-    let b = document.getElementById("invite-btn");
-    if (!b) { b = document.createElement("button"); b.id = "invite-btn"; b.addEventListener("click", doInvite); loginState.appendChild(b); }
-    b.textContent = t("state.invite");
+  let _teamPanelWired = false;
+  let _inviteLinkUrl = "";
+  // 团队管理面板:下拉切换 + 邀请链接 + 按邮箱加 + 成员列表(owner 可移除)
+  function renderTeamPanel() {
+    const panel = document.getElementById("team-panel");
+    if (!panel) return;
+    panel.hidden = false;
+    const sel = document.getElementById("team-select");
+    const swRow = document.getElementById("team-switch-row");
+    if (sel && swRow) {
+      sel.innerHTML = "";
+      for (const tm of _sessionTeams) {
+        const o = document.createElement("option");
+        o.value = tm.team_id; o.textContent = tm.name || tm.team_id;
+        if (_sessionTeam && tm.team_id === _sessionTeam.id) o.selected = true;
+        sel.appendChild(o);
+      }
+      swRow.hidden = _sessionTeams.length < 2; // 单团队不显示切换
+    }
+    if (!_teamPanelWired) {
+      _teamPanelWired = true;
+      const gen = document.getElementById("gen-invite-btn"); if (gen) gen.addEventListener("click", genInviteLink);
+      const cp = document.getElementById("copy-invite-btn"); if (cp) cp.addEventListener("click", copyInviteLink);
+      const add = document.getElementById("add-email-btn"); if (add) add.addEventListener("click", addMemberByEmail);
+      if (sel) sel.addEventListener("change", () => { if (sel.value) switchTeam(sel.value); });
+    }
+    loadMembers();
+  }
+  async function _authFetch(path, init) {
+    const cfg = await getCfg(["session_token"]);
+    const headers = Object.assign({ Authorization: "Bearer " + cfg.session_token }, (init && init.headers) || {});
+    return fetch(BACKEND + path, Object.assign({}, init, { headers }));
+  }
+  async function genInviteLink() {
+    try {
+      const r = await _authFetch("/auth/invites", { method: "POST" });
+      const j = await r.json();
+      if (j.join_url) {
+        const base = BACKEND || "https://deuce.monster";
+        _inviteLinkUrl = new URL(j.join_url, base).href; // join_url 是 /htmlgenius/join?code= 路径 → 绝对
+        const box = document.getElementById("invite-link-row");
+        const u = document.getElementById("invite-link-url");
+        if (box && u) { u.textContent = _inviteLinkUrl.replace(/^https?:\/\//, ""); box.hidden = false; }
+      } else { showToast(t("team.inviteFail")); }
+    } catch (e) { showToast(t("team.inviteFail")); }
+  }
+  async function copyInviteLink() {
+    if (!_inviteLinkUrl) return;
+    try { await navigator.clipboard.writeText(_inviteLinkUrl); showToast(t("team.linkCopied")); } catch (e) {}
+  }
+  async function addMemberByEmail() {
+    const email = ((document.getElementById("add-email-input") || {}).value || "").trim();
+    if (!email) return;
+    const teamId = _sessionTeam && _sessionTeam.id;
+    try {
+      const r = await _authFetch("/auth/teams/" + teamId + "/members/by-email",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+      if (r.ok) { showToast(t("team.addedOk")); (document.getElementById("add-email-input") || {}).value = ""; loadMembers(); }
+      else if (r.status === 404) showToast(t("team.addNotFound"));
+      else if (r.status === 403) showToast(t("team.ownerOnly"));
+      else showToast(t("team.addFail"));
+    } catch (e) { showToast(t("team.addFail")); }
+  }
+  async function loadMembers() {
+    const teamId = _sessionTeam && _sessionTeam.id;
+    const list = document.getElementById("member-list");
+    const cnt = document.getElementById("member-count");
+    if (!teamId || !list) return;
+    try {
+      const r = await _authFetch("/auth/teams/" + teamId + "/members");
+      if (!r.ok) { list.textContent = ""; if (cnt) cnt.textContent = ""; return; }
+      const items = (await r.json()).items || [];
+      if (cnt) cnt.textContent = "(" + items.length + ")";
+      const meId = _sessionUser && _sessionUser.id;
+      const isOwner = items.some((m) => m.sub === meId && m.role === "owner");
+      list.innerHTML = "";
+      for (const m of items) {
+        const row = document.createElement("div"); row.className = "member-row";
+        const nm = document.createElement("span"); nm.className = "member-name";
+        nm.textContent = (m.name || m.sub) + " · " + (m.role === "owner" ? "owner" : "member");
+        row.appendChild(nm);
+        if (isOwner && m.sub !== meId) {
+          const rm = document.createElement("button"); rm.className = "member-remove"; rm.textContent = t("team.remove");
+          rm.addEventListener("click", () => removeMember(m.sub));
+          row.appendChild(rm);
+        }
+        list.appendChild(row);
+      }
+    } catch (e) { /* 非关键 */ }
+  }
+  async function removeMember(sub) {
+    const teamId = _sessionTeam && _sessionTeam.id;
+    try {
+      const r = await _authFetch("/auth/teams/" + teamId + "/members/" + encodeURIComponent(sub), { method: "DELETE" });
+      if (r.ok) loadMembers(); else showToast(t("team.removeFail"));
+    } catch (e) { showToast(t("team.removeFail")); }
+  }
+  async function switchTeam(teamId) {
+    try {
+      const r = await _authFetch("/auth/switch-team",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ team_id: teamId }) });
+      if (!r.ok) throw new Error("switch " + r.status);
+      const j = await r.json();
+      await applySession({ token: j.token, user: j.user, team_id: j.team_id, teams: _sessionTeams }, false);
+      showToast(t("team.switched"));
+      broadcastTeamChanged(); // 所有协同页重载(切到新团队的批注/SSE)
+    } catch (e) { showToast(t("team.switchFail")); }
+  }
+  function broadcastTeamChanged() {
+    chrome.tabs.query({}, (tabs) => {
+      for (const tb of tabs || []) {
+        if (tb && tb.id != null) { try { chrome.tabs.sendMessage(tb.id, { type: "team-changed" }).catch(() => {}); } catch (e) {} }
+      }
+    });
   }
   async function doLogout() {
     const cfg = await getCfg(["session_token"]);
     if (cfg.session_token) {
       try { await fetch(BACKEND + "/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + cfg.session_token } }); } catch (e) { /* 忽略 */ }
     }
-    await new Promise((r) => chrome.storage.sync.remove(["session_token", "user", "mode"], r));
+    await new Promise((r) => {
+      let p = 2; const done = () => { if (--p === 0) r(); };
+      chrome.storage.local.remove(["session_token"], done); // SUP-5:token 在 local
+      chrome.storage.sync.remove(["user", "mode"], done);
+    });
     _sessionUser = null;
+    _sessionTeam = null; _sessionTeams = [];
     loginState.textContent = t("state.loggedOut");
     ["logout-btn", "invite-btn"].forEach((id) => { const e = document.getElementById(id); if (e) e.remove(); });
+    const tp = document.getElementById("team-panel"); if (tp) tp.hidden = true;
+    const lr = document.getElementById("invite-link-row"); if (lr) lr.hidden = true;
     renderPresence([]); // 登出:清掉在线人数
   }
-  async function doInvite() {
-    const cfg = await getCfg(["session_token"]);
-    try {
-      const r = await fetch(BACKEND + "/auth/invites", { method: "POST", headers: { Authorization: "Bearer " + cfg.session_token } });
-      const j = await r.json();
-      if (j.code) {
-        showToast(t("team.inviteCopied") + j.code);
-        try { await navigator.clipboard.writeText(j.code); } catch (e) {}
-      }
-    } catch (e) { showToast(t("team.inviteFail")); }
-  }
-
-  // 飞书登录
-  loginBtn.addEventListener("click", async () => {
-    loginState.textContent = t("login.larkLoading");
-    try {
-      const r = await Login.start({ backend: BACKEND });
-      await applySession(r);
-      showToast(t("login.larkSuccess"));
-    } catch (e) { loginState.textContent = t("login.fail") + (e && e.message ? e.message : e); }
-  });
 
   // Google 登录(交互)
   googleBtn.addEventListener("click", async () => {
@@ -2087,6 +2247,8 @@
     } else if (msg.type === "bridge-failed") {
       setContractRunning(false); stopRunTimer();
       if (_contractStep === "plan-running") setContractStep("compose");
+      _lastFailed = { code: msg.code || null, message: msg.message || "", provider: _provider, run_kind: _contractRunKind || null, at: new Date().toISOString() };
+      // v0.9.x:自动上报改由 background captureDiag 在 failRun 终态负责(sidepanel 关闭也能报);此处不再重复上报。
       const failText = tBridgeFailed(msg.code, msg);
       setBridgeStatus(failText, bridgeFailClass(msg.code));
       pushProgress(failText);
@@ -2123,8 +2285,11 @@
       try {
         const me = await fetch(BACKEND + "/auth/me", { headers: { Authorization: "Bearer " + cfg.session_token } }).then((r) => (r.ok ? r.json() : null));
         if (me && me.id) {
-          // 恢复持久化的团队身份,让 account sheet 继续显示当前团队。
-          _sessionTeam = (cfg.team_id || me.team_id) ? { id: cfg.team_id || me.team_id, name: cfg.team_name || "" } : null;
+          // 恢复持久化的团队身份 + 全部团队列表(/auth/me 现返回 teams),供下拉切换。
+          if (Array.isArray(me.teams)) _sessionTeams = me.teams;
+          const cur = _sessionTeams.find((x) => x.team_id === (cfg.team_id || me.team_id));
+          _sessionTeam = cur ? { id: cur.team_id, name: cur.name }
+            : ((cfg.team_id || me.team_id) ? { id: cfg.team_id || me.team_id, name: cfg.team_name || "" } : null);
           showLoggedIn(me);
           return;
         }
@@ -2228,6 +2393,99 @@
     const fbClose = document.getElementById("feedback-close");
     if (fbClose) fbClose.addEventListener("click", closeFeedbackSheet);
   }
+  // === 诊断上报(A 一键报告 + B opt-in 自动):环境 + 最近错误 + Agent 流式 → 可审视 → 上传/复制 ===
+  let _diagQueue = []; // 最近捕获的诊断记录(background 终态写入 IndexedDB,sidepanel 读出)
+  // sidepanel 侧环境快照(上传时 enrich 进队列记录;background SW 无 navigator,故在此补)
+  function _diagEnvSnapshot() {
+    const manifest = chrome.runtime.getManifest();
+    const ua = navigator.userAgent || "";
+    return {
+      chrome_version: (ua.match(/Chrome\/([\d.]+)/) || [])[1] || "",
+      platform: navigator.platform || "",
+      backend: BACKEND,
+      bridge: (_health && _health.bridge) ? { status: _health.bridge.status, version: _health.bridge.version } : null,
+      providers: (_health && _health.providers) || [],
+      provider_selected: _provider,
+      active_team: _sessionTeam ? { id: _sessionTeam.id, name: _sessionTeam.name } : null,
+      app_version: manifest.version,
+    };
+  }
+  // 队列记录 → 上传 bundle(叠加 sidepanel 环境快照 + mode)
+  function _diagBundleForUpload(rec, uploadMode) {
+    return Object.assign({ mode: uploadMode }, _diagEnvSnapshot(), rec);
+  }
+  async function uploadDiagnostics(bundle) {
+    const r = await fetch(BACKEND + "/api/diagnostics", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bundle),
+    }).catch(() => null);
+    return (r && r.ok) ? r.json() : null;
+  }
+  function _diagSummary(rec) {
+    const time = String(rec.at || "").replace("T", " ").slice(5, 19); // MM-DD HH:MM:SS
+    const oc = rec.outcome === "no_change" ? t("diag.noChange")
+      : (rec.outcome === "failed" ? t("diag.failed") : String(rec.outcome || ""));
+    const prov = rec.provider || "?";
+    const detail = rec.outcome === "no_change"
+      ? (rec.compliance ? ("applicable " + (rec.compliance.applicable || 0) + "/" + (rec.compliance.total || 0)) : "")
+      : (rec.error_code || "");
+    return time + " · " + oc + " · " + prov + (detail ? " · " + detail : "");
+  }
+  async function openDiagSheet() {
+    try { _diagQueue = await Storage.listDiagnostics(10); } catch (_) { _diagQueue = []; }
+    const sheet = document.getElementById("diag-sheet");
+    if (sheet) sheet.classList.add("show"); // .sheet 默认 display:none,统一用 .show 显隐(与 feedback/account sheet 一致)
+    getCfg(["hgAutoDiag"]).then((c) => { const cb = document.getElementById("diag-auto-toggle"); if (cb) cb.checked = !!(c && c.hgAutoDiag); });
+    const box = document.getElementById("diag-preview");
+    if (!box) return;
+    if (!_diagQueue.length) { box.innerHTML = '<div class="diag-empty">' + esc(t("diag.queueEmpty")) + "</div>"; return; }
+    // 每条:勾选框 + 摘要 + <details> 展开完整 JSON(上报前可审视,含 agent_stream 可能的页面内容)
+    box.innerHTML = _diagQueue.map((rec) => {
+      const id = (rec.id != null) ? String(rec.id) : "";
+      const json = esc(JSON.stringify(rec, null, 2));
+      return '<label class="diag-row"><input type="checkbox" class="diag-check" data-id="' + esc(id) + '" checked>'
+        + '<span class="diag-oc diag-oc-' + esc(rec.outcome || "failed") + '">' + esc(_diagSummary(rec)) + '</span></label>'
+        + '<details class="diag-detail"><summary>' + esc(t("diag.viewDetail")) + '</summary><pre>' + json + '</pre></details>';
+    }).join("");
+  }
+  function _diagCheckedIds() {
+    const box = document.getElementById("diag-preview");
+    if (!box) return [];
+    return Array.from(box.querySelectorAll(".diag-check:checked")).map((el) => el.getAttribute("data-id"));
+  }
+  const diagReportBtn = document.getElementById("diag-report-btn");
+  if (diagReportBtn) diagReportBtn.addEventListener("click", openDiagSheet);
+  const diagSheetEl = document.getElementById("diag-sheet");
+  const diagClose = document.getElementById("diag-close");
+  if (diagClose) diagClose.addEventListener("click", () => { if (diagSheetEl) diagSheetEl.classList.remove("show"); });
+  const diagUpload = document.getElementById("diag-upload-btn");
+  if (diagUpload) diagUpload.addEventListener("click", async () => {
+    const ids = _diagCheckedIds();
+    const picked = _diagQueue.filter((r) => ids.indexOf(String(r.id)) !== -1);
+    const toUpload = picked.length ? picked : _diagQueue; // 未勾选任何 → 全部上报
+    if (!toUpload.length) return;
+    diagUpload.disabled = true;
+    let ok = 0, lastId = null;
+    for (const rec of toUpload) {
+      const r = await uploadDiagnostics(_diagBundleForUpload(rec, "manual"));
+      if (r && r.id != null) { ok++; lastId = r.id; }
+    }
+    diagUpload.disabled = false;
+    let msg = t("diag.uploadFail");
+    if (ok) { msg = t("diag.uploadOk").replace("{id}", lastId); if (ok > 1) msg += " · " + ok; }
+    showToast(msg);
+    if (ok) { try { await Storage.clearDiagnostics(); } catch (_) {} if (diagSheetEl) diagSheetEl.classList.remove("show"); }
+  });
+  const diagCopy = document.getElementById("diag-copy-btn");
+  if (diagCopy) diagCopy.addEventListener("click", () => {
+    const ids = _diagCheckedIds();
+    const picked = _diagQueue.filter((r) => ids.indexOf(String(r.id)) !== -1);
+    const toCopy = picked.length ? picked : _diagQueue;
+    if (!toCopy.length) return;
+    try { navigator.clipboard.writeText(JSON.stringify(toCopy.map((r) => _diagBundleForUpload(r, "manual")), null, 2)); showToast(t("diag.copied")); } catch (_) {}
+  });
+  const diagAuto = document.getElementById("diag-auto-toggle");
+  if (diagAuto) diagAuto.addEventListener("change", () => setCfg({ hgAutoDiag: !!diagAuto.checked }));
+
   // v0.9.9 前往官网(header 主页按钮 → 新标签打开;URL 取 manifest.homepage_url,与商店/仓库同源)
   const websiteBtn = document.getElementById("website-btn");
   if (websiteBtn) websiteBtn.addEventListener("click", () => {

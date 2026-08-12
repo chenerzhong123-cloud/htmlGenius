@@ -74,3 +74,20 @@ def test_touch_expired_returns_none(tmp_path, monkeypatch):
     tok = sessions.create_session("ou", "n", "t", ttl=1)
     time.sleep(1.2)
     assert sessions.touch_session(tok) is None
+
+
+def test_absolute_lifetime_invalidates_even_with_future_expiry(tmp_path, monkeypatch):
+    """BE-11:超过绝对寿命(创建起算)→ 失效,即便 expires_at 在未来、touch 滑动续期也不绕过。"""
+    from datetime import datetime, timedelta, timezone
+    storage.init_db(tmp_path / "be11.db")
+    monkeypatch.setattr(sessions, "_ABSOLUTE_TTL", 3600)  # 1h 绝对上限
+    tok = sessions.create_session("u", "U", "t", ttl=604800)  # 7d 滑动有效期
+    assert sessions.get_session(tok) is not None  # 刚创建,在绝对寿命内
+    # 篡改 created_at 到 2h 前(超 1h 绝对上限),expires_at 留在未来
+    c = storage._connect()
+    old_created = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    future_exp = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+    c.execute("UPDATE sessions SET created_at=?, expires_at=? WHERE token=?", (old_created, future_exp, tok))
+    c.close()
+    assert sessions.get_session(tok) is None   # 绝对寿命到 → 失效(强制重登)
+    assert sessions.touch_session(tok) is None  # touch 也不再续期

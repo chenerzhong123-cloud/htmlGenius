@@ -89,6 +89,14 @@ function resolveDir(d, home) {
 // 拒绝:symlink(lstat 判断,防指向不受控二进制)、目录、不可执行文件。不执行未验证路径。
 export function discoverLocalCopilotCli({ env = process.env, fsImpl = fs, platform = process.platform } = {}) {
   if (platform !== "darwin") return null; // host 仅 macOS
+  // v1.0.11: 默认禁用本地 CLI runtime,强制走 bundled SDK。
+  // 根因:打包的 @github/copilot-sdk 1.0.7 与本地 copilot CLI(实测 1.0.79)的 session 创建不兼容——
+  //   轻量 probe(start + getAuthStatus)能过(假阳性),但真正 createSession(带 availableTools/hooks)
+  //   + sendAndWait 失败 → COPILOT_RUN_FAILED、stream 全空(目标 Mac id=17 实测,session=null)。
+  //   bundled runtime 无此问题(Copilot 能跑,见 id=15/16)。本地 CLI 仍保留供用户完成 GitHub 登录认证,
+  //   只是 bridge 不把它当 runtime。重启本地 CLI 路径前,须先让 probe 做真实 session 校验(消除假阳性)。
+  // 临时恢复(仅调试):env 设 HG_COPILOT_ALLOW_LOCAL_CLI=1。
+  if (!/^(1|true|yes|on)$/i.test(String((env && env.HG_COPILOT_ALLOW_LOCAL_CLI) || ""))) return null;
   const home = env.HOME || os.homedir() || "";
   const dirs = [];
   const seen = new Set();
@@ -100,13 +108,21 @@ export function discoverLocalCopilotCli({ env = process.env, fsImpl = fs, platfo
   };
   String(env.PATH || "").split(":").forEach(push);
   COMMON_CLI_DIRS.forEach(push);
+  // v0.9.x:nvm 装的 copilot 在 ~/.nvm/versions/node/<ver>/bin/(Chrome 启动的 bridge 拿不到 .zshrc 的 PATH);
+  // bridge 自己跑在 process.execPath 的 node 上,其 bin 目录通常与 copilot 同目录。
+  push(path.dirname(process.execPath || ""));
+  try { const nvmBase = path.join(home, ".nvm", "versions", "node"); for (const v of fsImpl.readdirSync(nvmBase)) push(path.join(nvmBase, v, "bin")); } catch (_) {}
   for (const dir of dirs) {
     const candidate = path.join(dir, "copilot");
     let st;
     try { st = fsImpl.lstatSync(candidate); } catch (_) { continue; }
-    if (st.isSymbolicLink()) continue; // 拒绝 symlink
-    if (!st.isFile()) continue;        // 拒绝目录等
+    // v0.9.x:允许 symlink(homebrew/npm/nvm 装的 copilot 常是 symlink→npm-loader.js 这种 node 脚本;
+    // Agent 工具的路径围栏才是真安全边界,不靠拒绝 symlink——否则合法安装全部找不到,只能用 bundled 兜底)。
+    if (!st.isFile() && !st.isSymbolicLink()) continue;
     try { fsImpl.accessSync(candidate, fsImpl.constants ? fsImpl.constants.X_OK : 1); } catch (_) { continue; }
+    // copilot 是 node 脚本(shebang #!/usr/bin/env node);bridge 由 Chrome 启动、PATH 可能不含 node
+    // → 把它所在目录注入 env.PATH,使后续 spawn(版本读取 / SDK forStdio)的 shebang 能在同目录找到 node。
+    try { const p = String(env.PATH || ""); if (!p.split(":").includes(dir)) env.PATH = dir + ":" + p; } catch (_) {}
     return candidate;
   }
   return null;
@@ -143,7 +159,7 @@ export async function loadCopilotSdk({ sdkLoader } = {}) {
 
 // 每个 run 一份客户端配置(§5.1/§5.2):empty 模式(telemetry 默认关、强制 availableTools)、
 // workingDirectory = run workspace、baseDirectory = workspace 内受控 COPILOT_HOME。
-export function buildCopilotClientOptions({ sdk, runtime, cliPath, cwd, baseDirectory }) {
+export function buildCopilotClientOptions({ sdk, runtime, cliPath, cwd, baseDirectory, gitHubToken }) {
   const options = {
     mode: "empty",
     workingDirectory: cwd,
@@ -154,14 +170,43 @@ export function buildCopilotClientOptions({ sdk, runtime, cliPath, cwd, baseDire
     if (!cliPath) throw copilotError(COPILOT_ERRORS.CLI_NOT_FOUND, "local Copilot CLI path is required for local_cli runtime");
     options.connection = sdk.RuntimeConnection.forStdio({ path: cliPath });
   }
+  if (gitHubToken) options.gitHubToken = gitHubToken;
   return options;
 }
 
-export function buildAvailableTools() {
-  return [...READ_TOOLS, ...WRITE_TOOLS].map((n) => "builtin:" + n);
+export function buildAvailableTools({ write = true } = {}) {
+  // patch run 只读(Agent 输出 edits JSON,host 确定性应用)→ 不暴露写工具,否则 Copilot 会试图 edit
+  // 源文件而被 onPreToolUse 拒(write_without_path)→ COPILOT_PERMISSION_DENIED(mac pro 实测)。
+  return [...READ_TOOLS, ...(write ? WRITE_TOOLS : [])].map((n) => "builtin:" + n);
 }
 export function buildExcludedTools() {
   return DENIED_BUILTIN_TOOLS.map((n) => "builtin:" + n);
+}
+
+// v1.011 Copilot 鉴权兜底。NM-host 进程里 SDK 的 useLoggedInUser 读不到 CLI 存的 token
+// (CLI 1.0.79 存在钥匙串 service=copilot-cli,SDK 没去找/读不到)→ session 报
+// "Session was not created with authentication info"。此处主动取 token 作 gitHubToken 传 SDK:
+// ① env: COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN;② macOS 钥匙串 copilot-cli 项。
+// token 只传 SDK,绝不进日志/诊断/manifest。非 darwin 或读不到 → null(回退 useLoggedInUser)。
+export function readCopilotKeychainToken({ execFileImpl = execFile } = {}) {
+  if (process.platform !== "darwin") return null;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    try {
+      execFileImpl("security", ["find-generic-password", "-s", "copilot-cli", "-w"], { timeout: 8000, maxBuffer: 8192 }, (err, stdout) => {
+        if (err || typeof stdout !== "string") return finish(null);
+        const tok = stdout.trim();
+        finish(tok.length > 0 ? tok : null);
+      });
+    } catch (_) { finish(null); }
+  });
+}
+export async function resolveCopilotToken({ env = process.env, execFileImpl = execFile, platform = process.platform } = {}) {
+  const envTok = env && (env.COPILOT_GITHUB_TOKEN || env.GH_TOKEN || env.GITHUB_TOKEN);
+  if (envTok) return String(envTok);
+  if (platform !== "darwin") return null;
+  return readCopilotKeychainToken({ execFileImpl });
 }
 
 // ———————————————————————— probe(§6.2:只读,不建 session)————————————————————————
@@ -181,13 +226,14 @@ function probeResult({ status, runtime = null, version = null }) {
 // 尝试用 SDK 启动一种 runtime 并读 auth/status。返回 { ok, runtime, authed, version } 或 { ok:false }。
 // 全程不 createSession / send / listSessions。finally 里 stop。probe 与执行期 runtime 选择共用。
 export async function attemptRuntimeStart({ sdk, runtime, cliPath }) {
+  const gitHubToken = await resolveCopilotToken();
   let client = null;
   try {
-    client = new sdk.CopilotClient(
-      runtime === COPILOT_RUNTIMES.LOCAL_CLI
-        ? { connection: sdk.RuntimeConnection.forStdio({ path: cliPath }) }
-        : {}
-    );
+    const ctorOpts = runtime === COPILOT_RUNTIMES.LOCAL_CLI
+      ? { connection: sdk.RuntimeConnection.forStdio({ path: cliPath }) }
+      : {};
+    if (gitHubToken) ctorOpts.gitHubToken = gitHubToken;
+    client = new sdk.CopilotClient(ctorOpts);
     await client.start();
     const auth = await client.getAuthStatus();
     let version = null;
@@ -339,10 +385,13 @@ export function createPreToolPolicy({ workspaceDir, writableFiles, fsImpl = fs, 
   const stats = { denials: 0 };
 
   const handler = (input) => {
-    const toolName = String((input && input.toolName) || "").toLowerCase();
+    const rawName = String((input && input.toolName) || "");
+    // SDK 可能以 "builtin:read" 形态传 toolName(availableTools 用 builtin:<name> 选择器);
+    // 白名单存裸名,先剥前缀,否则 read 被误判 tool_not_allowed 拒绝(Copilot 读源失败根因)。
+    const toolName = rawName.toLowerCase().replace(/^builtin:/, "");
     const deny = (category) => {
       stats.denials += 1;
-      try { recordDenial(toolName, category); } catch (_) {}
+      try { recordDenial(rawName || toolName, category); } catch (_) {}  // 记原始名便于排障
       return { permissionDecision: "deny", permissionDecisionReason: "htmlgenius: " + category };
     };
 
@@ -386,13 +435,14 @@ export async function runCopilotSession({
     }
   });
 
-  const client = new sdk.CopilotClient(buildCopilotClientOptions({ sdk, runtime, cliPath, cwd, baseDirectory }));
+  const gitHubToken = await resolveCopilotToken();
+  const client = new sdk.CopilotClient(buildCopilotClientOptions({ sdk, runtime, cliPath, cwd, baseDirectory, gitHubToken }));
   let session = null;
   try {
     await client.start();
     session = await client.createSession({
       clientName: "htmlgenius-bridge",
-      availableTools: buildAvailableTools(),
+      availableTools: buildAvailableTools({ write: runKind !== "patch" }),
       excludedTools: buildExcludedTools(),
       hooks: { onPreToolUse: handler }
     });
@@ -402,7 +452,7 @@ export async function runCopilotSession({
         try {
           const type = event && event.type;
           if (type === "tool.execution_start") onEvent({ kind: "tool", name: String((event.data && event.data.toolName) || "").slice(0, 64) });
-          else if (type === "assistant.message") onEvent({ kind: "text", text: String((event.data && event.data.content) || "").slice(0, 500) });
+          else if (type === "assistant.message") onEvent({ kind: "text", text: String((event.data && event.data.content) || "").slice(0, 4000) });
           else if (type === "session.idle") onEvent({ kind: "idle" });
         } catch (_) {}
       });

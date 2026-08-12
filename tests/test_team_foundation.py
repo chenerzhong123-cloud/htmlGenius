@@ -164,6 +164,74 @@ def test_team_cap(tmp_path, monkeypatch):
         teams.create_team("T3", "g_1")
 
 
+# === owner 按邮箱加人（档3 增量）===
+
+
+def test_add_member_by_email_owner_only_and_idempotent(tmp_path):
+    """owner 按邮箱加已注册用户 → 入团(幂等,大小写不敏感);非 owner → 403;未注册 → 404;加自己 → 400。"""
+    _init(tmp_path)
+    tid = teams.create_team("T", "g_owner")
+    teams.upsert_user("g_owner", "owner@example.com", "Owner", "")
+    teams.upsert_user("g_target", "target@example.com", "Target", "")
+    teams.upsert_user("g_member", "member@example.com", "Member", "")
+    teams.redeem_invite(teams.create_invite(tid, "g_owner"), "g_member")  # g_member = 普通成员
+    owner_tok = sessions.create_session("g_owner", "Owner", tid)
+    member_tok = sessions.create_session("g_member", "Member", tid)
+    H = lambda t: {"Authorization": f"Bearer {t}"}
+
+    # 非 owner → 403
+    r = client.post(f"/auth/teams/{tid}/members/by-email",
+                    json={"email": "target@example.com"}, headers=H(member_tok))
+    assert r.status_code == 403
+
+    # owner 加未注册邮箱 → 404
+    r = client.post(f"/auth/teams/{tid}/members/by-email",
+                    json={"email": "nobody@example.com"}, headers=H(owner_tok))
+    assert r.status_code == 404
+
+    # owner 加已注册用户(大小写不敏感)→ 200 + 入团
+    r = client.post(f"/auth/teams/{tid}/members/by-email",
+                    json={"email": "TARGET@example.com"}, headers=H(owner_tok))
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Target"
+    assert teams.is_member("g_target", tid)
+
+    # 幂等:再加一次仍 200,成员不重复
+    r2 = client.post(f"/auth/teams/{tid}/members/by-email",
+                     json={"email": "target@example.com"}, headers=H(owner_tok))
+    assert r2.status_code == 200
+    assert sum(1 for m in teams.team_members(tid) if m["sub"] == "g_target") == 1
+
+    # owner 加自己 → 400
+    r = client.post(f"/auth/teams/{tid}/members/by-email",
+                    json={"email": "owner@example.com"}, headers=H(owner_tok))
+    assert r.status_code == 400
+
+
+def test_switch_team_session_based(tmp_path):
+    """已登录用户切换活跃团队(须成员)→ 该团队新 session;切到非成员团队 → 403。"""
+    _init(tmp_path)
+    t1 = teams.create_team("T1", "g_u")
+    t2 = teams.create_team("T2", "g_other")
+    teams.redeem_invite(teams.create_invite(t2, "g_other"), "g_u")  # g_u ∈ T2
+    t3 = teams.create_team("T3", "g_x")  # g_u 不在 T3
+    tok1 = sessions.create_session("g_u", "U", t1)
+    H = {"Authorization": f"Bearer {tok1}"}
+
+    # 切到自己是成员的 T2 → 200,新 token,team=t2,name=T2
+    r = client.post("/auth/switch-team", json={"team_id": t2}, headers=H)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["team_id"] == t2
+    assert body["team_name"] == "T2"
+    assert body["token"] != tok1
+
+    # 用新 token 切到非成员团队 T3 → 403
+    r2 = client.post("/auth/switch-team", json={"team_id": t3},
+                     headers={"Authorization": f"Bearer {body['token']}"})
+    assert r2.status_code == 403
+
+
 def test_http_team_governance(tmp_path, monkeypatch):
     """端点层:owner 列成员/移除/解散;非 owner/非成员被拒。"""
     _init(tmp_path)
@@ -251,3 +319,17 @@ def test_e2e_register_invite_comment(tmp_path, monkeypatch):
         "Authorization": f"Bearer {client.post('/auth/google/session', json={'id_token': 't3', 'team_id': jc['teams'][0]['team_id']}).json()['token']}"
     }
     assert client.get("/api/annotations?document_id=d", headers=Hc).json()["items"] == []
+
+
+def test_diagnostics_endpoint(tmp_path):
+    """A+B:诊断上报端点接收任意 JSON、落库、大小封顶(128KB)。"""
+    _init(tmp_path)
+    r = client.post("/api/diagnostics", json={
+        "mode": "manual", "app_version": "0.9.15", "chrome_version": "Chrome/120",
+        "last_error": {"code": "CLAUDE_TIMEOUT", "message": "timed out"}, "agent_stream": "…",
+    })
+    assert r.status_code == 200, r.text
+    assert isinstance(r.json().get("id"), int)
+    # 超大 → 413
+    big = {"x": "a" * (130 * 1024)}
+    assert client.post("/api/diagnostics", json=big).status_code == 413

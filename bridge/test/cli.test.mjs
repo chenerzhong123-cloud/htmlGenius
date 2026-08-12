@@ -148,17 +148,16 @@ test("setup:首装 changed:true;再装 changed:false(幂等);manifest 单 origin
   } finally { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(hostsDir, { recursive: true, force: true }); }
 });
 
-test("setup:已注册不同 extension ID → EXTENSION_ORIGIN_MISMATCH,拒绝覆盖", async () => {
+test("setup:已注册不同 extension ID → 合并注册(多扩展;追加不覆盖)", async () => {
   const home = mkTmp("hg-cli-home-");
   const hostsDir = mkTmp("hg-cli-hosts-");
   try {
     const r1 = await run(["setup", "--json", "--scope", "user", "--extension-id", ID_A], envFor(home, hostsDir));
     assert.equal(r1.code, 0);
     const r2 = await run(["setup", "--json", "--scope", "user", "--extension-id", ID_B], envFor(home, hostsDir));
-    assert.equal(r2.code, 3, "冲突 → 非 0");
-    assert.match(r2.stderr, /EXTENSION_ORIGIN_MISMATCH/);
+    assert.equal(r2.code, 0, "第二个 ID 合并成功(不再拒绝)");
     const manifest = JSON.parse(fs.readFileSync(path.join(hostsDir, HOST_NAME + ".json"), "utf8"));
-    assert.deepEqual(manifest.allowed_origins, ["chrome-extension://" + ID_A + "/"], "原 origin 未被覆盖");
+    assert.deepEqual(manifest.allowed_origins, ["chrome-extension://" + ID_A + "/", "chrome-extension://" + ID_B + "/"], "两个 ID 都在(合并)");
   } finally { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(hostsDir, { recursive: true, force: true }); }
 });
 

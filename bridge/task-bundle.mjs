@@ -214,11 +214,13 @@ export function buildCandidatePrompt({ runId, task }) {
     "",
     "- Only read source.html and task-" + runId + ".md / task-" + runId + ".json in the current directory.",
     "- The original document path in the Change Contract is reference-only and may be OUTSIDE your accessible workspace; do NOT open it. source.html in the current directory is the authoritative snapshot placed there for you.",
-    "- Only write the final, complete, directly-openable HTML to candidate.html in the current directory.",
+    "- OUTPUT METHOD (important): create candidate.html as a NEW file using the `write_file` tool (or `write` / `create_file`) at the ABSOLUTE path given below. It must be the complete, directly-openable HTML document — not a diff, not a fragment.",
+    "- Do NOT use `edit`, `str_replace`, `multi_edit`, or any in-place edit tool to produce the output: those target the currently-open source.html (which is read-only/forbidden) and carry no output path, so they will be REJECTED. Always use `write_file` to create candidate.html.",
     "- Do not modify source.html, the task files, or any other file; do not use shell, network, MCP, or the browser.",
     "- Do not emit Markdown files, diffs, explanations, or multiple candidate files instead of candidate.html.",
     "- Strictly follow the Change Contract below; anything it does not permit must stay unchanged.",
-    "- If a target cannot be uniquely located, do not guess; keep the corresponding source content and note it briefly in your final text."
+    "- If a target cannot be uniquely located, do not guess; keep the corresponding source content and note it briefly in your final text.",
+    "- If you conclude NO change is needed (the source already satisfies the request, or a target cannot be located), briefly explain WHY in your final text so the user understands the outcome instead of a silent no-op."
   ].join("\n");
   const rendered = ChangeContract.renderPrompt(task);
   return prelude + "\n\n## Change Contract (execute strictly)\n" + rendered;
@@ -233,10 +235,10 @@ export function buildPatchPrompt({ runId, task }) {
     "",
     "- Read source.html and task-" + runId + ".md / task-" + runId + ".json in the current directory. Read source.html exactly once; do not re-read files to double-check.",
     "- The original document path in the Change Contract is reference-only and may be OUTSIDE your accessible workspace; do NOT open it. source.html in the current directory is the authoritative snapshot placed there for you.",
-    "- Do NOT modify any file. Do NOT write candidate.html. Do not use shell, network, MCP, plugins, or the browser.",
+    "- Do NOT modify any file. Do NOT write candidate.html. Do NOT output or rewrite the full HTML document — respond with ONLY the edits JSON (the host applies the edits deterministically). Do not use shell, network, MCP, plugins, or the browser.",
     "- For each selected comment in the Change Contract, decide the minimal precise edit that satisfies it.",
-    "- If a comment's requested change is ALREADY satisfied in source.html (the target text already matches the comment's intent), do NOT emit a no-op edit whose replacement equals the located text — return an empty edits array instead.",
-    "- Emit ONLY a single UTF-8 JSON object as your final response, matching the schema below. No Markdown, no prose, no code fences.",
+    "- If a comment's requested change is ALREADY satisfied in source.html (the target text already matches the comment's intent), do NOT emit a no-op edit whose replacement equals the located text — return an empty edits array instead. Whenever you return an empty edits array or omit an edit (already satisfied / cannot uniquely locate / out of scope), briefly explain WHY in your reasoning text so the user understands the no-change outcome.",
+    "- Your FINAL response must be a single UTF-8 JSON object matching the schema below. You may explain your reasoning in text before it; the final response itself is pure JSON — no Markdown, no code fences.",
     "- Only propose edits located at the commented targets. If a target cannot be uniquely located, omit that edit (do not guess).",
     "- Every edit must reference the comment it serves via comment_ref (the comment's id)."
   ].join("\n");
@@ -256,11 +258,12 @@ export function buildPatchPrompt({ runId, task }) {
     '      "locator": { "prefix": "…", "exact": "<text inside the target element>", "suffix": "…" },',
     '      "property": "font-size", "value": "18px" }',
     "  ]",
+    '  "note": "<optional short reason; required when edits is empty>"',
     "}",
     "```",
     "- action is one of: replace_text (set replacement) or set_style (set property/value on the element containing the located text).",
     "- locator.exact must be copied verbatim from source.html; prefix/suffix are the surrounding text used to disambiguate.",
-    '- If no edit is needed, return {"schema_version":1,"edits":[]}.'
+    '- If no edit is needed, return {"schema_version":1,"edits":[],"note":"<one short sentence: why no change>"} (e.g. target already satisfied / cannot uniquely locate / out of scope). The note is shown to the user so they understand the no-change outcome.'
   ].join("\n");
   return prelude + schema + "\n\n## Change Contract (produce edits strictly within its boundaries)\n" + ChangeContract.renderPrompt(task);
 }

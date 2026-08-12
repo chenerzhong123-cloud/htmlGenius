@@ -164,8 +164,9 @@ def lark_callback(payload: CallbackIn):
 
 @app.get("/auth/me")
 def auth_me(session: Session = Depends(require_session)):
-    """扩展启动时校验 session 是否仍有效。"""
-    return {"id": session.open_id, "name": session.name, "team_id": session.team_id}
+    """扩展启动时校验 session 是否仍有效;顺带返回该用户全部团队(供侧栏团队下拉)。"""
+    return {"id": session.open_id, "name": session.name, "team_id": session.team_id,
+            "teams": teams.user_teams(session.open_id)}
 
 
 @app.post("/auth/logout")
@@ -273,6 +274,30 @@ def auth_google_session(payload: GoogleSessionIn):
     }
 
 
+class SwitchTeamIn(BaseModel):
+    team_id: str
+
+
+@app.post("/auth/switch-team")
+def switch_team(payload: SwitchTeamIn, session: Session = Depends(require_session)):
+    """已登录用户切换当前活跃团队(须是该团队成员)→ 发该团队的新 session。
+    用现有 session 证明身份,无需重新跑 Google OAuth(下拉切换更轻)。"""
+    if not teams.is_member(session.open_id, payload.team_id):
+        raise HTTPException(status_code=403, detail="not a member of this team")
+    team_name = ""
+    for tm in teams.user_teams(session.open_id):
+        if tm["team_id"] == payload.team_id:
+            team_name = tm["name"]
+            break
+    token = sessions.create_session(session.open_id, session.name, payload.team_id)
+    return {
+        "token": token,
+        "team_id": payload.team_id,
+        "team_name": team_name,
+        "user": {"id": session.open_id, "name": session.name},
+    }
+
+
 @app.post("/auth/invites")
 def create_invite(session: Session = Depends(require_session)):
     """当前 session 的 team 生成邀请码(任意成员可生)。"""
@@ -289,6 +314,28 @@ def list_team_members(team_id: str, session: Session = Depends(require_session))
     if teams.member_role(session.open_id, team_id) is None:
         raise HTTPException(status_code=403, detail="not a member")
     return {"items": teams.team_members(team_id)}
+
+
+class MemberByEmailIn(BaseModel):
+    email: str
+
+
+@app.post("/auth/teams/{team_id}/members/by-email")
+def add_member_by_email(team_id: str, payload: MemberByEmailIn, session: Session = Depends(require_session)):
+    """owner 按邮箱直接加人:查已注册用户(google_sub) → add_membership(幂等)。
+    比"分享邀请码"更强的动作(对方无需同意即入团),故限 owner。非 owner → 403;未注册 → 404。"""
+    if teams.member_role(session.open_id, team_id) != "owner":
+        raise HTTPException(status_code=403, detail="only owner can add members by email")
+    email = (payload.email or "").strip()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="valid email required")
+    u = teams.user_by_email(email)
+    if not u:
+        raise HTTPException(status_code=404, detail="用户尚未用该 Google 账号登录过本工具，请让对方先登录一次")
+    if u["google_sub"] == session.open_id:
+        raise HTTPException(status_code=400, detail="不能添加自己")
+    teams.add_membership(u["google_sub"], team_id)  # INSERT OR IGNORE → 已是成员则幂等
+    return {"ok": True, "sub": u["google_sub"], "name": u["name"]}
 
 
 @app.delete("/auth/teams/{team_id}/members/{sub}")
@@ -311,6 +358,22 @@ def dissolve_team(team_id: str, session: Session = Depends(require_session)):
     except PermissionError:
         raise HTTPException(status_code=403, detail="only owner can dissolve")
     return {"ok": True}
+
+
+# === 诊断上报(A+B:用户一键报告 / opt-in 自动上报;不鉴权,用户主动触发)===
+
+
+@app.post("/api/diagnostics")
+def submit_diagnostics(payload: dict):
+    """接收诊断包。大小封顶(128KB)防滥用;不鉴权(用户主动上报/opt-in 自动)。
+    payload 由扩展构造:app/chrome/os 版本、bridge 状态、provider、最近错误、Agent 流式(可能含页面内容)。
+    """
+    raw = json.dumps(payload, ensure_ascii=False)
+    if len(raw) > 128 * 1024:
+        raise HTTPException(status_code=413, detail="diagnostics payload too large")
+    mode = str((payload.get("mode") if isinstance(payload, dict) else "") or "manual")[:16]
+    diag_id = storage.save_diagnostics(raw, mode)
+    return {"ok": True, "id": diag_id}
 
 
 # === 文档 / 版本 (BE-2:全部需 session 鉴权;HTML 响应加严格 CSP 防存储型 XSS) ===

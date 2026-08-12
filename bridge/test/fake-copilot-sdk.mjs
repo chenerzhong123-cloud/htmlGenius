@@ -1,4 +1,4 @@
-// bridge/test/fake-copilot-sdk.mjs — @github/copilot-sdk 1.0.7 的测试替身。
+// bridge/test/fake-copilot-sdk.mjs — @github/copilot-sdk 1.0.9 的测试替身。
 // 只复刻 HTML Genius 使用的 SDK 表面(§5.1 允许集):CopilotClient(start/getAuthStatus/getStatus/ping/
 // createSession/stop/forceStop)、RuntimeConnection.forStdio、CopilotSession(sendAndWait/on/disconnect/abort)。
 // 明确不实现被禁 API(listSessions/resumeSession/getLastSessionId/getEvents/...);若被测代码调用它们,
@@ -44,7 +44,7 @@ export function makeFakeSdk(behavior = {}) {
       calls.record("client.getStatus", { kind: this._kind });
       const b = this._kind === "local" ? local : bundled;
       if (b.statusError) throw b.statusError;
-      return b.status || { version: "1.0.7", protocolVersion: 1 };
+      return b.status || { version: "1.0.9", protocolVersion: 1 };
     }
     async ping(message) {
       calls.record("client.ping", { kind: this._kind, message });

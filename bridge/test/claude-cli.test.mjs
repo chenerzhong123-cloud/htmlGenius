@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  buildHandoffArgv, buildClaudeArgv, isSessionUuid, parseHandoffResult, parsePatchResult,
+  buildHandoffArgv, buildClaudeArgv, isSessionUuid, parseHandoffResult, parsePatchResult, parseStreamLine,
   checkAuth, runHandoff, resumeHandoff, classifyClaudeFailure
 } from "../claude-cli.mjs";
 
@@ -213,4 +213,36 @@ test("spawn: claude 不在 PATH → CLAUDE_NOT_INSTALLED", async () => {
   } finally {
     process.env.PATH = savedPath;
   }
+});
+
+
+// === Claude Code 流式(stream-json)===
+
+test("buildClaudeArgv(stream):output-format=stream-json + 带 --verbose", () => {
+  const argv = buildClaudeArgv({ promptText: "P", runKind: "candidate", stream: true });
+  assert.equal(argv[argv.indexOf("--output-format") + 1], "stream-json");
+  assert.ok(argv.includes("--verbose"));
+});
+
+test("buildClaudeArgv(默认非流式):仍是 json、无 verbose", () => {
+  const argv = buildClaudeArgv({ promptText: "P", runKind: "candidate" });
+  assert.equal(argv[argv.indexOf("--output-format") + 1], "json");
+  assert.ok(!argv.includes("--verbose"));
+});
+
+test("parseStreamLine:assistant 文本→delta、tool_use→command、tool_result→info;result→返回 obj", () => {
+  const out = [];
+  const onStream = (ev) => out.push(ev);
+  // assistant:文本 + 工具调用
+  assert.equal(parseStreamLine(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "hi" }, { type: "tool_use", name: "Read" }] } }), onStream), null);
+  assert.deepEqual(out.shift(), { kind: "delta", text: "hi" });
+  assert.deepEqual(out.shift(), { kind: "command", text: "🔧 Read", starting: true });
+  // tool_result → info(截断)
+  parseStreamLine(JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", content: "FILE_CONTENTS" }] } }), onStream);
+  assert.deepEqual(out.shift(), { kind: "info", text: "↩ FILE_CONTENTS" });
+  // result → 返回该 obj(用于取 session_id)
+  const resObj = { type: "result", session_id: "12345678-1234-1234-1234-123456789012", is_error: false };
+  assert.deepEqual(parseStreamLine(JSON.stringify(resObj), onStream), resObj);
+  // 非 JSON / 非 result → null
+  assert.equal(parseStreamLine("not-json", onStream), null);
 });

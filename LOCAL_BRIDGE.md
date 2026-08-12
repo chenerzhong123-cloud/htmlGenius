@@ -30,7 +30,7 @@ Native Messaging 安全模型决定：扩展**不能**自行下载安装程序�
 ### 前置条件（任一 Agent 就绪即可）
 
 - **Codex（推荐）**：Codex Mac App（ChatGPT.app）已登录。
-- **GitHub Copilot**：本机 Copilot 已登录；可选装 `copilot` CLI（优先走它，否则 SDK 自带 runtime）。
+- **GitHub Copilot**：本机 Copilot 已登录即可（bridge 用 SDK 自带 runtime，并自动读取系统钥匙串里的登录凭据，无需手动配置 token）。
 - **Claude Code**：`claude auth login` 完成。
 - htmlGenius **不要求、不读取、不保存**任何 API key / token / Cookie——全部复用各 Agent 本机登录态。
 
@@ -62,7 +62,7 @@ Native Messaging 安全模型决定：扩展**不能**自行下载安装程序�
 
 ```bash
 cd bridge
-npm install                                   # 拉取 @github/copilot-sdk 1.0.7(精确锁定)
+npm install                                   # 拉取 @github/copilot-sdk 1.0.9(精确锁定)
 node install-macos.mjs --extension-id <扩展ID>  # 就地安装:launcher 直接指向仓库 host.mjs(改代码即生效)
 node install-macos.mjs --uninstall              # 卸载
 ```

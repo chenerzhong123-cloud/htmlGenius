@@ -162,7 +162,6 @@
   <div class="sheet-title" data-i18n="sheet.title">登录后开启团队协作</div>
   <div class="sheet-sub" data-i18n="sheet.sub">实时共享评论 · 作者身份绑定账号 · 仅本人可删自己的评论</div>
   <div id="login-area" class="collab-row">
-    <button id="lark-login-btn" data-i18n="login.lark">飞书登录</button>
     <button id="google-login-btn" data-i18n="login.google">Google 登录</button>
   </div>
   <div id="team-setup" hidden>
@@ -176,6 +175,29 @@
     </div>
   </div>
   <div id="login-state"></div>
+  <div id="team-panel" hidden>
+    <div id="team-switch-row" class="collab-row" hidden>
+      <select id="team-select" aria-label="团队"></select>
+    </div>
+    <div class="team-block">
+      <div class="team-block-title" data-i18n="team.inviteTitle">邀请成员</div>
+      <div class="collab-row">
+        <button id="gen-invite-btn" data-i18n="team.genLink">生成邀请链接</button>
+      </div>
+      <div id="invite-link-row" class="invite-link-row" hidden>
+        <code id="invite-link-url"></code>
+        <button id="copy-invite-btn" data-i18n="team.copy">复制</button>
+      </div>
+      <div class="collab-row">
+        <input id="add-email-input" type="email" data-i18n-placeholder="team.emailPh" placeholder="对方 Gmail" />
+        <button id="add-email-btn" data-i18n="team.add">添加</button>
+      </div>
+    </div>
+    <div class="team-block">
+      <div class="team-block-title"><span data-i18n="team.members">成员</span> <span id="member-count"></span></div>
+      <div id="member-list" class="member-list"></div>
+    </div>
+  </div>
   <div id="presence-count" class="presence-count" hidden></div>
 </div>
 
@@ -188,6 +210,20 @@
     <img class="feedback-qr" src="icons/feedback-qrcode.jpeg" alt="小红书二维码,也可在小红书搜索 @AI二重同学 反馈" />
   </div>
   <div class="feedback-scan" data-i18n="feedback.scanHint">扫码前往小红书反馈</div>
+  <button id="diag-report-btn" class="diag-report-btn" type="button" data-i18n="diag.reportBtn">报告问题（附诊断信息）</button>
+</div>
+
+<!-- 诊断上报(A+B):可审视诊断包 → 上传/复制;opt-in 自动上报 -->
+<div id="diag-sheet" class="sheet diag-sheet" role="dialog" aria-modal="true" aria-labelledby="diag-title">
+  <button id="diag-close" class="feedback-close" type="button" aria-label="✕">✕</button>
+  <div id="diag-title" class="sheet-title" data-i18n="diag.title">报告问题</div>
+  <div class="sheet-sub" data-i18n="diag.sub">以下是最近捕获的诊断记录（任务失败 / 未修改）。勾选后上传，或复制后手动发送。不含登录凭证/密钥；agent_stream 可能含页面内容，上传前可展开审视。</div>
+  <div id="diag-preview" class="diag-list"></div>
+  <label class="diag-auto-row"><input id="diag-auto-toggle" type="checkbox" /><span data-i18n="diag.autoOpt">以后出错自动上报</span></label>
+  <div class="diag-actions">
+    <button id="diag-upload-btn" type="button" data-i18n="diag.upload">上传到服务器</button>
+    <button id="diag-copy-btn" type="button" data-i18n="diag.copy">复制</button>
+  </div>
 </div>
 
 <!-- v0.8.1 创建编辑任务(覆盖式 sheet)。data-step:compose(选择修改范围,默认全选)/ comment-scope(选择评论范围,高级入口)/ plan-review(确认修改计划)。
@@ -238,7 +274,7 @@
         </div>
         <div class="advanced-field">
           <label class="advanced-label" data-i18n="patch.modeLabel">精确修改的应用方式</label>
-          <p class="field-hint" data-i18n="patch.modeHint">仅对「精准修补」且已连接 Claude Code 生效；其余情况仍生成完整候选。</p>
+          <p class="field-hint" data-i18n="patch.modeHint">仅对「精准修补」生效：Claude Code / Codex 支持逐条编辑预览；Copilot 不支持此项，会直接生成完整候选。</p>
           <div class="patch-apply-modes">
             <label class="patch-apply-mode"><input type="radio" name="patch-apply-mode" value="preview_confirm"><span data-i18n="patch.modePreview">先预览，确认后再应用</span></label>
             <label class="patch-apply-mode"><input type="radio" name="patch-apply-mode" value="apply_then_review" checked><span data-i18n="patch.modeApply">直接应用，事后审阅</span></label>
@@ -267,9 +303,9 @@
                 <div class="menu-setup-cmd"><code id="contract-send-setup-cmd"></code><button class="menu-setup-copy" id="contract-send-setup-copy" type="button" data-i18n="bridge.copyCmd">复制</button></div>
                 <div class="menu-setup-step"><b>2</b><span data-i18n="bridge.setupStep2">安装并登录你要用的 Agent(Claude Code / Codex / Copilot),回来点「检查连接」。</span></div>
               </div>
-              <button class="agent" data-provider="claude_code_cli" type="button"><i class="agent-dot"></i><span><b>Claude Code</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span><span class="agent-chip" hidden></span></button>
-              <button class="agent" data-provider="codex_app_server" type="button"><i class="agent-dot"></i><span><b>Codex</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span><span class="agent-chip" hidden></span></button>
-              <button class="agent" data-provider="github_copilot" type="button"><i class="agent-dot"></i><span><b>GitHub Copilot</b><small class="agent-note" data-i18n="provider.checking">正在检查…</small></span><span class="agent-chip" hidden></span></button>
+              <button class="agent" data-provider="claude_code_cli" type="button"><i class="agent-dot"></i><span><b>Claude Code</b><small class="agent-note" data-i18n="provider.checking">正在连接…</small></span><span class="agent-chip" hidden></span></button>
+              <button class="agent" data-provider="codex_app_server" type="button"><i class="agent-dot"></i><span><b>Codex</b><small class="agent-note" data-i18n="provider.checking">正在连接…</small></span><span class="agent-chip" hidden></span></button>
+              <button class="agent" data-provider="github_copilot" type="button"><i class="agent-dot"></i><span><b>GitHub Copilot</b><small class="agent-note" data-i18n="provider.checking">正在连接…</small></span><span class="agent-chip" hidden></span></button>
               <div id="conn-center" class="conn-center" hidden>
                 <div class="conn-body" id="conn-body">
                   <div class="conn-checking" id="conn-checking" role="status" aria-live="polite" hidden>

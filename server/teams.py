@@ -81,6 +81,19 @@ def add_membership(sub: str, team_id: str) -> None:
         c.close()
 
 
+def user_by_email(email: str) -> "dict | None":
+    """按 email 查已注册用户(Google 登录时 upsert 写入 email)。未注册 → None。大小写不敏感。"""
+    c = _connect()
+    try:
+        r = c.execute(
+            "SELECT google_sub, name FROM users WHERE lower(email)=lower(?) LIMIT 1",
+            (email.strip(),),
+        ).fetchone()
+    finally:
+        c.close()
+    return {"google_sub": r["google_sub"], "name": r["name"]} if r else None
+
+
 def user_teams(sub: str) -> "list[dict]":
     """用户的 team 列表(最近加入在前)。"""
     c = _connect()

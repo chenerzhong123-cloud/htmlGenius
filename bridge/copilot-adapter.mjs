@@ -10,6 +10,8 @@
 // 不采信模型 response 文本:成功与否只看受控输出文件 + hash 校验(§5.3)。
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import {
   resolveSourcePath, prepareCandidateRun, writeManifest, validateCandidate,
@@ -41,12 +43,34 @@ export function copilotWorkspacePathFor({ sourcePath, logicalDocumentId }) {
     e.code = 'BAD_LOGICAL_ID';
     throw e;
   }
-  return path.join(path.dirname(sourcePath), BRIDGE_DIR_NAME, PROVIDER_DIR_NAME, logicalDocumentId);
+  // v0.9.x:workspace 放 os.tmpdir() 下(非隐藏目录)。原放源文件旁的 .htmlgenius-bridge(隐藏),
+  // Copilot bundled CLI 会忽略该 workingDirectory → 读不到 source.html(mac pro 实测)。tmpdir 下可正常读。
+  // 用 sourcePath 的 realpath 的 sha256 做隔离键:不同源文件 → 不同 workspace(等价于原来"挨着源文件"
+  // 的隔离语义);realpath 消解 macOS /var→/private/var 符号链接,保证代码端(已 realpath)与调用方一致。
+  let realSrc;
+  try { realSrc = fs.realpathSync(String(sourcePath)); } catch (_) { realSrc = String(sourcePath); }
+  const sourceKey = crypto.createHash('sha256').update(realSrc).digest('hex').slice(0, 24);
+  return path.join(os.tmpdir(), 'htmlgenius-bridge', PROVIDER_DIR_NAME, sourceKey, logicalDocumentId);
 }
 
 // COPILOT_HOME 放在 provider 目录下、run workspace 围栏之外(Agent 的文件工具读不到自己的会话态;§7)。
 function copilotHomeFor(workspace, runId, kind) {
   return path.join(workspace, '.copilot-home', (kind === 'plan' ? 'plan-' : 'run-') + runId);
+}
+
+// Copilot bundled CLI 的 workingDirectory 生效不稳定(mac pro 实测:同一 tmpdir workspace,
+// 1.0.7 时找到 source.html、1.0.8 时找不到、改搜 /tmp///Users)。→ 不依赖"当前目录",
+// 直接在 prompt 里给出 workspace 内文件的绝对路径(source.html / task / 输出文件),让 Copilot 按绝对路径读写。
+// 这些是 workspace 快照路径(在 tmpdir),非用户真实文件;暴露给模型无风险,且 onPreToolUse 路径围栏仍只准 workspace 内。
+function withAbsPaths(promptText, runsDir, runId, outFile) {
+  const lines = [
+    'Your working directory is: ' + runsDir,
+    'The authoritative source snapshot is at this ABSOLUTE path: ' + path.join(runsDir, 'source.html'),
+    'The task files are at these ABSOLUTE paths: ' + path.join(runsDir, 'task-' + runId + '.md') + '  /  ' + path.join(runsDir, 'task-' + runId + '.json')
+  ];
+  if (outFile) lines.push('Write your output to this ABSOLUTE path: ' + outFile);
+  lines.push('If "the current directory" or relative paths do not resolve, USE THESE ABSOLUTE PATHS to read/write the files.');
+  return lines.join('\n') + '\n\n' + promptText;
 }
 
 function truncateMsg(s) { const t = String(s || ''); return t.length > 400 ? t.slice(0, 400) + '…' : t; }
@@ -86,7 +110,9 @@ function makeCopilotStreamer(runId, emit) {
       if (!e) return;
       if (e.kind === 'text') emit({ type: 'bridge_stream', run_id: runId, kind: 'delta', text: String(e.text || '') });
       else if (e.kind === 'tool') emit({ type: 'bridge_stream', run_id: runId, kind: 'info', text: 'tool: ' + String(e.name || '') });
-      else if (e.kind === 'tool_denied') emit({ type: 'bridge_stream', run_id: runId, kind: 'info', text: 'denied: ' + String(e.tool || '') + ' (' + String(e.category || '') + ')' });
+      // tool_denied 用结构化 kind(tool/category 字段),不再拍平成 info 文本 ——
+      // background 透传 + 累积进诊断 denials,定位 Copilot 读源被哪条规则挡(tool_not_allowed / path_outside_workspace…)。
+      else if (e.kind === 'tool_denied') emit({ type: 'bridge_stream', run_id: runId, kind: 'tool_denied', text: 'denied: ' + String(e.tool || '') + ' (' + String(e.category || '') + ')', tool: String(e.tool || ''), category: String(e.category || '') });
     } catch (_) { /* 非关键 */ }
   };
 }
@@ -175,7 +201,7 @@ export async function executeCopilotCandidateRun(msg, { emit, selectRuntime, sdk
     run = await runCopilotSession({
       sdk: sel.sdk, runtime: sel.runtime, cliPath: sel.cliPath,
       cwd: prep.runsDir, baseDirectory: home,
-      prompt: buildCandidatePrompt({ runId, task }) + (msg.approved_plan ? approvedPlanPreamble(msg.approved_plan.edited_plan_markdown) : ''),
+      prompt: withAbsPaths(buildCandidatePrompt({ runId, task }) + (msg.approved_plan ? approvedPlanPreamble(msg.approved_plan.edited_plan_markdown) : ''), prep.runsDir, runId, path.join(prep.runsDir, 'candidate.html')),
       timeoutMs: CANDIDATE_TIMEOUT_MS,
       writableFiles: [prep.candidatePath],
       runKind: 'candidate',
@@ -190,6 +216,15 @@ export async function executeCopilotCandidateRun(msg, { emit, selectRuntime, sdk
   catch (e) { failed('SOURCE_MUTATED_DURING_CANDIDATE', '无法重读 source', prep.runsDir, ctxBase); return; }
   if (sourceSha256After !== prep.sourceSha256Before) {
     failed('SOURCE_MUTATED_DURING_CANDIDATE', 'source 在 copilot run 期间变化,candidate 未采用', prep.runsDir, { ...ctxBase, sourceSha256After }); return;
+  }
+
+  // 6.5 兜底:Copilot 常不调 write 工具,改把整页 HTML 当聊天文本 dump(id=16)。
+  //      candidate.html 缺失时,从回复文本抢救 HTML 落盘,再交给下面 validateCandidate 正常复核。
+  if (!fs.existsSync(prep.candidatePath)) {
+    const recovered = extractHtmlFromReply(copilotReplyText(run && run.reply));
+    if (recovered) {
+      try { fs.writeFileSync(prep.candidatePath, recovered, { mode: 0o600 }); } catch (_) {}
+    }
   }
 
   // 7. 校验 candidate 形态;若期间有越权工具被拒且无输出 → 归因 PERMISSION_DENIED(§5.5)
@@ -386,6 +421,24 @@ function copilotReplyText(reply) {
   try { return JSON.stringify(reply); } catch (_) { return ""; }
 }
 
+// Copilot(尤其 bundled SDK 的 empty 模式)常不调用 write 工具落 candidate.html,
+// 而是把整页 HTML 当聊天文本回复 dump 出来(目标 Mac id=16 实测:读完源后直接吐整页 HTML)。
+// 此处从回复文本里抢救出完整 HTML 文档,仅作 candidate 兜底:找到才写 candidate.html,
+// 找不到返回 null,交回原 CANDIDATE_MISSING 流程(后续 validateCandidate 仍会复核形态)。
+export function extractHtmlFromReply(text) {
+  if (typeof text !== "string" || text.length === 0) return null;
+  // 1) 优先取 ```html … ``` 代码围栏里的内容(模型常把整页 HTML 包在围栏里)
+  const fence = text.match(/```(?:html|HTML)?\s*([\s\S]*?)```/);
+  const haystack = fence ? fence[1] : text;
+  // 2) 匹配完整文档:<!DOCTYPE html>…</html> 或 <html …>…</html>(非贪婪到首个闭合 </html>)
+  const m = haystack.match(/(<!DOCTYPE[^>]*>\s*<html[\s\S]*?<\/html>|<html[\s\S]*?<\/html>)/i);
+  if (!m) return null;
+  const html = m[1].trim();
+  // 必须闭合 + 足够长(真实候选是整页,>=256B);零碎提及的 <html> 标签不在此列
+  if (html.length < 256 || !/<\/html>/i.test(html)) return null;
+  return html;
+}
+
 export async function executeCopilotPatchPreviewRun(msg, { emit, selectRuntime, sdkLoader, execFileImpl, env, fsImpl } = {}) {
   if (typeof emit !== 'function') throw new Error('emit is required');
   const runId = msg && msg.run_id;
@@ -456,11 +509,11 @@ export async function executeCopilotPatchPreviewRun(msg, { emit, selectRuntime, 
     run = await runCopilotSession({
       sdk: sel.sdk, runtime: sel.runtime, cliPath: sel.cliPath,
       cwd: prep.runsDir, baseDirectory: home,
-      prompt: buildPatchPrompt({ runId, task }),
+      prompt: withAbsPaths(buildPatchPrompt({ runId, task }), prep.runsDir, runId),
       timeoutMs: COPILOT_PATCH_TIMEOUT_MS,
       writableFiles: [],          // 空允许写清单 → 任何写工具都被拒(patch 只读 source,输出在 reply 文本)
       runKind: 'patch',
-      onEvent: null,              // patch 预览不流式(与 claude patch 同口径)
+      onEvent: makeCopilotStreamer(runId, emit), // v0.9.x:patch 开流式(让无变更理由进流式窗口 + 诊断)
       fsImpl
     });
   } catch (e) { failed(e.code || COPILOT_ERRORS.RUN_FAILED, e.message, prep.runsDir, ctxBase); return; }

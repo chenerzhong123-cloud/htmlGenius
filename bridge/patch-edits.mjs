@@ -32,7 +32,7 @@ export function parseEditsJson(resultText) {
   if (!obj) fail("PATCH_EDITS_INVALID", "result does not contain a JSON edit object");
   if (obj.schema_version !== 1) fail("PATCH_EDITS_INVALID", "unsupported edits schema_version: " + obj.schema_version);
   if (!Array.isArray(obj.edits)) fail("PATCH_EDITS_INVALID", "edits must be an array");
-  return { edits: obj.edits.map(validateEdit) };
+  return { edits: obj.edits.map(validateEdit), note: (obj.note == null ? null : String(obj.note).slice(0, 500)) };
 }
 
 function tryParseObject(s) {

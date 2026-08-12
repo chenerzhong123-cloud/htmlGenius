@@ -1,7 +1,7 @@
 // storage.js — IndexedDB 封装(annotations + legacy versions + artifact versions + bridge sessions/runs)
 // 用 globalThis(而非 window)以兼容 background service worker(无 window);在 content-script/sidepanel globalThis===window,行为不变。
 const DB_NAME = "htmlgenius";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -52,6 +52,13 @@ function openDB() {
         bp.createIndex("tab_id", "tab_id", { unique: false });
         bp.createIndex("status", "status", { unique: false });
         bp.createIndex("plan_run_id", "plan_run_id", { unique: false });
+      }
+      // v0.9.x (DB v6):诊断队列 —— background 在 run 终态(failed/no_change)捕获的诊断记录。
+      // 留最近 N 条(默认 10);sidepanel 报告浮层读它(支持关 sidepanel 后重开仍可上报)。
+      // 不存 token/密钥;agent_stream 可能含页面内容(用户上报前可审视)。
+      if (!db.objectStoreNames.contains("bridge_diagnostics")) {
+        const bd = db.createObjectStore("bridge_diagnostics", { keyPath: "id", autoIncrement: true });
+        bd.createIndex("at", "at", { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -333,6 +340,42 @@ const LocalStore = {
     });
     return updated;
   },
+  // === v0.9.x 诊断队列(background 终态捕获:failed / no_change;留最近 N 条)===
+  // enqueueDiagnostic 追加一条并修剪到最近 keep 条(id 自增、倒序=最新在前)。
+  async enqueueDiagnostic(record, opts) {
+    const keep = (opts && opts.keep) || 10;
+    const rec = Object.assign({}, record, { at: record.at || new Date().toISOString() });
+    await dbPut("bridge_diagnostics", rec);
+    try {
+      const all = await this.listDiagnostics();
+      if (all.length > keep) {
+        // all 已按 id 倒序;尾部是最旧,删掉超出的部分。
+        for (const s of all.slice(keep)) { try { await dbDelete("bridge_diagnostics", s.id); } catch (_) {} }
+      }
+    } catch (_) {}
+    return rec;
+  },
+  async listDiagnostics(limit) {
+    const db = await openDB();
+    const all = await new Promise((res, rej) => {
+      const tx = db.transaction("bridge_diagnostics", "readonly");
+      const req = tx.objectStore("bridge_diagnostics").getAll();
+      req.onsuccess = () => res(req.result || []);
+      req.onerror = () => rej(req.error);
+    });
+    all.sort((a, b) => (b.id || 0) - (a.id || 0)); // id 倒序(最新在前)
+    return limit ? all.slice(0, limit) : all;
+  },
+  async clearDiagnostics() {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction("bridge_diagnostics", "readwrite");
+      tx.objectStore("bridge_diagnostics").clear();
+      tx.oncomplete = () => res(true);
+      tx.onerror = () => rej(tx.error);
+    });
+  },
+  async deleteDiagnostic(id) { return dbDelete("bridge_diagnostics", id); },
 };
 
 // === mode 分派器 ===
@@ -379,6 +422,11 @@ const Storage = {
   getBridgePlan(planId) { return LocalStore.getBridgePlan(planId); },
   updateBridgePlan(planId, patch) { return LocalStore.updateBridgePlan(planId, patch); },
   markDraftPlansStaleForDocument(logicalDocumentId, exceptPlanId) { return LocalStore.markDraftPlansStaleForDocument(logicalDocumentId, exceptPlanId); },
+  // v0.9.x 诊断队列:facade 转发(始终本地)
+  enqueueDiagnostic(record, opts) { return LocalStore.enqueueDiagnostic(record, opts); },
+  listDiagnostics(limit) { return LocalStore.listDiagnostics(limit); },
+  clearDiagnostics() { return LocalStore.clearDiagnostics(); },
+  deleteDiagnostic(id) { return LocalStore.deleteDiagnostic(id); },
   canonicalArtifactUri,
   isManagedLocalUri,
   legacyDocumentIdForUri,

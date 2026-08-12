@@ -21,10 +21,10 @@ const HANDOFF_START_TYPES = (() => {
 // v0.9 §4.3:版本单一来源 —— 扩展版本一律取 manifest(getManifest().version),杜绝四处漂移。
 // BRIDGE_PROTOCOL_VERSION:与 bridge-health/host 共用;TARGET_BRIDGE_VERSION:bootstrap 指向的受控 CLI 版本(不得 latest)。
 const BRIDGE_PROTOCOL_VERSION = 1;
-const TARGET_BRIDGE_VERSION = "1.0.2";
+const TARGET_BRIDGE_VERSION = "1.0.11";
 // bridge 自 1.0.0 起独立于扩展 manifest 编号(扩展仍按 0.x.x);此处只钉 bootstrap 指向的 bridge 版本。
 // bootstrap 发行态:"development" = 仓库内开发命令(显著标注仅开发环境);"production" = 已发布的固定版本 npx 命令。
-// @htmlgenius/bridge 已发布到 npm → production:任何设备 `npx --yes @htmlgenius/bridge@1.0.2 setup` 即可安装。
+// @htmlgenius/bridge 已发布到 npm → production:任何设备 `npx --yes @htmlgenius/bridge@1.0.11 setup` 即可安装。
 const BOOTSTRAP_DISTRIBUTION = "production";
 function extensionVersion() { try { return chrome.runtime.getManifest().version; } catch (_) { return "0.0.0"; } }
 // v0.8.1 §5.2/§6.7:candidate + plan 是新主流程;handoff 旧路径保留兼容(V0.8.1 UI 不再创建)。
@@ -48,6 +48,30 @@ function isUuid(s) { return typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[
 function broadcast(payload) {
   // 向 sidepanel 推送 run 进度;sidepanel 关闭时无接收者,run 在 background/host 继续(§9)
   try { chrome.runtime.sendMessage(payload).catch(() => {}); } catch (e) { /* 非关键 */ }
+}
+
+// v0.9.x 诊断队列:background 累积每个 run 的 stream(sidepanel 关闭也不丢),供终态诊断捕获。
+// _streamBuf: runId -> { text:String, denials:[{tool,category}] }。delta/message 拼 text;tool_denied 记结构化。
+const _streamBuf = new Map();
+const _STREAM_TEXT_CAP = 8000;
+function accumulateStream(runId, m) {
+  if (!runId || !m) return;
+  const kind = m.kind;
+  if (kind !== "delta" && kind !== "message" && kind !== "tool_denied") return;
+  let buf = _streamBuf.get(runId);
+  if (!buf) { buf = { text: "", denials: [] }; _streamBuf.set(runId, buf); }
+  if (kind === "delta" || kind === "message") {
+    buf.text = (buf.text + String(m.text || "")).slice(-_STREAM_TEXT_CAP);
+  } else if (kind === "tool_denied") {
+    buf.denials.push({ tool: String(m.tool || ""), category: String(m.category || "") });
+  }
+}
+// 终态取出并清空 runId 的 buffer(captureDiag 用;取完即删,避免内存堆积)。
+function takeStreamBuf(runId) {
+  const buf = _streamBuf.get(runId);
+  if (!buf) return { text: "", denials: [] };
+  _streamBuf.delete(runId);
+  return { text: buf.text, denials: buf.denials };
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -337,7 +361,8 @@ function onHostMessage(tab_id, runId, m, taskSha, logicalId, artifactUrl) {
   }
   if (m.type === "bridge_stream") {
     // v0.8.1:Codex turn 中途进度(token 流/工具/文件)。只转发安全摘要,不含命令体/路径/stderr/思维链正文。
-    broadcast({ type: "bridge-stream", tab_id, run_id: runId, kind: m.kind || "info", text: String(m.text || "").slice(0, 800), starting: !!m.starting });
+    accumulateStream(runId, m); // v0.9.x:background 累积 stream(sidepanel 关闭也不丢),供终态诊断捕获
+    broadcast({ type: "bridge-stream", tab_id, run_id: runId, kind: m.kind || "info", text: String(m.text || "").slice(0, 8000), starting: !!m.starting });
     return;
   }
   if (m.type === "bridge_failed") {
@@ -360,6 +385,46 @@ function onHostDisconnect(tab_id, runId) {
   failRun(tab_id, runId, "HOST_DISCONNECTED", err ? String(err.message || err) : "native host disconnected");
 }
 
+// v0.9.x 诊断队列:run 终态(failed/no_change)捕获诊断上下文 → 入队(留最近 10)。
+// sidepanel 关闭也不丢(队列在 IndexedDB);hgAutoDiag opt-in 时 background 直接自动上传。
+// 注:agent_stream 可能含页面内容(用户上报前可在 sidepanel 浮层审视);tool_denials 结构化便于定位 Copilot 读源等。
+async function captureDiag(runId, { outcome, code, message, compliance }) {
+  if (!runId) return;
+  let run = null;
+  try { run = await Storage.getBridgeRun(runId); } catch (_) {}
+  const buf = takeStreamBuf(runId); // 取出累积 stream + 工具拒绝事件,取完即清(防内存堆积)
+  const record = {
+    at: nowIso(),
+    outcome,                           // "failed" | "no_change"
+    run_id: runId,
+    provider: (run && run.provider) || null,
+    run_kind: (run && run.run_kind) || null,
+    task_mode: (run && run.mode) || null,
+    error_code: code || (run && run.error_code) || null,
+    message: String(message || "").slice(0, 1000) || null,
+    compliance: compliance || null,
+    agent_stream: buf.text,
+    tool_denials: buf.denials,
+    app_version: extensionVersion(),
+    bridge_protocol: BRIDGE_PROTOCOL_VERSION,
+  };
+  try { await Storage.enqueueDiagnostic(record); } catch (e) { console.warn("[hg] enqueueDiagnostic failed", e); }
+  // opt-in 自动上报(参照 onPatchPreviewReady 读 hgPatchApplyMode 的写法)
+  let autoDiag = false, backend = "";
+  try {
+    const cfg = await new Promise((res) => {
+      try { chrome.storage.sync.get({ hgAutoDiag: false, backend: "" }, (r) => res(r || {})); }
+      catch (e) { res({}); }
+    });
+    autoDiag = !!(cfg && cfg.hgAutoDiag);
+    backend = (cfg && cfg.backend) || "";
+  } catch (_) {}
+  if (autoDiag) {
+    const url = (backend || "https://www.deuce.monster/htmlgenius") + "/api/diagnostics";
+    fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ mode: "auto" }, record)) }).catch(() => {});
+  }
+}
+
 async function failRun(tab_id, runId, code, message) {
   // R-10(v0.9.9):终态守卫 —— run 已 completed/failed 则不再覆盖。避免迟到的失败(host 在 bridge_completed
   // 后又补发 bridge_failed、或 reconcile 与关 tab 竞态)把成功 run 误标失败 + 双广播/状态长期不一致。
@@ -378,6 +443,7 @@ async function failRun(tab_id, runId, code, message) {
   // 先广播再写库:SW 可能在 await IndexedDB 期间被 Chrome 杀掉 → broadcast 永远不执行 → sidepanel 卡死
   broadcast({ type: "bridge-failed", tab_id, run_id: runId, code, message });
   await Storage.updateBridgeRun(runId, { status: "failed", error_code: code, completed_at: nowIso() }).catch(() => {});
+  captureDiag(runId, { outcome: "failed", code, message }).catch(() => {}); // v0.9.x 诊断队列:失败入队
 }
 
 // v0.8.1 用户主动终止:断 host port(子进程退出)→ 终态广播 USER_CANCELLED;不触 onHostDisconnect 二次广播
@@ -531,6 +597,8 @@ async function onPatchPreviewReady(tab_id, runId, m, taskSha, logicalId, artifac
   }
   // okIds 为空(目标已满足/定位不到/全被跳过)→ 不自动应用零编辑(会产出与原文完全相同的无意义 candidate),
   // 改走预览展示路径:sidepanel 渲染空状态说明,由用户取消收尾。
+  // v0.9.x:no_change(applicable===0)入诊断队列 —— 区分 failed,让用户能上报"Agent 没改任何东西"的现场
+  if (okIds.length === 0) captureDiag(runId, { outcome: "no_change", compliance: m.compliance }).catch(() => {});
   // 预览确认:收尾 preview host(应用阶段另起进程读盘),保持 run 于 awaiting_confirm(tab 锁仍持有)
   const entry = _runsByTab.get(tab_id);
   if (entry && entry.run_id === runId) { entry.terminal = true; try { entry.port.disconnect(); } catch (_) {} }

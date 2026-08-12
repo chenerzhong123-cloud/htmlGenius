@@ -233,7 +233,7 @@ async function cmdSetup(flags) {
 
   // origin 硬边界:已注册但 ID 不同 → 拒绝覆盖(§3.3/§6.3)
   const ins = inspectExistingManifest({ hostsDir, extensionId });
-  if (ins.state === "ours_mismatch") { logErr(REASON.EXTENSION_ORIGIN_MISMATCH, "Bridge is registered for a different extension; refusing to overwrite"); return EXIT.ERROR; }
+  // ours_mismatch(本 host 已注册、本次 extensionId 未含)→ 不拒绝;继续到 ensureHostRegistration 合并追加(多扩展支持)。仅 foreign(无关 manifest)拒绝。
   if (ins.state === "foreign") { logErr(REASON.MANIFEST_FOREIGN, "an unrelated host occupies the HTML Genius host name; refusing to overwrite"); return EXIT.ERROR; }
 
   const version = pkgVersion();
@@ -290,7 +290,7 @@ async function cmdRepair(flags) {
     return EXIT.ACTION_REQUIRED;
   }
   const ins = inspectExistingManifest({ hostsDir, extensionId });
-  if (ins.state === "ours_mismatch") { logErr(REASON.EXTENSION_ORIGIN_MISMATCH, "Bridge is registered for a different extension; refusing to overwrite"); return EXIT.ERROR; }
+  // ours_mismatch(本 host 已注册、本次 extensionId 未含)→ 不拒绝;继续到 ensureHostRegistration 合并追加(多扩展支持)。仅 foreign(无关 manifest)拒绝。
   if (ins.state === "foreign") { logErr(REASON.MANIFEST_FOREIGN, "an unrelated host occupies the HTML Genius host name; refusing to overwrite"); return EXIT.ERROR; }
 
   // allow-list 修复:只重写它自身的 launcher + manifest(指向现有受管目录),不装 Node/Agent、不跑包管理器
