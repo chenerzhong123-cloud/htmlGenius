@@ -490,6 +490,32 @@ body {
 }
 #lark-login-btn:hover, #google-login-btn:hover { background: rgba(255,255,255,.07); border-color: var(--brand); }
 #login-state { font-size: 11px; color: var(--text-muted); margin-top: 10px; min-height: 14px; line-height: 1.6; }
+/* 邮箱 + 密码登录表单 */
+.email-login-area { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.email-tabs { display: flex; gap: 4px; }
+.email-tab {
+  flex: 1; background: transparent; color: var(--text-muted);
+  border: 1px solid var(--line-default); border-radius: var(--r-sm);
+  height: 28px; font-size: 11px; cursor: pointer; font-family: var(--font-sans);
+}
+.email-tab.active { color: var(--text-primary); border-color: var(--brand); background: rgba(255,255,255,.05); }
+#email-login-area input[type=email], #email-login-area input[type=password], #email-login-area input[type=text],
+#email-code-row input {
+  background: var(--bg-surface-raised); color: var(--text-primary);
+  border: 1px solid var(--line-default); border-radius: var(--r-md);
+  height: 34px; padding: 0 10px; font-size: 12px; font-family: var(--font-sans); flex: 1; min-width: 0;
+}
+#email-send-code-btn {
+  background: var(--bg-surface-raised); color: var(--text-secondary);
+  border: 1px solid var(--line-default); border-radius: var(--r-md);
+  height: 34px; padding: 0 10px; font-size: 11px; cursor: pointer; white-space: nowrap; font-family: var(--font-sans);
+}
+#email-send-code-btn:disabled { opacity: .5; cursor: default; }
+#email-submit-btn {
+  background: var(--brand); color: #fff; border: none; border-radius: var(--r-md);
+  height: 34px; font-size: 12px; font-weight: 500; cursor: pointer; font-family: var(--font-sans);
+}
+#email-submit-btn:hover { filter: brightness(1.08); }
 #logout-btn, #invite-btn {
   background: transparent; color: var(--text-secondary); border: 1px solid var(--line-default);
   height: 24px; padding: 0 9px; font-size: 11px; margin-left: 6px; border-radius: var(--r-sm);

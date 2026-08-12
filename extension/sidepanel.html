@@ -164,6 +164,22 @@
   <div id="login-area" class="collab-row">
     <button id="google-login-btn" data-i18n="login.google">Google 登录</button>
   </div>
+  <!-- 邮箱 + 密码登录(无 VPN 用户;注册带邮箱验证码) -->
+  <div id="email-login-area" class="email-login-area">
+    <div class="email-tabs">
+      <button type="button" id="email-tab-login" class="email-tab active" data-i18n="login.emailTabLogin">邮箱登录</button>
+      <button type="button" id="email-tab-register" class="email-tab" data-i18n="login.emailTabRegister">注册新账号</button>
+    </div>
+    <input id="email-input" type="email" data-i18n-placeholder="login.emailPh" placeholder="邮箱" />
+    <input id="email-pw-input" type="password" data-i18n-placeholder="login.pwPh" placeholder="密码" />
+    <input id="email-name-input" class="email-register-only" type="text" data-i18n-placeholder="login.namePh" placeholder="昵称(可选)" hidden />
+    <input id="email-invite-input" class="email-register-only" type="text" data-i18n-placeholder="login.invitePh" placeholder="邀请码(可选)" hidden />
+    <div id="email-code-row" class="collab-row email-register-only" hidden>
+      <input id="email-code-input" inputmode="numeric" maxlength="6" data-i18n-placeholder="login.codePh" placeholder="验证码" />
+      <button type="button" id="email-send-code-btn" data-i18n="login.sendCode">发送验证码</button>
+    </div>
+    <button type="button" id="email-submit-btn" data-i18n="login.emailLogin">登录</button>
+  </div>
   <div id="team-setup" hidden>
     <div class="collab-row">
       <input id="invite-code-input" data-i18n-placeholder="team.invitePh" placeholder="邀请码" />
