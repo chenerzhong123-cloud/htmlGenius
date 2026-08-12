@@ -199,23 +199,30 @@
     <div id="team-switch-row" class="collab-row" hidden>
       <select id="team-select" aria-label="团队"></select>
     </div>
+    <!-- 主层:邀请链接(最高频,任意成员可生) -->
     <div class="team-block">
       <div class="team-block-title" data-i18n="team.inviteTitle">邀请成员</div>
       <div class="collab-row">
-        <button id="gen-invite-btn" data-i18n="team.genLink">生成邀请链接</button>
+        <button id="gen-invite-btn" class="account-primary" data-i18n="team.genLink">生成邀请链接</button>
       </div>
       <div id="invite-link-row" class="invite-link-row" hidden>
         <code id="invite-link-url"></code>
         <button id="copy-invite-btn" data-i18n="team.copy">复制</button>
       </div>
-      <div class="collab-row">
-        <input id="add-email-input" type="email" data-i18n-placeholder="team.emailPh" placeholder="对方 Gmail" />
-        <button id="add-email-btn" data-i18n="team.add">添加</button>
-      </div>
     </div>
+    <!-- 次层:成员(可折叠;展开后 owner 可按邮箱加人/移除) -->
     <div class="team-block">
-      <div class="team-block-title"><span data-i18n="team.members">成员</span> <span id="member-count"></span></div>
-      <div id="member-list" class="member-list"></div>
+      <button type="button" id="members-toggle" class="team-block-toggle" aria-expanded="false">
+        <span data-i18n="team.members">成员</span> <span id="member-count"></span>
+        <span class="team-caret" aria-hidden="true">▾</span>
+      </button>
+      <div id="members-collapsible" class="team-collapsible" hidden>
+        <div id="member-list" class="member-list"></div>
+        <div id="add-email-row" class="collab-row" hidden>
+          <input id="add-email-input" type="email" data-i18n-placeholder="team.emailPh" placeholder="对方邮箱" />
+          <button id="add-email-btn" data-i18n="team.add">添加</button>
+        </div>
+      </div>
     </div>
   </div>
   <div id="presence-count" class="presence-count" hidden></div>

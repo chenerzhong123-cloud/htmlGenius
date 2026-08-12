@@ -2085,6 +2085,15 @@
       const cp = document.getElementById("copy-invite-btn"); if (cp) cp.addEventListener("click", copyInviteLink);
       const add = document.getElementById("add-email-btn"); if (add) add.addEventListener("click", addMemberByEmail);
       if (sel) sel.addEventListener("change", () => { if (sel.value) switchTeam(sel.value); });
+      const mt = document.getElementById("members-toggle");
+      if (mt) mt.addEventListener("click", () => {
+        const c = document.getElementById("members-collapsible");
+        if (!c) return;
+        const willOpen = c.hidden;
+        c.hidden = !willOpen;
+        mt.setAttribute("aria-expanded", String(willOpen));
+        if (willOpen) loadMembers(); // 展开时刷新成员
+      });
     }
     loadMembers();
   }
@@ -2135,6 +2144,8 @@
       if (cnt) cnt.textContent = "(" + items.length + ")";
       const meId = _sessionUser && _sessionUser.id;
       const isOwner = items.some((m) => m.sub === meId && m.role === "owner");
+      const addRow = document.getElementById("add-email-row");
+      if (addRow) addRow.hidden = !isOwner; // 按邮箱加人仅 owner 可见
       list.innerHTML = "";
       for (const m of items) {
         const row = document.createElement("div"); row.className = "member-row";
