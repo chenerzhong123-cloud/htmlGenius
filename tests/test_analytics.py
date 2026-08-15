@@ -34,6 +34,17 @@ def test_save_events_and_idempotent_repost(tmp_path, monkeypatch):
     assert rows[1][2] == "login_start"
 
 
+def test_window_limiter_basic_and_injected_clock():
+    from server.ratelimit import WindowLimiter
+    clock = {"t": 0.0}
+    lim = WindowLimiter(3, 60, now=lambda: clock["t"])
+    assert [lim.allow("ip1") for _ in range(3)] == [True, True, True]
+    assert lim.allow("ip1") is False          # 窗口内第 4 次
+    assert lim.allow("ip2") is True           # 不同 key 互不影响
+    clock["t"] = 61.0                          # 窗口滑走
+    assert lim.allow("ip1") is True
+
+
 def test_prune_analytics_deletes_old_rows(tmp_path, monkeypatch):
     _init(tmp_path, monkeypatch)
     storage.save_events("cid_abcdefgh", [_ev(1, ts="2020-01-01T00:00:00Z"), _ev(2)])
