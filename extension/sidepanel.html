@@ -32,6 +32,9 @@
   <!-- v0.9.6: 编辑视图改列布局(镜像评论区):内容在 .edit-scroll 内滚动,底部动作栏固定第一屏 -->
   <div id="edit-scroll" class="edit-scroll">
   <div id="mode-indicator" data-i18n="mode.connecting">正在连接当前页面…</div>
+  <div id="sync-paused-hint" class="file-access-hint" hidden>
+    <span data-i18n="sync.pausedBody">此页签的实时同步已暂停（省流模式）。切换到该页签后会自动恢复并同步最新评论。</span>
+  </div>
   <div id="file-access-hint" class="file-access-hint" hidden>
     <b data-i18n="fileAccess.title">允许 htmlGenius 访问本地文件</b>
     <span data-i18n="fileAccess.body">要编辑电脑中的网页文件，需要先打开一项权限。</span>
@@ -168,30 +171,23 @@
   </div><!-- /.account-inner -->
 </div>
 
-<!-- v0.9.6 问题反馈浮层(点 header 反馈按钮展开):引导文案 + 小红书二维码。二维码位待替换。 -->
+<!-- v0.9.6 联系作者浮层(点 header 反馈按钮展开):引导文案 + 小红书二维码。 -->
 <div id="feedback-sheet" class="sheet feedback-sheet" role="dialog" aria-modal="false" aria-labelledby="feedback-title">
   <button id="feedback-close" class="feedback-close" type="button" data-i18n-title="feedback.close" aria-label="✕">✕</button>
-  <div id="feedback-title" class="sheet-title" data-i18n="feedback.title">问题反馈</div>
-  <div class="sheet-sub" data-i18n="feedback.guide">遇到异常或有建议?扫码前往小红书,把情况告诉我。</div>
+  <div id="feedback-title" class="sheet-title" data-i18n="feedback.title">联系作者</div>
+  <div class="sheet-sub" data-i18n="feedback.guide">扫码前往小红书反馈使用异常与建议，也可以在小红书搜索@AI二重同学。</div>
   <div class="feedback-qr-box">
-    <img class="feedback-qr" src="icons/feedback-qrcode.jpeg" alt="小红书二维码,也可在小红书搜索 @AI二重同学 反馈" />
+    <img class="feedback-qr" src="icons/feedback-qrcode.jpeg" alt="小红书二维码" />
   </div>
-  <div class="feedback-scan" data-i18n="feedback.scanHint">扫码前往小红书反馈</div>
-  <button id="diag-report-btn" class="diag-report-btn" type="button" data-i18n="diag.reportBtn">报告问题（附诊断信息）</button>
-</div>
-
-<!-- 诊断上报(A+B):可审视诊断包 → 上传/复制;opt-in 自动上报 -->
-<div id="diag-sheet" class="sheet diag-sheet" role="dialog" aria-modal="true" aria-labelledby="diag-title">
-  <button id="diag-close" class="feedback-close" type="button" aria-label="✕">✕</button>
-  <div id="diag-title" class="sheet-title" data-i18n="diag.title">报告问题</div>
-  <div class="sheet-sub" data-i18n="diag.sub">以下是最近捕获的诊断记录（任务失败 / 未修改）。勾选后上传，或复制后手动发送。不含登录凭证/密钥；agent_stream 可能含页面内容，上传前可展开审视。</div>
-  <div id="diag-preview" class="diag-list"></div>
-  <label class="diag-auto-row"><input id="diag-auto-toggle" type="checkbox" /><span data-i18n="diag.autoOpt">以后出错自动上报</span></label>
-  <div class="diag-actions">
-    <button id="diag-upload-btn" type="button" data-i18n="diag.upload">上传到服务器</button>
-    <button id="diag-copy-btn" type="button" data-i18n="diag.copy">复制</button>
+  <section class="feedback-report" aria-labelledby="diag-title">
+    <div id="diag-title" class="feedback-report-title" data-i18n="diag.title">报告问题</div>
+    <div class="diag-actions">
+      <button id="diag-upload-btn" type="button" data-i18n="diag.upload">一键上传报错信息</button>
+      <button id="diag-copy-btn" type="button" data-i18n="diag.copy">复制</button>
+    </div>
+    <label class="diag-auto-row"><input id="diag-auto-toggle" type="checkbox" /><span data-i18n="diag.autoOpt">勾选后，agent生成失败时可自动上报，我们会基于上报的错误信息增强适配agent的能力。上报内容不包含敏感信息。</span></label>
+  </section>
   </div>
-</div>
 
 <!-- v0.8.1 创建编辑任务(覆盖式 sheet)。data-step:compose(选择修改范围,默认全选)/ comment-scope(选择评论范围,高级入口)/ plan-review(确认修改计划)。
      每次派发都是新 task(session_mode=new);绝不续发 plan task,不接管用户外部会话。状态语义见 sidepanel.js。 -->
@@ -206,11 +202,10 @@
   <!-- ===== compose:选择修改范围(主流程,默认全选直达)===== -->
   <div class="contract-step" id="contract-step-compose">
     <div class="contract-scroll">
-      <button id="contract-compose-back" class="contract-back" type="button" data-i18n="contract.backToComments">← 返回页面评论</button>
-      <div class="contract-head">
-        <div class="contract-title-text">
-          <div id="contract-title" class="sheet-title" data-i18n="compose.title">选择修改范围</div>
-        </div>
+      <!-- 与账号视图同规范:顶部入口栏常驻(sheet 从 header 下方开始),标题行 = ← 图标按钮 + 当前步骤标题 -->
+      <div class="contract-header">
+        <button id="contract-compose-back" class="account-back" type="button" aria-label="返回" data-i18n-title="contract.backToComments"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
+        <span id="contract-title" class="account-header-title" data-i18n="compose.title">选择AI修改力度</span>
       </div>
 
       <!-- 三档修改范围(spec §3.B;不再有 restructure / 执行 seg) -->
@@ -301,7 +296,7 @@
         </div>
         <button id="contract-plan" class="plan-button" type="button" data-i18n="compose.plan" hidden>先给我看修改计划</button>
       </div>
-      <div id="contract-send-hint" class="send-hint" hidden data-i18n="bridge.localOnlyHint">直接发送给 Agent 仅支持本地 HTML 文件。当前页面可改用「复制 Prompt」手动交给 AI。</div>
+      <div id="contract-send-hint" class="send-hint" hidden data-i18n="bridge.localOnlyHint">直接发送给 Agent 仅支持本地 HTML 文件，远程网页无法被直接修改。可「复制 Prompt」发给 AI 获取修改建议，再由你手动更新页面。</div>
       <div id="contract-bridge-status" class="contract-bridge-status" hidden>
         <div class="cbs-main"><span class="cbs-text"></span><span class="cbs-timer"></span><span class="cbs-candidate" hidden><span class="cbs-version"></span><button class="cbs-open" type="button" data-i18n="candidate.openCandidate">打开候选版本</button></span><span class="cbs-chev" aria-hidden="true">▾</span></div>
         <div class="cbs-detail" hidden>

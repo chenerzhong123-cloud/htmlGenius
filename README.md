@@ -2,77 +2,67 @@
 
 <p align="center"><img src="assets/html-genius-logo-deep-mint-512x512.png" width="120" alt="htmlGenius"></p>
 
-> 一个 Chrome 扩展：在任意网页上划词、写下意见，把要改的地方整理成带精确定位的修改契约——复制给 AI，或一键交给本机的 Codex / Claude Code / GitHub Copilot，产出一份**不会覆盖原文件**的候选版本。
+> 不要再对着 AI 描述“这里改一下”。
 
-🌐 **官网**（中 / English）：<https://www.deuce.monster/htmlgenius/>
+网页已经摆在眼前，问题也已经看得见。可一旦回到对话框，你还要把位置、上下文和限制条件重新讲一遍，AI 仍可能改偏。
 
-用 AI 生成一份 HTML，渲染出来总能挑出毛病：「这里字号大了」「这段措辞要改」「这个按钮该靠右」。光在对话框里描述，AI 经常改不到位。htmlGenius 让你**直接在渲染好的页面上**圈出每一处、写下意见；动手前再**勾选**这次要处理的评论，整理成一段带定位的契约交给 AI。
+htmlGenius 把反馈留在页面上：圈出一句话，写下想法，选中要处理的意见，再交给你本机的 Codex、Claude Code 或 GitHub Copilot。它生成的是一份独立候选版，不是对原文件的覆盖。
 
-装一次，任何网页都能用；数据留在你自己机器上。
+不想交给 AI 时，也可以直接在页面上改。文字、样式和排版所见即所得，改完立刻看到结果；需要撤销时，按下 Ctrl+Z 即可回退。
 
-## 它能做什么
+让网页评审从反复解释，变成直接指出。
 
-- **划词批注**：选中网页上的文字，选区上方弹「评论」，写下你的意见。
-- **先讨论、后决定**：评论默认只是讨论记录。要动手时点「整理评论，创建编辑任务」，**人工勾选**这次要处理的评论（默认全选，可取消）——没有任何模型替你判断哪条该改。
-- **评论跟着内容走**：AI 改完出新版后，评论自动定位到新位置；原文被删掉的评论归档保留，不丢。
-- **层层回复**：一条评论下面可以继续讨论，形成讨论线索。
-- **修改契约**：把选中的评论整理成带「允许范围 / 保护规则 / 歧义处理 / 验收条件」的结构化契约。
-- **本地直接编辑**：本地的 HTML 还能直接在页面上改文字、调样式（加粗 / 斜体 / 颜色 / 字号 / 对齐 / 元素级）。
-- **交给本机 Agent**：契约直接交给本机已登录的 **Codex / Claude Code / GitHub Copilot**，产出一份**新的候选 HTML**（只写候选，绝不覆盖原文件），以 `原名V1.1.html` 带版本号独立发布，打开后评论自动重定位；状态栏实时显示 Agent 输出，完成后自动开新页签 + 系统通知。
-- **不破坏原网页**：高亮只是一层覆盖，关掉插件页面照旧，不动原文结构。
+🌐 官网：<https://www.deuce.monster/htmlgenius/>
+
+## 它如何工作
+
+1. **在页面上指出问题**
+
+   选中一段文字即可评论，也可以直接编辑页面内容。讨论和上下文都留在原位置，不必再截屏、转述或猜测 AI 说的是哪一块。
+
+2. **只处理这次想改的内容**
+
+   点击“基于评论修改文档”，选择 AI 修改力度，再选定要处理的评论。你决定修改范围和保护规则，而不是把整页交给 AI 碰运气。
+
+3. **先得到候选版，再决定是否采用**
+
+   本机 Agent 会生成带版本号的新 HTML 文件，例如 `原名V1.1.html`。原文件不会被覆盖；你可以审阅、比较、继续讨论，也可以直接放弃候选版。
+
+## 一个人收口，或和团队一起定稿
+
+htmlGenius 适合审阅 AI 生成的 HTML 原型、设计稿和网页内容。独自使用时，它是更准确的页面反馈工具；需要协作时，登录后创建团队、邀请成员，所有人都能在同一网页上实时讨论。
+
+团队批注绑定账号身份，只有作者本人可以编辑或删除自己的评论。已有团队的账号登录后会回到上次活跃的团队；加入其他团队由用户主动发起。
 
 ## 安装
 
-1. 打开 `chrome://extensions`，右上角开「**开发者模式**」。
-2. 点「**加载已解压的扩展程序**」→ 选本仓库的 `extension/` 目录。
-3. 打开任意网页，点工具栏的 htmlGenius 图标，侧边栏即打开。
+### 从 Chrome Web Store 安装（推荐）
 
-## 怎么用
+打开 [htmlGenius Chrome Web Store 页面](https://chromewebstore.google.com/detail/htmlgenius/fcapmgclnpiljjlcaficmjjclkaepaon)，点击“添加至 Chrome”即可安装。安装后打开任意网页，点击工具栏的 htmlGenius 图标。
 
-1. 选中网页上一段文字 → 选区上方点「**评论**」。
-2. 侧边栏输入框写意见 → **Enter** 保存（Shift+Enter 换行，Esc 取消）。
-3. 把想讨论的地方都标出来。
-4. 底部「**基于评论修改文档**」→ 勾选本次要处理的评论 →「继续」→ 在契约里补目标 / 保护项 →「**复制 Prompt**」粘给 AI，或发送下拉里选「**发送给 Codex / Claude Code / GitHub Copilot**」交给本机 Agent。
+### 从源码加载（开发者）
 
-> 在一条评论上悬停，可以**回复 / 编辑 / 删除**（编辑、删除仅限作者本人；删除会连同其下回复一起删）。
+1. 打开 `chrome://extensions`，开启“开发者模式”。
+2. 选择“加载已解压的扩展程序”，选中本仓库的 `extension/` 目录。
+3. 打开任意网页，点击工具栏的 htmlGenius 图标。
+4. 选中文字并评论；也可以直接进入编辑模式修改页面。准备交给 AI 时，在侧边栏点击“基于评论修改文档”。
 
-## 连接本机 Agent（可选）
+## 本机 Agent（可选）
 
-想「一键发送」而不是复制粘贴，装一次本地连接组件即可：
+不安装本机连接组件，也可以把评论复制为结构化 Prompt，粘到任何 AI 对话框中。
 
-- 打开「发送给 Agent」右侧的 **⌄ 下拉**：集中显示三个 Agent 的状态、**检查连接**、**复制诊断**。按提示跑固定版本的安装命令，完成任一 Agent 登录后再点「检查连接」。
-- 三个任选其一：
-  - **Codex**：安装 Codex / ChatGPT 桌面应用并登录。
-  - **Claude Code**：安装后运行 `claude auth login`。
-  - **GitHub Copilot**：本机已登录 Copilot（CLI 可选，缺失时走 SDK 自带 runtime）。
-- 组件只在你机器上跑各 Agent 的官方程序、只用你的登录态，**不存任何凭证、不读历史会话**。没连上也随时能「复制 Prompt」手动交给任意 AI。
+如果希望一键生成候选 HTML，可在 macOS 上安装本机 host（Node 20+），并登录 Codex、Claude Code 或 GitHub Copilot。host 只在你的设备上调用对应 Agent；评论和页面内容通过本机处理，用于生成候选版。
 
-> 仅支持 macOS + Chrome + Node 20.x / 22+（GitHub Copilot 另需 20.19+ / 22.12+）。详见 [连接配置文档](https://www.deuce.monster/htmlgenius/setup.html)、[Agent 说明](https://www.deuce.monster/htmlgenius/agents.html) 与 [`LOCAL_BRIDGE.md`](LOCAL_BRIDGE.md)。
+连接配置见[配置文档](https://www.deuce.monster/htmlgenius/setup.html)、[Agent 说明](https://www.deuce.monster/htmlgenius/agents.html)和[`LOCAL_BRIDGE.md`](LOCAL_BRIDGE.md)。
 
-## 最近更新
+## 数据边界
 
-> 这里只保留最近 3 条；完整版本历史见 **[RELEASE_NOTES.md](RELEASE_NOTES.md)**。
+未登录时，批注保存在浏览器本地。主动使用团队协同时，团队批注会同步到 htmlGenius 自有服务，以便成员实时查看。不会收集浏览历史，不接广告，也不使用第三方分析。
 
-### v0.9.16（2026-08-12 · 当前版本）
-- **GitHub Copilot 终于能正常生成本地候选了**：之前 Copilot 生成候选会因本地连接组件（bridge）鉴权 / 工具适配问题必然失败；本次 bridge **自动读取系统钥匙串里的 Copilot 登录凭据**（免手动填 token）并修正输出方式，Copilot 现可与 Claude Code / Codex 一样直接生成本地 HTML 候选（bridge 1.0.11）。新增运行诊断留存 + 一键 / 自动上报脱敏诊断；检查连接时 Agent 状态点转圈显示「正在连接…」；「先预览确认」标注 Copilot 不支持（仅 Claude Code / Codex 支持逐条预览）。
-
-### v0.9.15（2026-08-04）
-- 修 GitHub Copilot 生成候选必败（本地连接组件的读工具白名单漏了 Copilot 的读取工具 → 报「读取 source.html 被拒绝」，bridge 1.0.2 已修）；修 Codex 未登录却显示「已连接」（改为正确提示需登录）；候选完成提示语从易误解的「修改计划已发送」改为「候选版本已生成」。本地连接组件指针更新到 bridge 1.0.2。
-
-### v0.9.14（2026-08-02）
-- 「精准修补」的确定性编辑（Agent 只给改动点、扩展精确应用、严格限定圈选范围）现在 **Codex 也支持**（只读沙箱）；Copilot 适配已完成、真机验证后开放，暂仍走完整候选。精确编辑结果不再带绿框、直接沿用原样式；候选页改为独立文档，不再继承旧高亮、源文件评论不再误丢；Agent 下拉区分「使用中 / 已连接」。
-
-## 已知限制
-
-- **回灌需手动粘贴**：复制指令后要自己粘进 AI 对话框（用本机 Agent 闭环则不用）。
-- **远程网页的编辑是临时的**：刷新或关闭页面即丢失，无法存回原网站。
-- **候选 ≠ 接受修改**：候选版本不会自动覆盖原文件；diff / 审查 / 显式提升尚在路线图。
-- **本地文件需开权限**：在本地 HTML 文件（`file://`）上使用时，需到 `chrome://extensions` 打开 htmlGenius 的「允许访问文件网址」开关；v0.9.10 起未开会主动提示。
-- **确定性精确编辑的支持范围**：改动严格限定圈选区的「确定性编辑」（逐条预览确认）目前支持「精准修补」+ **Claude Code / Codex**；**Copilot 不支持逐条精确编辑**（会直接生成完整候选）。三种 Agent 都能生成完整候选。
+详见[隐私政策](https://www.deuce.monster/htmlgenius/privacy.html)。
 
 ## 更多
 
-- 完整版本历史（含每次更新细节）：**[RELEASE_NOTES.md](RELEASE_NOTES.md)**
-- 开发、测试、部署与架构说明：**[DEVELOPMENT.md](DEVELOPMENT.md)**
-- 官网静态源码与发布说明：[`landing/demo-2026-07/`](landing/demo-2026-07/)
-- 各版本的设计与实现计划：仅存于本地 `docs/`（审计报告 / spec / 计划等本地工作文档，已 `.gitignore`，不入库）。
+- [RELEASE_NOTES.md](RELEASE_NOTES.md)：版本历史
+- [DEVELOPMENT.md](DEVELOPMENT.md)：开发、测试与架构说明
+- [`landing/demo-2026-07/`](landing/demo-2026-07/)：官网静态源码与发布说明

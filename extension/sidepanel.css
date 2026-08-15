@@ -192,7 +192,14 @@ body {
    仍须确保编辑/评论 Tab 绝不回到布局中。 */
 body.account-view-open #tabbar,
 body.account-view-open #view-edit,
-body.account-view-open #view-comment { display: none !important; }
+body.account-view-open #view-comment,
+body.account-view-open #contract-sheet { display: none !important; }
+/* 创建编辑任务是 Side Panel 内的第三种独占内容视图，而不是覆盖整页的弹窗。
+   Header 永远保留；仅隐藏主 Tab 与编辑/评论内容，和账号/团队模式遵循同一壳层。 */
+body.contract-open #tabbar,
+body.contract-open #view-edit,
+body.contract-open #view-comment,
+body.contract-open #account-sheet { display: none !important; }
 /* v0.8 #7: 视图占满剩余高度;编辑视图内部整体滚动,评论视图改为列布局(列表滚、按钮固定) */
 .view { display: none; flex: 1; min-height: 0; overflow-y: auto; }
 .view.show { display: block; }
@@ -213,7 +220,7 @@ body.account-view-open #view-comment { display: none !important; }
 .account-back { width: 28px; height: 28px; padding: 0; background: transparent; border: 0; border-radius: 7px; color: var(--text-secondary); cursor: pointer; display: grid; place-items: center; }
 .account-back svg { width: 18px; height: 18px; display: block; }
 .account-back:hover { background: var(--bg-surface-raised); color: var(--text-primary); }
-.account-inner { flex: 1; min-height: 0; overflow-y: auto; padding-top: 14px; }
+.account-inner { flex: 1; min-width: 0; min-height: 0; max-width: 100%; overflow-x: clip; overflow-y: auto; padding-top: 14px; box-sizing: border-box; }
 /* #7: 底部操作区 —— 固定在第一屏(不被评论数量挤出);之后要加按钮直接放这个容器里 */
 .comment-actions { flex: none; padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--line-subtle); display: flex; flex-direction: column; gap: 8px; }
 
@@ -492,7 +499,8 @@ body.account-view-open #view-comment { display: none !important; }
 .sheet-sub { font-size: 11px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px; }
 
 /* v0.9.6 问题反馈浮层:窄一点,居中放二维码 + 引导文案 */
-.feedback-sheet { width: 232px; }
+.feedback-sheet { top: 54px; right: auto; left: 12px; width: 232px; }
+.feedback-sheet::before { content: ""; position: absolute; top: -7px; left: 14px; width: 12px; height: 12px; transform: rotate(45deg); background: var(--bg-overlay); border-top: 1px solid var(--line-default); border-left: 1px solid var(--line-default); pointer-events: none; }
 .feedback-close { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center; background: transparent;
   color: var(--text-muted); border: 0; border-radius: var(--r-sm); cursor: pointer; font-size: 13px; line-height: 1; }
@@ -500,7 +508,9 @@ body.account-view-open #view-comment { display: none !important; }
 .feedback-qr-box { display: flex; align-items: center; justify-content: center; margin: 2px 0 8px; }
 /* 原图 260×358(二维码 + 下方"也可小红书搜 @AI二重同学"文字兜底),按原比例满宽显示,白底保证扫得稳 */
 .feedback-qr { width: 100%; height: auto; display: block; border-radius: var(--r-md); background: #fff; border: 1px solid var(--line-subtle); }
-.feedback-scan { font-size: 11px; color: var(--text-muted); text-align: center; }
+/* 原图 260×358：保留原始二维码像素，只裁去下方文字区，避免重绘导致扫码失真。 */
+.feedback-qr-box { align-items: flex-start; aspect-ratio: 1; overflow: hidden; border-radius: var(--r-md); background: #fff; border: 1px solid var(--line-subtle); }
+.feedback-qr { border: 0; border-radius: 0; background: transparent; }
 
 /* === 协同登录控件(浮层内;第三方按钮等权二级) === */
 .collab-row { display: flex; gap: 6px; }
@@ -630,8 +640,10 @@ button {
 
 /* === v0.6.1 修改契约 Composer → v0.7.2 选择流(覆盖式 sheet;data-step=select|compose)=== */
 #contract-sheet {
-  top: 0; right: 0; left: 0; bottom: 0; width: auto; max-width: none;
-  border-radius: 0; padding: 0; z-index: 200;
+  /* 作为 body flex 的子项占用 Header 下的剩余空间，绝不 fixed 覆盖 Header 或猜测其高度。 */
+  position: static; inset: auto; width: auto; max-width: none; flex: 1; min-height: 0;
+  /* 覆盖 .sheet 的浮层皮肤：这里是主内容，不应有更亮底色、外框或投影。 */
+  background: transparent; border: 0; border-radius: 0; padding: 0; z-index: auto; box-shadow: none;
   display: none; flex-direction: column; overflow: hidden; /* 滚动交给 .contract-scroll;绝不出现横向滚动 */
 }
 #contract-sheet.show { display: flex; }
@@ -645,9 +657,11 @@ button {
 #contract-sheet[data-step="compose"] #contract-step-compose,
 #contract-sheet[data-step="comment-scope"] #contract-step-comment-scope,
 #contract-sheet[data-step="plan-review"] #contract-step-plan-review { display: flex; }
-.contract-scroll { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 14px 10px; }
-/* 固定底栏(还原 mockup:窄面板不被挤出,仅列表纵向滚动) */
-.contract-bottom { flex: none; min-width: 0; padding: 12px 14px; border-top: 1px solid var(--line-subtle); background: var(--bg-canvas); display: flex; flex-direction: column; gap: 8px; }
+.contract-scroll { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 0 10px; }
+/* 固定底栏与编辑/评论页的 action bar 同一视觉基线，不再另起一个浮层框。 */
+.contract-bottom { flex: none; min-width: 0; padding: 10px 0 0; margin-top: 10px; border-top: 1px solid var(--line-subtle); background: transparent; display: flex; flex-direction: column; gap: 8px; box-shadow: none; }
+/* Header 本身已有底部间距，任务内容不再重复增加顶部留白。 */
+.contract-scroll { padding: 0 0 10px; }
 /* 返回链接(mockup .back) */
 .contract-back { border: 0; padding: 0; margin-bottom: 12px; cursor: pointer; color: var(--brand-hover); background: transparent; font: 600 12px/1.4 var(--font-sans); text-align: left; height: auto; }
 .contract-back:hover { text-decoration: underline; }
@@ -762,6 +776,8 @@ button {
 .comment-actions .cta-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .comment-actions .cta-row #export-btn { flex: 1; min-width: 0; }
 .contract-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+/* compose 步骤标题行:与账号视图 account-header 同规范(← 图标按钮 + 标题,下边线分隔) */
+.contract-header { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 0 12px; border-bottom: 1px solid var(--line-subtle); margin-bottom: 12px; }
 .contract-head .sheet-title { margin: 0; }
 .contract-close { background: transparent; border: 0; color: var(--text-muted); font-size: 16px; width: 28px; height: 28px; padding: 0; border-radius: var(--r-sm); cursor: pointer; line-height: 1; }
 .contract-close:hover { background: rgba(255,255,255,.08); color: var(--text-primary); }
@@ -992,8 +1008,6 @@ button {
 :where(.view, #annotations, .edit-scroll, .contract-scroll, .contract-bridge-status.expanded .cbs-detail) { scrollbar-width: thin; scrollbar-color: var(--line-default) transparent; }
 :where(.view, #annotations, .edit-scroll, .contract-scroll, .contract-bridge-status.expanded .cbs-detail)::-webkit-scrollbar { width: 8px; }
 :where(.view, #annotations, .edit-scroll, .contract-scroll, .contract-bridge-status.expanded .cbs-detail)::-webkit-scrollbar-thumb { background: var(--line-default); border: 2px solid transparent; border-radius: var(--r-pill); background-clip: padding-box; }
-.contract-bottom { box-shadow: 0 -8px 18px rgba(0, 0, 0, .08); }
-[data-theme="light"] .contract-bottom { box-shadow: 0 -8px 18px rgba(24, 29, 38, .06); }
 #export-btn:hover, .card-acts button:hover, #lark-login-btn:hover, #google-login-btn:hover, #logout-btn:hover, #invite-btn:hover, .contract-secondary:hover { background: var(--bg-surface-raised); }
 
 /* Provider choice is the primary decision; connection setup shares this menu. */
@@ -1063,25 +1077,35 @@ button {
 .account-primary { background: var(--cta-bg); color: var(--on-cta); border: none; font-weight: 500; }
 .email-branch { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 /* === 账号工作区流程：按已确认 Demo 的单任务层级 === */
-.account-flow-host { padding: 0; }
-.af-page { display: flex; flex-direction: column; gap: 8px; }
+.account-flow-host { width: 100%; min-width: 0; max-width: 100%; padding: 0; box-sizing: border-box; }
+.af-page { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
 .af-eyebrow { margin: 0 0 -5px; font-size: 12px; color: var(--text-muted); }
 .af-h2 { margin: 0; font-size: 20px; font-weight: 650; line-height: 1.25; letter-spacing: -.02em; color: var(--text-primary); }
 .af-copy { margin: 0 0 10px; font-size: 12.5px; line-height: 1.55; color: var(--text-muted); }
 .af-label { margin: 2px 0 -2px; font-size: 12px; color: var(--text-muted); }
-.af-input { height: 38px; width: 100%; border: 1px solid var(--line-default); border-radius: 9px; background: var(--bg-surface-raised); color: var(--text-primary); padding: 0 10px; font: inherit; font-size: 13px; box-sizing: border-box; }
+.af-input { align-self: stretch; height: 38px; width: 100%; min-width: 0; max-width: 100%; border: 1px solid var(--line-default); border-radius: 9px; background: var(--bg-surface-raised); color: var(--text-primary); padding: 0 10px; font: inherit; font-size: 13px; box-sizing: border-box; }
 .af-input::placeholder { color: var(--text-faint); }
-.af-primary { height: 38px; width: 100%; border: 0; border-radius: 9px; background: var(--cta-bg); color: var(--on-cta); font-size: 13px; font-weight: 650; cursor: pointer; font-family: var(--font-sans); }
+/* 全局 focus-visible 使用外扩 outline；在窄 Side Panel 中它会越过内容区。
+   账号流程的输入框改为内收焦点环，视觉与键盘可访问性保留，但绝不改变控件外框尺寸。 */
+.af-input:focus,
+.af-input:focus-visible { outline: 2px solid var(--line-focus); outline-offset: -2px; border-color: var(--line-focus); box-shadow: inset 0 0 0 1px var(--brand-soft); }
+.af-primary { align-self: stretch; height: 38px; width: 100%; min-width: 0; max-width: 100%; border: 0; border-radius: 9px; background: var(--cta-bg); color: var(--on-cta); font-size: 13px; font-weight: 650; cursor: pointer; font-family: var(--font-sans); box-sizing: border-box; }
 .af-primary:hover { filter: brightness(1.06); }
 .af-primary:disabled { opacity: .55; cursor: default; }
-.af-secondary { height: 38px; width: 100%; border: 1px solid var(--line-default); border-radius: 9px; background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer; font-family: var(--font-sans); }
+.af-secondary { align-self: stretch; height: 38px; width: 100%; min-width: 0; max-width: 100%; border: 1px solid var(--line-default); border-radius: 9px; background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer; font-family: var(--font-sans); box-sizing: border-box; }
 .af-secondary:hover { background: var(--bg-surface-raised); color: var(--text-primary); }
+/* 明示同意后的便利功能：置于两种登录方式之后，明确对当前选中的登录方式生效。 */
+.af-check { display: flex; align-items: flex-start; gap: 8px; margin: 2px 1px 0; color: var(--text-muted); font-size: 11.5px; line-height: 1.45; cursor: pointer; }
+.af-check input { appearance: none; width: 16px; height: 16px; flex: 0 0 16px; margin: 0; border: 1px solid var(--line-default); border-radius: 4px; background: var(--bg-input); cursor: pointer; box-sizing: border-box; }
+.af-check input:checked { border-color: var(--brand); background: var(--brand); }
+.af-check input:checked::after { content: ""; display: block; width: 7px; height: 4px; margin: 3px 0 0 3px; border: solid var(--on-cta); border-width: 0 0 2px 2px; transform: rotate(-45deg); }
+.af-check input:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }
 .af-link { align-self: flex-start; height: auto; background: transparent; border: 0; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 0; font-family: var(--font-sans); }
 .af-link:hover { color: var(--text-primary); }
 /* 工作区卡片已删(无上传团队图标的入口,卡片没有存在意义);团队名并入首页标题。 */
-.af-list { margin-top: 4px; border-top: 1px solid var(--line-subtle); }
-/* 整行可点 + 整行悬停态:行占满内容区宽,分割线与标题栏下边线同宽同位置(不带圆角) */
-.af-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; border: 0; border-bottom: 1px solid var(--line-subtle); border-radius: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 13px 8px; font-size: 13px; cursor: pointer; font-family: var(--font-sans); }
+.af-list { width: 100%; min-width: 0; margin-top: 4px; border-top: 1px solid var(--line-subtle); box-sizing: border-box; }
+/* 操作列表在自身行内预留左右安全边距：hover 从文字左侧开始，且不会依赖越出滚动容器的绘制。 */
+.af-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--line-subtle); border-radius: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 13px 8px; font-size: 13px; cursor: pointer; font-family: var(--font-sans); }
 .af-row:hover { background: var(--bg-surface-raised); color: var(--brand-hover); }
 .af-row:last-child { border-bottom: 0; }
 .af-chev { width: 16px; height: 16px; flex: none; color: var(--text-muted); }
@@ -1090,9 +1114,14 @@ button {
 .af-fallback { display: flex; flex-direction: column; gap: 6px; margin: 0 0 6px; color: var(--text-muted); font-size: 11px; }
 .af-fallback .af-input { color: var(--text-secondary); font-size: 11px; }
 .af-note { margin: 8px 0 0; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
+.af-join-help { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; padding: 10px; border: 1px solid var(--line-subtle); border-radius: 9px; background: var(--bg-surface-raised); min-width: 0; box-sizing: border-box; }
+.af-help-label { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+.af-example-url, .af-request-copy { margin: 0; color: var(--text-secondary); font: 10.5px/1.5 var(--font-mono, ui-monospace, monospace); overflow-wrap: anywhere; word-break: break-word; }
+.af-request-copy { font-family: var(--font-sans); font-size: 11.5px; }
+.af-copy-request { margin-top: 1px; }
 .af-error { margin-top: 2px; font-size: 12px; color: var(--danger); }
 .af-status { margin-top: 2px; font-size: 12px; color: var(--brand-hover); }
-.af-choice { display: flex; align-items: center; gap: 11px; width: 100%; border: 0; border-bottom: 1px solid var(--line-subtle); border-radius: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 14px 8px; cursor: pointer; font-family: var(--font-sans); }
+.af-choice { display: flex; align-items: center; gap: 11px; width: 100%; min-width: 0; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--line-subtle); border-radius: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 14px 0; cursor: pointer; font-family: var(--font-sans); }
 .af-choice:hover { background: var(--bg-surface-raised); color: var(--brand-hover); }
 .af-choice:last-child { border-bottom: 0; }
 .af-choice-icon { width: 30px; height: 30px; flex: none; border-radius: 8px; display: grid; place-items: center; background: var(--bg-surface-raised); color: var(--brand); font-size: 15px; }
@@ -1105,6 +1134,12 @@ button {
 .af-mtext { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-primary); }
 .af-mtext small { display: block; color: var(--text-muted); font-size: 11px; margin-top: 2px; }
 .af-confirm { display: flex; gap: 8px; align-items: center; }
+.af-transfer-confirm { flex-direction: column; align-items: flex-end; gap: 1px; }
+.af-transfer-note { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.af-member-actions { display: flex; flex-direction: column; align-items: flex-end; }
+.af-member-actions .af-link { padding: 2px 0; }
+.af-transfer { color: var(--brand-hover); }
+.af-transfer:hover { color: var(--brand); }
 .account-primary:hover { filter: brightness(1.08); }
 #gen-invite-btn, #add-email-btn, #copy-invite-btn {
   background: var(--bg-surface-raised); color: var(--text-primary); border: 1px solid var(--line-default);
@@ -1120,22 +1155,13 @@ button {
 .member-remove { background: transparent; color: var(--danger); border: none; font-size: 10px; cursor: pointer; padding: 0 4px; font-family: var(--font-sans); }
 .member-remove:hover { text-decoration: underline; }
 
-/* === 诊断上报(A 一键报告 + B opt-in)=== */
-.diag-report-btn { margin-top: 10px; width: 100%; height: 30px; background: var(--bg-surface-raised); color: var(--text-secondary); border: 1px solid var(--line-default); border-radius: var(--r-sm); font-size: 11px; cursor: pointer; font-family: var(--font-sans); }
-.diag-report-btn:hover { border-color: var(--brand); }
-.diag-sheet .diag-list { max-height: 220px; overflow: auto; background: var(--bg-input); border: 1px solid var(--line-subtle); border-radius: var(--r-sm); padding: 6px; margin: 8px 0; }
-.diag-empty { padding: 14px 8px; text-align: center; color: var(--text-muted); font-size: 11.5px; }
-.pp-note { margin: 8px 0 0; padding: 7px 9px; background: var(--bg-input); border: 1px solid var(--line-subtle); border-left: 3px solid var(--brand, #6b8afd); border-radius: var(--r-sm); font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); word-break: break-word; }
-.diag-row { display: flex; align-items: flex-start; gap: 6px; padding: 5px 4px; border-bottom: 1px solid var(--line-subtle); font-size: 11px; color: var(--text-secondary); }
-.diag-row:last-child { border-bottom: 0; }
-.diag-row .diag-check { margin-top: 2px; flex: 0 0 auto; }
-.diag-oc { word-break: break-word; line-height: 1.45; }
-.diag-oc-no_change { color: var(--text-muted); }
-.diag-oc-failed { color: var(--warn, #d97706); }
-.diag-detail { margin: 0 0 6px 22px; }
-.diag-detail > summary { cursor: pointer; font-size: 10.5px; color: var(--text-muted); }
-.diag-detail > pre { max-height: 160px; overflow: auto; margin: 4px 0 0; padding: 6px; background: var(--bg-surface); border: 1px solid var(--line-subtle); border-radius: var(--r-sm); font: 10px/1.5 var(--font-mono, ui-monospace, monospace); color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; user-select: text; }
-.diag-auto-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); margin: 6px 0; }
-.diag-actions { display: flex; gap: 6px; }
-.diag-actions button { flex: 1; height: 30px; background: var(--bg-surface-raised); color: var(--text-primary); border: 1px solid var(--line-default); border-radius: var(--r-sm); font-size: 12px; cursor: pointer; font-family: var(--font-sans); }
+/* === 诊断上报：与联系作者共用同一弹层，不再打开二级弹窗。 */
+.feedback-report { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-subtle); }
+.feedback-report-title { color: var(--text-primary); font-size: 12px; font-weight: 600; }
+.diag-auto-row { display: flex; align-items: flex-start; gap: 6px; font-size: 11px; line-height: 1.45; color: var(--text-secondary); margin: 8px 0 0; }
+.diag-auto-row input { margin: 1px 0 0; }
+.diag-actions { display: flex; align-items: center; gap: 6px; }
+.diag-actions button { height: 32px; min-width: 0; padding: 0 8px; background: var(--bg-surface-raised); color: var(--text-primary); border: 1px solid var(--line-default); border-radius: var(--r-sm); font-size: 11px; line-height: 1; text-align: center; white-space: nowrap; cursor: pointer; font-family: var(--font-sans); }
+.diag-actions #diag-upload-btn { flex: 1.35; }
+.diag-actions #diag-copy-btn { flex: .65; }
 .diag-actions button:hover { border-color: var(--brand); }

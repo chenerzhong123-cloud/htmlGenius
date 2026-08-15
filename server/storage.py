@@ -117,6 +117,14 @@ def init_db(path: Path) -> None:
                 mode TEXT,
                 payload TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS sse_stats (
+                date TEXT PRIMARY KEY,
+                connects INTEGER NOT NULL DEFAULT 0,
+                disconnects INTEGER NOT NULL DEFAULT 0,
+                peak_concurrent INTEGER NOT NULL DEFAULT 0,
+                peak_per_team INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         # v0.2 迁移:versions 加 html_content 列(若旧库缺)
@@ -539,3 +547,32 @@ def get_diagnostics(diag_id: int) -> "dict | None":
     if not r:
         return None
     return {"id": r["id"], "created_at": r["created_at"], "mode": r["mode"], "payload": r["payload"]}
+
+
+def upsert_sse_stats(date: str, connects: int, disconnects: int, peak_concurrent: int, peak_per_team: int) -> None:
+    """SSE 用量日汇总(容量评估用)。内存累计绝对值整行覆盖,幂等;每天最多 ~288 次写(5min 粒度)。"""
+    c = _connect()
+    try:
+        c.execute(
+            "INSERT INTO sse_stats(date, connects, disconnects, peak_concurrent, peak_per_team, updated_at) "
+            "VALUES(?,?,?,?,?,?) ON CONFLICT(date) DO UPDATE SET "
+            "connects=excluded.connects, disconnects=excluded.disconnects, "
+            "peak_concurrent=MAX(sse_stats.peak_concurrent, excluded.peak_concurrent), "
+            "peak_per_team=MAX(sse_stats.peak_per_team, excluded.peak_per_team), "
+            "updated_at=excluded.updated_at",
+            (date, connects, disconnects, peak_concurrent, peak_per_team, _now()),
+        )
+    finally:
+        c.close()
+
+
+def list_sse_stats(limit: int = 30) -> list[dict]:
+    """最近 N 天的 SSE 用量(扩容决策数据源)。"""
+    c = _connect()
+    try:
+        rows = c.execute(
+            "SELECT * FROM sse_stats ORDER BY date DESC LIMIT ?", (int(limit),)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        c.close()

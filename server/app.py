@@ -79,6 +79,25 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def _sse_stats_flusher():
+    """SSE 用量统计(容量评估):内存计数器每 5 分钟落盘一次到 sse_stats(每天一行)。
+
+    写放大极小(288 次/天);进程重启只丢未落盘的当日增量,峰值跨重启保留(取 MAX)。
+    """
+    import contextlib
+
+    async def _flush_loop():
+        while True:
+            await asyncio.sleep(300)
+            with contextlib.suppress(Exception):  # 统计失败不影响业务
+                st = rooms.stats_snapshot()
+                storage.upsert_sse_stats(st["date"], st["connects"], st["disconnects"],
+                                         st["peak_concurrent"], st["peak_per_team"])
+
+    asyncio.create_task(_flush_loop())
+
+
 @app.middleware("http")
 async def no_cache_static(request, call_next):
     """开发期:静态文档不缓存,确保改 HTML 后 reload 拿到最新版(重定位/stale 验证依赖此)。"""
@@ -382,6 +401,10 @@ class TeamCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
 
 
+class TeamRenameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
 @app.post("/auth/teams/join")
 def team_join(payload: TeamJoinIn, session: Session = Depends(require_session)):
     """已登录用户凭邀请码加入工作区(Google/email 通用,幂等)。无效/过期 → 400。"""
@@ -409,6 +432,20 @@ def team_create(payload: TeamCreateIn, session: Session = Depends(require_sessio
             "user": {"id": session.open_id, "name": session.name}, "teams": teams_list}
 
 
+@app.patch("/auth/teams/{team_id}")
+def team_rename(team_id: str, payload: TeamRenameIn, session: Session = Depends(require_session)):
+    """仅团队 owner 可修改名称；前端入口隐藏不作为权限控制。"""
+    try:
+        name = teams.rename_team(team_id, payload.name, session.open_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can rename team")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="team not found")
+    return {"team_id": team_id, "name": name}
+
+
 @app.post("/auth/invites")
 def create_invite(session: Session = Depends(require_session)):
     """当前 session 的 team 生成邀请码(任意成员可生)。"""
@@ -431,6 +468,10 @@ class MemberByEmailIn(BaseModel):
     email: str
 
 
+class TransferOwnershipIn(BaseModel):
+    sub: str = Field(min_length=1, max_length=200)
+
+
 @app.post("/auth/teams/{team_id}/members/by-email")
 def add_member_by_email(team_id: str, payload: MemberByEmailIn, session: Session = Depends(require_session)):
     """owner 按邮箱直接加人:查已注册用户(user_id) → add_membership(幂等)。
@@ -447,6 +488,18 @@ def add_member_by_email(team_id: str, payload: MemberByEmailIn, session: Session
         raise HTTPException(status_code=400, detail="不能添加自己")
     teams.add_membership(u["user_id"], team_id)  # INSERT OR IGNORE → 已是成员则幂等
     return {"ok": True, "sub": u["user_id"], "name": u["name"]}
+
+
+@app.post("/auth/teams/{team_id}/transfer-ownership")
+def transfer_team_ownership(team_id: str, payload: TransferOwnershipIn, session: Session = Depends(require_session)):
+    """owner 将所有权转给当前成员；原 owner 自动降为 member。"""
+    try:
+        teams.transfer_ownership(team_id, payload.sub, session.open_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can transfer ownership")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "team_id": team_id, "owner_sub": payload.sub}
 
 
 @app.delete("/auth/teams/{team_id}/members/{sub}")
@@ -484,7 +537,8 @@ def submit_diagnostics(payload: dict):
         raise HTTPException(status_code=413, detail="diagnostics payload too large")
     mode = str((payload.get("mode") if isinstance(payload, dict) else "") or "manual")[:16]
     diag_id = storage.save_diagnostics(raw, mode)
-    return {"ok": True, "id": diag_id}
+    # 顺带返回 SSE 实时并发(客户端忽略也不影响),远程排查连接水位用。
+    return {"ok": True, "id": diag_id, "sse": rooms.stats_snapshot()}
 
 
 # === 文档 / 版本 (BE-2:全部需 session 鉴权;HTML 响应加严格 CSP 防存储型 XSS) ===

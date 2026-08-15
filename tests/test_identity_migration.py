@@ -79,5 +79,5 @@ def test_teams_work_after_migration(tmp_path, monkeypatch):
     _old_schema_db(db)
     storage.init_db(db)
     # 老 Google 用户迁移后仍能查到自己的团队
-    assert teams.user_teams("g_sub_1") == [{"team_id": "team_t1", "name": "T1"}]
+    assert teams.user_teams("g_sub_1") == [{"team_id": "team_t1", "name": "T1", "role": "owner"}]
     assert teams.member_role("g_sub_1", "team_t1") == "owner"

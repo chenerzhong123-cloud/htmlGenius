@@ -6,27 +6,39 @@
   const { describe, anchor } = window;
   console.log("[hg] cs loaded: Storage=", typeof window.Storage, "RemoteStore=", typeof window.RemoteStore, "Sync=", typeof window.Sync);
 
-  // === 协同 sync/mode:读 chrome.storage.sync,mode==="synced" 才接入后端 ===
-  // 无配置或 mode 为 local/unset → 走 LocalStore(零回归)。
+  // === 协同 sync/mode:账号会话只读 chrome.storage.local ===
+  // token、身份、团队必须在同一台设备上成组读取；不能把 token 放 local、身份放 sync，
+  // 否则两台设备登录不同账号时会用 A 的身份显示、B 的 token 发请求。
   let _cfg = { mode: "local" };
   let _sync = null;
   // cfg 读取异步;协同模式下保存批注需等 _cfg.session_token 就绪(RemoteStore 用它做 Authorization)。
   const cfgReady = new Promise((resolve) => {
-    if (chrome.storage && chrome.storage.sync) {
-      // SUP-5:session_token 在 storage.local(每设备独立),其余在 sync。
-      chrome.storage.sync.get(["mode", "backend", "user", "team_id"], (c) => {
-        chrome.storage.local.get(["session_token"], (l) => {
-          _cfg = Object.assign({}, _cfg, c || {}, l || {});
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(["mode", "backend", "user", "team_id", "session_token"], (l) => {
+          const local = l || {};
+          // backend 烤在 config.js(已随本脚本注入页面);历史版本曾把空串写进 storage,这里始终兜底修复。
+          const defaultBackend = (window.HG_CONFIG && window.HG_CONFIG.backend) || "";
+          if (!local.backend && defaultBackend) {
+            local.backend = defaultBackend;
+            chrome.storage.local.set({ backend: local.backend });
+          }
+          // 旧版本仅把 session_token 放本地。安全迁移只补本设备模式,绝不从 sync 恢复 user/team。
+          if (!local.mode && local.session_token) {
+            local.mode = "synced";
+            chrome.storage.local.set({ mode: local.mode });
+          }
+          _cfg = Object.assign({}, _cfg, local);
           console.log("[hg] cfg:", JSON.stringify({mode:_cfg.mode, backend:_cfg.backend, hasToken:!!_cfg.session_token, hasUser:!!_cfg.user}));
           if (_cfg.mode === "synced") {
             Storage.configure(_cfg); // 切到 RemoteStore
-            startSync();
+            // SSE 省流:仅可见页签保持实时连接;后台页签不连(切回时 onopen 全量对账补齐)。
+            if (document.visibilityState === "visible") startSync();
+            else console.log("[hg] SSE deferred: tab hidden at load");
             console.log("[hg] switched to RemoteStore(协同)");
           } else {
             console.log("[hg] staying LocalStore(本地)—— storage 里 mode 不是 synced");
           }
           resolve(_cfg);
-        });
       });
     } else {
       resolve(_cfg);
@@ -73,6 +85,22 @@
   }
 
   window.addEventListener("beforeunload", () => { if (_sync) _sync.stop(); });
+
+  // SSE 省流(v0.9.17):SSE 连接按页签可见性管理,避免几十个后台页签各占一条长连接。
+  // 隐藏超 60s 才断(快速切换不抖动);重新可见即重连,onopen 的全量对账会自动补齐断开期间的 delta。
+  let _sseIdleTimer = null;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      if (_sseIdleTimer) { clearTimeout(_sseIdleTimer); _sseIdleTimer = null; }
+      if (_cfg.mode === "synced" && !_sync) startSync();
+    } else {
+      if (_sseIdleTimer) clearTimeout(_sseIdleTimer);
+      _sseIdleTimer = setTimeout(() => {
+        _sseIdleTimer = null;
+        if (_sync) { try { _sync.stop(); } catch (e) {} _sync = null; broadcastUpdate(); }
+      }, 60000);
+    }
+  });
 
 
   // join 链接页:路径 /join 带 ?code → 通知 sidepanel 预填邀请码
@@ -675,15 +703,16 @@
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === "team-changed") {
       // 团队切换:重读 storage(新 session_token/team_id)→ 协同页整页重载,以新团队身份重载批注+SSE。
-      chrome.storage.sync.get(["mode"], (c) => {
+      chrome.storage.local.get(["mode"], (c) => {
         if (c && c.mode === "synced") { try { location.reload(); } catch (e) {} }
         try { sendResponse({ ok: true }); } catch (e) {}
       });
       return true;
     }
     if (msg.type === "get-annotations") {
-      getArtifactState().then((artifact_state) => sendResponse({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing, artifact_state }))
-        .catch(() => sendResponse({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing, artifact_state: artifactStateSnapshot() }));
+      const sseState = () => ({ synced: _cfg.mode === "synced", sse_live: !!_sync });
+      getArtifactState().then((artifact_state) => sendResponse(Object.assign({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing, artifact_state }, sseState())))
+        .catch(() => sendResponse(Object.assign({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing, artifact_state: artifactStateSnapshot() }, sseState())));
       return true;
     } else if (msg.type === "scroll-to") {
       const ann = (window.__hgAnnotations || []).find((a) => a.id === msg.id);
@@ -849,7 +878,7 @@
       // 复用父批注的 selector 上下文(回复无独立选区)
       const parent = (window.__hgAnnotations || []).find((a) => a.id === msg.parentId);
       const sel = (parent && parent.selector) || { type: "TextQuoteSelector", exact: (parent && parent.quote) || "" };
-      // Fix #4: 等 _cfg.user 就绪,保证 X-User-Id 正确 → author.id 与 sidepanel 一致。
+      // 作者和团队均由本机 session token 在后端注入；只有写入及全量刷新都成功才确认给面板。
       cfgReady.then(() => Storage.getDocumentId()).then((docId) =>
         Storage.saveAnnotation({
           document_id: docId,
@@ -858,8 +887,11 @@
           body: { comment: msg.comment, action: "rewrite", instruction: "" },
           parent_id: msg.parentId,
         })
-      ).then(() => loadAnnotations());
-      sendResponse({ ok: true });
+      ).then(() => loadAnnotations()).then(
+        () => sendResponse({ ok: true }),
+        (error) => sendResponse({ ok: false, error: String(error && error.message || error) })
+      );
+      return true;
     } else if (msg.type === "commit-comment") {
       // 来自 sidepanel 草稿块的提交:用 start-comment 时捕获的 selector + 用户输入的评论落库。
       cfgReady.then(() => Storage.getDocumentId()).then((docId) =>
@@ -870,8 +902,11 @@
           body: { comment: msg.comment, action: "rewrite", instruction: "" },
           author: _cfg.user || { id: "u_self", name: t("author.fallback") },
         })
-      ).then(() => loadAnnotations());
-      sendResponse({ ok: true });
+      ).then(() => loadAnnotations()).then(
+        () => sendResponse({ ok: true }),
+        (error) => sendResponse({ ok: false, error: String(error && error.message || error) })
+      );
+      return true;
     } else if (msg.type === "delete-annotation") {
       Storage.deleteAnnotation(msg.id).then((ok) => {
         sendResponse(ok ? { ok: true } : { forbidden: true });
@@ -890,7 +925,8 @@
   });
 
   function broadcastUpdate() {
-    chrome.runtime.sendMessage({ type: "annotations-updated" }).catch(() => {});
+    // SSE 断开/重连会改变实时状态 → 一并带上,sidepanel 据此显隐「实时同步已暂停」提示。
+    chrome.runtime.sendMessage({ type: "annotations-updated", sse_live: !!_sync, synced: _cfg.mode === "synced" }).catch(() => {});
   }
 
   // #5: 与侧边栏的长连接 —— 侧边栏关闭(页面销毁)→ port 断开 → 失活(比 pagehide+异步 query 可靠)

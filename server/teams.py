@@ -134,13 +134,13 @@ def user_teams(sub: str) -> "list[dict]":
     c = _connect()
     try:
         rows = c.execute(
-            "SELECT t.team_id, t.name FROM teams t JOIN memberships m ON t.team_id=m.team_id "
+            "SELECT t.team_id, t.name, m.role FROM teams t JOIN memberships m ON t.team_id=m.team_id "
             "WHERE m.user_id=? ORDER BY m.joined_at DESC",
             (sub,),
         ).fetchall()
     finally:
         c.close()
-    return [{"team_id": r["team_id"], "name": r["name"]} for r in rows]
+    return [{"team_id": r["team_id"], "name": r["name"], "role": r["role"]} for r in rows]
 
 
 def is_member(sub: str, team_id: str) -> bool:
@@ -237,6 +237,59 @@ def member_role(sub: str, team_id: str) -> "str | None":
     finally:
         c.close()
     return r["role"] if r else None
+
+
+def rename_team(team_id: str, name: str, actor_sub: str) -> str:
+    """owner 修改团队名。权限判断和写入放在同一事务，前端隐藏入口不是权限边界。"""
+    value = (name or "").strip()
+    if not value:
+        raise ValueError("team name required")
+    c = _connect()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            row = c.execute(
+                "SELECT role FROM memberships WHERE user_id=? AND team_id=?", (actor_sub, team_id)
+            ).fetchone()
+            if row is None or row["role"] != "owner":
+                raise PermissionError("only owner can rename team")
+            if c.execute("UPDATE teams SET name=? WHERE team_id=?", (value, team_id)).rowcount != 1:
+                raise KeyError("team not found")
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+    finally:
+        c.close()
+    return value
+
+
+def transfer_ownership(team_id: str, target_sub: str, actor_sub: str) -> None:
+    """owner 将团队所有权转给现有成员；原 owner 在同一事务内降为 member。"""
+    if actor_sub == target_sub:
+        raise ValueError("cannot transfer ownership to self")
+    c = _connect()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            actor = c.execute(
+                "SELECT role FROM memberships WHERE user_id=? AND team_id=?", (actor_sub, team_id)
+            ).fetchone()
+            if actor is None or actor["role"] != "owner":
+                raise PermissionError("only owner can transfer ownership")
+            target = c.execute(
+                "SELECT 1 FROM memberships WHERE user_id=? AND team_id=?", (target_sub, team_id)
+            ).fetchone()
+            if target is None:
+                raise ValueError("target must be a team member")
+            c.execute("UPDATE memberships SET role='member' WHERE user_id=? AND team_id=?", (actor_sub, team_id))
+            c.execute("UPDATE memberships SET role='owner' WHERE user_id=? AND team_id=?", (target_sub, team_id))
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+    finally:
+        c.close()
 
 
 def team_members(team_id: str) -> "list[dict]":
