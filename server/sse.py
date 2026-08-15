@@ -26,12 +26,23 @@ class TooManyConnections(Exception):
     """SSE 并发订阅超限(单 team 或全局)。端点层捕获后返 429。"""
 
 
+def _today() -> str:
+    """本地日期(YYYY-MM-DD)。SSE 统计按天分桶,供容量评估。"""
+    import datetime as _dt
+
+    return _dt.date.today().isoformat()
+
+
 class RoomManager:
     def __init__(self) -> None:
         self._queues: dict[tuple[str, str], set[asyncio.Queue]] = defaultdict(set)
         # BE-4: 连接计数。_total 全局;_per_team 按 team_id。sum(_per_team) == _total。
         self._total = 0
         self._per_team: dict[str, int] = defaultdict(int)
+        # 容量观测(2026-08-15):内存 O(1) 计数器,按天分桶,app 层定期落盘到 sse_stats 单表。
+        # 连接事件计数是累计值(重启丢当日未落盘增量);峰值是当天观测到的最大并发。
+        self._stats = {"date": _today(), "connects": 0, "disconnects": 0,
+                       "peak_concurrent": 0, "peak_per_team": 0}
 
     @property
     def total(self) -> int:
@@ -56,6 +67,8 @@ class RoomManager:
         self._queues[(team_id, doc_id)].add(q)
         self._total += 1
         self._per_team[team_id] += 1
+        self._bump_stats()
+        self._stats["connects"] += 1
         return q
 
     def unsubscribe(self, team_id: str, doc_id: str, q: asyncio.Queue) -> None:
@@ -77,6 +90,24 @@ class RoomManager:
                 self._per_team[team_id] -= 1
             else:
                 self._per_team.pop(team_id, None)
+            self._bump_stats()
+            self._stats["disconnects"] += 1
+
+    def _bump_stats(self) -> None:
+        """跨天滚动新桶;并维护当天并发/单团队峰值(扩容决策的核心指标)。"""
+        today = _today()
+        if self._stats["date"] != today:
+            self._stats = {"date": today, "connects": 0, "disconnects": 0,
+                           "peak_concurrent": 0, "peak_per_team": 0}
+        self._stats["peak_concurrent"] = max(self._stats["peak_concurrent"], self._total)
+        if self._per_team:
+            self._stats["peak_per_team"] = max(self._stats["peak_per_team"], max(self._per_team.values()))
+
+    def stats_snapshot(self) -> dict:
+        """当前统计桶的拷贝(含实时并发),供落盘与 diagnostics 上报。"""
+        snap = dict(self._stats)
+        snap["current_concurrent"] = self._total
+        return snap
 
     async def broadcast(self, team_id: str, doc_id: str, event: str, data: dict) -> None:
         """向房间内所有订阅者投递一条消息。list() 快照防迭代中变更。"""

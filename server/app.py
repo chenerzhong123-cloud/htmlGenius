@@ -9,9 +9,9 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from . import google, lark, sessions, storage, teams
+from . import email_auth, google, lark, sessions, storage, teams
 from .envutil import is_dev_env
 from .auth import (
     Session,
@@ -77,6 +77,25 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.on_event("startup")
+async def _sse_stats_flusher():
+    """SSE 用量统计(容量评估):内存计数器每 5 分钟落盘一次到 sse_stats(每天一行)。
+
+    写放大极小(288 次/天);进程重启只丢未落盘的当日增量,峰值跨重启保留(取 MAX)。
+    """
+    import contextlib
+
+    async def _flush_loop():
+        while True:
+            await asyncio.sleep(300)
+            with contextlib.suppress(Exception):  # 统计失败不影响业务
+                st = rooms.stats_snapshot()
+                storage.upsert_sse_stats(st["date"], st["connects"], st["disconnects"],
+                                         st["peak_concurrent"], st["peak_per_team"])
+
+    asyncio.create_task(_flush_loop())
 
 
 @app.middleware("http")
@@ -274,6 +293,82 @@ def auth_google_session(payload: GoogleSessionIn):
     }
 
 
+# === 邮箱 + 密码登录(带邮箱验证码;与 Google/飞书 并存的第三个 provider)===
+
+
+class EmailRegisterIn(BaseModel):
+    email: str = Field(max_length=200)
+    password: str = Field(min_length=8, max_length=256)
+    name: Optional[str] = Field(None, max_length=100)
+
+
+class EmailVerifyIn(BaseModel):
+    email: str = Field(max_length=200)
+    code: str = Field(min_length=6, max_length=6)
+    invite_code: Optional[str] = Field(None, max_length=64)
+    team_name: Optional[str] = Field(None, max_length=100)
+
+
+class EmailLoginIn(BaseModel):
+    email: str = Field(max_length=200)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class EmailResendIn(BaseModel):
+    email: str = Field(max_length=200)
+
+
+@app.post("/auth/email/register")
+def email_register(payload: EmailRegisterIn):
+    """注册:校验 → 生成验证码 → 发邮件(未配 HG_SMTP_HOST 走日志模式)。"""
+    try:
+        email_auth.start_registration(payload.email, payload.password, payload.name)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    return {"verify_required": True}
+
+
+@app.post("/auth/email/verify")
+def email_verify(payload: EmailVerifyIn):
+    """校验验证码 → 建用户 → team 归属(邀请码加入 / 新建 / 默认)→ 发 session。"""
+    try:
+        return email_auth.verify(payload.email, payload.code, payload.invite_code, payload.team_name)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+
+
+@app.post("/auth/email/login")
+def email_login(payload: EmailLoginIn):
+    """邮箱+密码登录。失败不区分"邮箱不存在 / 密码错误"。"""
+    try:
+        return email_auth.login(payload.email, payload.password)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+
+
+@app.post("/auth/email/resend")
+def email_resend(payload: EmailResendIn):
+    """重发验证码(受 60s 冷却限制)。"""
+    try:
+        email_auth.resend(payload.email)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    return {"verify_required": True}
+
+
+class EmailProbeIn(BaseModel):
+    email: str = Field(max_length=200)
+
+
+@app.post("/auth/email/probe")
+def email_probe(payload: EmailProbeIn):
+    """探测邮箱是否已注册(登录/注册分支用;暴露账号是否存在,已知权衡)。"""
+    try:
+        return email_auth.probe(payload.email)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+
+
 class SwitchTeamIn(BaseModel):
     team_id: str
 
@@ -298,6 +393,59 @@ def switch_team(payload: SwitchTeamIn, session: Session = Depends(require_sessio
     }
 
 
+class TeamJoinIn(BaseModel):
+    invite_code: str = Field(min_length=1, max_length=64)
+
+
+class TeamCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class TeamRenameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+@app.post("/auth/teams/join")
+def team_join(payload: TeamJoinIn, session: Session = Depends(require_session)):
+    """已登录用户凭邀请码加入工作区(Google/email 通用,幂等)。无效/过期 → 400。"""
+    team_id = teams.join_team(payload.invite_code, session.open_id)
+    if not team_id:
+        raise HTTPException(status_code=400, detail="邀请码无效或已过期")
+    teams_list = teams.user_teams(session.open_id)
+    team_name = next((t["name"] for t in teams_list if t["team_id"] == team_id), "")
+    token = sessions.create_session(session.open_id, session.name, team_id)
+    return {"token": token, "team_id": team_id, "team_name": team_name,
+            "user": {"id": session.open_id, "name": session.name}, "teams": teams_list}
+
+
+@app.post("/auth/teams", status_code=201)
+def team_create(payload: TeamCreateIn, session: Session = Depends(require_session)):
+    """已登录用户新建工作区(Google/email 通用)。超 HG_MAX_TEAMS_PER_USER → 409。"""
+    try:
+        team_id = teams.create_team(payload.name, session.open_id)
+    except teams.TeamLimitExceeded as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    teams_list = teams.user_teams(session.open_id)
+    token = sessions.create_session(session.open_id, session.name, team_id)
+    return {"token": token, "team_id": team_id,
+            "team_name": payload.name or "未命名团队",
+            "user": {"id": session.open_id, "name": session.name}, "teams": teams_list}
+
+
+@app.patch("/auth/teams/{team_id}")
+def team_rename(team_id: str, payload: TeamRenameIn, session: Session = Depends(require_session)):
+    """仅团队 owner 可修改名称；前端入口隐藏不作为权限控制。"""
+    try:
+        name = teams.rename_team(team_id, payload.name, session.open_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can rename team")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="team not found")
+    return {"team_id": team_id, "name": name}
+
+
 @app.post("/auth/invites")
 def create_invite(session: Session = Depends(require_session)):
     """当前 session 的 team 生成邀请码(任意成员可生)。"""
@@ -320,9 +468,13 @@ class MemberByEmailIn(BaseModel):
     email: str
 
 
+class TransferOwnershipIn(BaseModel):
+    sub: str = Field(min_length=1, max_length=200)
+
+
 @app.post("/auth/teams/{team_id}/members/by-email")
 def add_member_by_email(team_id: str, payload: MemberByEmailIn, session: Session = Depends(require_session)):
-    """owner 按邮箱直接加人:查已注册用户(google_sub) → add_membership(幂等)。
+    """owner 按邮箱直接加人:查已注册用户(user_id) → add_membership(幂等)。
     比"分享邀请码"更强的动作(对方无需同意即入团),故限 owner。非 owner → 403;未注册 → 404。"""
     if teams.member_role(session.open_id, team_id) != "owner":
         raise HTTPException(status_code=403, detail="only owner can add members by email")
@@ -332,10 +484,22 @@ def add_member_by_email(team_id: str, payload: MemberByEmailIn, session: Session
     u = teams.user_by_email(email)
     if not u:
         raise HTTPException(status_code=404, detail="用户尚未用该 Google 账号登录过本工具，请让对方先登录一次")
-    if u["google_sub"] == session.open_id:
+    if u["user_id"] == session.open_id:
         raise HTTPException(status_code=400, detail="不能添加自己")
-    teams.add_membership(u["google_sub"], team_id)  # INSERT OR IGNORE → 已是成员则幂等
-    return {"ok": True, "sub": u["google_sub"], "name": u["name"]}
+    teams.add_membership(u["user_id"], team_id)  # INSERT OR IGNORE → 已是成员则幂等
+    return {"ok": True, "sub": u["user_id"], "name": u["name"]}
+
+
+@app.post("/auth/teams/{team_id}/transfer-ownership")
+def transfer_team_ownership(team_id: str, payload: TransferOwnershipIn, session: Session = Depends(require_session)):
+    """owner 将所有权转给当前成员；原 owner 自动降为 member。"""
+    try:
+        teams.transfer_ownership(team_id, payload.sub, session.open_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="only owner can transfer ownership")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "team_id": team_id, "owner_sub": payload.sub}
 
 
 @app.delete("/auth/teams/{team_id}/members/{sub}")
@@ -373,7 +537,8 @@ def submit_diagnostics(payload: dict):
         raise HTTPException(status_code=413, detail="diagnostics payload too large")
     mode = str((payload.get("mode") if isinstance(payload, dict) else "") or "manual")[:16]
     diag_id = storage.save_diagnostics(raw, mode)
-    return {"ok": True, "id": diag_id}
+    # 顺带返回 SSE 实时并发(客户端忽略也不影响),远程排查连接水位用。
+    return {"ok": True, "id": diag_id, "sse": rooms.stats_snapshot()}
 
 
 # === 文档 / 版本 (BE-2:全部需 session 鉴权;HTML 响应加严格 CSP 防存储型 XSS) ===

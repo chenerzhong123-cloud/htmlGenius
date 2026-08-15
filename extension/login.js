@@ -99,5 +99,45 @@ window.Login = (function () {
     return { token: sj.token, user: sj.user, team_id: sj.team_id, teams: j.teams };
   }
 
-  return { start: start, googleStart: googleStart, parseCallbackUrl: parseCallbackUrl, buildCallbackBody: buildCallbackBody };
+  // 邮箱 + 密码登录(带邮箱验证码)。backend 由调用方传入。
+  async function emailRegister(backend, email, password, name) {
+    var body = { email: email, password: password };
+    if (name) body.name = name;
+    var r = await fetch(backend + "/auth/email/register", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    var j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw new Error((j && j.detail) || ("register failed " + r.status));
+    return j;
+  }
+  async function emailVerify(backend, email, code, inviteCode, teamName) {
+    var body = { email: email, code: code };
+    if (inviteCode) body.invite_code = inviteCode;
+    if (teamName) body.team_name = teamName;
+    var r = await fetch(backend + "/auth/email/verify", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    var j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw new Error((j && j.detail) || ("verify failed " + r.status));
+    return j;
+  }
+  async function emailLogin(backend, email, password) {
+    var r = await fetch(backend + "/auth/email/login", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email, password: password }),
+    });
+    var j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw new Error((j && j.detail) || ("login failed " + r.status));
+    return j;
+  }
+
+  async function emailProbe(backend, email) {
+    var r = await fetch(backend + "/auth/email/probe", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email }),
+    });
+    var j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw new Error((j && j.detail) || ("probe failed " + r.status));
+    return j;
+  }
+
+  return { start: start, googleStart: googleStart, emailRegister: emailRegister, emailVerify: emailVerify, emailLogin: emailLogin, emailProbe: emailProbe, parseCallbackUrl: parseCallbackUrl, buildCallbackBody: buildCallbackBody };
 })();

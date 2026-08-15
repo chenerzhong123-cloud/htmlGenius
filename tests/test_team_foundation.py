@@ -144,6 +144,30 @@ def test_remove_member_owner_only_and_not_self(tmp_path):
     assert teams.member_role("g_2", tid) is None
 
 
+def test_rename_team_owner_only_and_trimmed(tmp_path):
+    _init(tmp_path)
+    tid = teams.create_team("Before", "g_owner")
+    teams.redeem_invite(teams.create_invite(tid, "g_owner"), "g_member")
+    with pytest.raises(PermissionError):
+        teams.rename_team(tid, "After", "g_member")
+    assert teams.rename_team(tid, "  After  ", "g_owner") == "After"
+    assert next(t for t in teams.user_teams("g_owner") if t["team_id"] == tid)["name"] == "After"
+    assert next(t for t in teams.user_teams("g_owner") if t["team_id"] == tid)["role"] == "owner"
+
+
+def test_transfer_ownership_is_owner_only_and_atomic_role_swap(tmp_path):
+    _init(tmp_path)
+    tid = teams.create_team("T", "g_owner")
+    teams.redeem_invite(teams.create_invite(tid, "g_owner"), "g_member")
+    with pytest.raises(PermissionError):
+        teams.transfer_ownership(tid, "g_owner", "g_member")
+    with pytest.raises(ValueError):
+        teams.transfer_ownership(tid, "g_missing", "g_owner")
+    teams.transfer_ownership(tid, "g_member", "g_owner")
+    assert teams.member_role("g_owner", tid) == "member"
+    assert teams.member_role("g_member", tid) == "owner"
+
+
 def test_dissolve_owner_only_and_cascades(tmp_path):
     _init(tmp_path)
     tid = teams.create_team("T", "g_owner")
@@ -260,6 +284,35 @@ def test_http_team_governance(tmp_path, monkeypatch):
     # owner 解散 → 200
     assert client.delete(f"/auth/teams/{tid}", headers=owner).status_code == 200
     assert teams.team_members(tid) == []
+
+
+def test_http_rename_team_owner_only(tmp_path, monkeypatch):
+    _init(tmp_path)
+    monkeypatch.setenv("HG_AUTH_ALLOW_DEV", "1")
+    monkeypatch.setenv("HG_ENV", "test")
+    tid = teams.create_team("Before", "g_owner")
+    teams.redeem_invite(teams.create_invite(tid, "g_owner"), "g_member")
+    owner = {"Authorization": f"Bearer {_dev_login(tid, open_id='g_owner', name='owner')}"}
+    member = {"Authorization": f"Bearer {_dev_login(tid, open_id='g_member', name='member')}"}
+    assert client.patch(f"/auth/teams/{tid}", json={"name": "After"}, headers=member).status_code == 403
+    r = client.patch(f"/auth/teams/{tid}", json={"name": "After"}, headers=owner)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"team_id": tid, "name": "After"}
+
+
+def test_http_transfer_ownership_owner_only(tmp_path, monkeypatch):
+    _init(tmp_path)
+    monkeypatch.setenv("HG_AUTH_ALLOW_DEV", "1")
+    monkeypatch.setenv("HG_ENV", "test")
+    tid = teams.create_team("T", "g_owner")
+    teams.redeem_invite(teams.create_invite(tid, "g_owner"), "g_member")
+    owner = {"Authorization": f"Bearer {_dev_login(tid, open_id='g_owner', name='owner')}"}
+    member = {"Authorization": f"Bearer {_dev_login(tid, open_id='g_member', name='member')}"}
+    assert client.post(f"/auth/teams/{tid}/transfer-ownership", json={"sub": "g_owner"}, headers=member).status_code == 403
+    r = client.post(f"/auth/teams/{tid}/transfer-ownership", json={"sub": "g_member"}, headers=owner)
+    assert r.status_code == 200, r.text
+    assert teams.member_role("g_owner", tid) == "member"
+    assert teams.member_role("g_member", tid) == "owner"
 
 
 # === e2e：注册 → 邀请 → 加入 → 协作 ===
