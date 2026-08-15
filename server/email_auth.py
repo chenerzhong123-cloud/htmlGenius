@@ -2,7 +2,8 @@
 
 email_verifications 表暂存待激活注册(只存哈希,绝不存明文码);激活后落 users 表
 (provider='email')并复用 sessions.create_session 发令牌。team 归属:邀请码加入 /
-建新团队 / 默认个人团队。
+建新团队;两者皆无 → 发无团队会话(team_id 空),客户端引导进「加入或创建工作区」,
+绝不默认替用户建队。
 """
 from __future__ import annotations
 
@@ -72,7 +73,8 @@ def start_registration(email: str, password: str, name: str | None) -> None:
     mailer.send_verification_code(email, code)
 
 
-def _resolve_team(user_id: str, invite_code: str | None, team_name: str | None) -> str:
+def _resolve_team(user_id: str, invite_code: str | None, team_name: str | None) -> "str | None":
+    """注册后的团队归属:邀请码加入 / 指定名建队;皆无 → None(无团队,客户端引导加入或创建)。"""
     if invite_code:
         tid = teams.redeem_invite(invite_code, user_id)
         if tid:
@@ -80,7 +82,7 @@ def _resolve_team(user_id: str, invite_code: str | None, team_name: str | None) 
         raise EmailAuthError(400, "邀请码无效或已过期")
     if team_name:
         return teams.create_team(team_name, user_id)
-    return teams.create_team("我的团队", user_id)
+    return None
 
 
 def verify(email: str, code: str, invite_code: str | None = None, team_name: str | None = None) -> dict:
@@ -110,7 +112,7 @@ def verify(email: str, code: str, invite_code: str | None = None, team_name: str
     finally:
         c.close()
     user_id = teams.create_email_user(email, name, password_hash)
-    team_id = _resolve_team(user_id, invite_code, team_name)
+    team_id = _resolve_team(user_id, invite_code, team_name) or ""
     display = name or email
     token = sessions.create_session(user_id, display, team_id)
     return {"token": token, "user": {"id": user_id, "name": display},
@@ -118,13 +120,13 @@ def verify(email: str, code: str, invite_code: str | None = None, team_name: str
 
 
 def login(email: str, password: str) -> dict:
-    """邮箱+密码 → 校验(不区分"不存在/密码错")→ 取/建团队 → 发 session。"""
+    """邮箱+密码 → 校验(不区分"不存在/密码错")→ 取首个团队(无则发无团队会话)。"""
     email = _validate_email(email)
     u = teams.get_email_user(email)
     if not u or not u.get("password_hash") or not security.verify_secret(password, u["password_hash"]):
         raise EmailAuthError(401, "邮箱或密码错误")
     teams_list = teams.user_teams(u["user_id"])
-    team_id = teams_list[0]["team_id"] if teams_list else teams.create_team("我的团队", u["user_id"])
+    team_id = teams_list[0]["team_id"] if teams_list else ""
     token = sessions.create_session(u["user_id"], u["name"], team_id)
     return {"token": token, "user": {"id": u["user_id"], "name": u["name"]},
             "team_id": team_id, "teams": teams.user_teams(u["user_id"])}

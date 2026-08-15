@@ -182,6 +182,17 @@ body {
 }
 
 /* === 视图切换 === */
+/* 全局兜底:任何 [hidden] 元素一律 display:none。
+   原因 —— body 是 flex 列,且 tabbar、主视图和 account sheet 等容器各自声明了
+   display:flex,其作者层规则优先级高于 UA 默认 [hidden]{display:none},
+   导致 JS 设置 element.hidden=true 后元素仍可见(详见 v0.9.8 .edit-tools[hidden] 注释)。
+   此兜底确保 hidden 属性在任何声明了 display 的元素上都能生效。 */
+[hidden] { display: none !important; }
+/* 账号/工作区是独占整面板视图。不能只依赖 hidden：异步刷新或其它视图状态变化时，
+   仍须确保编辑/评论 Tab 绝不回到布局中。 */
+body.account-view-open #tabbar,
+body.account-view-open #view-edit,
+body.account-view-open #view-comment { display: none !important; }
 /* v0.8 #7: 视图占满剩余高度;编辑视图内部整体滚动,评论视图改为列布局(列表滚、按钮固定) */
 .view { display: none; flex: 1; min-height: 0; overflow-y: auto; }
 .view.show { display: block; }
@@ -192,13 +203,17 @@ body {
 #view-edit.show { display: flex; flex-direction: column; overflow: hidden; }
 .edit-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 /* 账号视图(整面板;点头像进入,非小浮层) */
+/* 复用 body 的 16px padding(与编辑/评论 Tab 一致),不单独 max-width 居中。 */
 #account-sheet.account-view { padding: 0; }
 #account-sheet.account-view.show { display: flex; flex-direction: column; overflow: hidden; }
-.account-header { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line-subtle); }
-.account-back { background: transparent; border: none; color: var(--text-secondary); font-size: 24px; line-height: 1; cursor: pointer; padding: 0 8px; border-radius: var(--r-sm); font-family: var(--font-sans); height: 30px; }
-.account-back:hover { background: rgba(255,255,255,.07); color: var(--text-primary); }
-.account-header-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-.account-inner { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; max-width: 420px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+/* 稳定标题栏:返回按钮居左(导航惯例:返回指向前一级/退出),标题跟在其后。
+   遵循与 #header 一致的下边线分隔规范。 */
+.account-header { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 0 12px; border-bottom: 1px solid var(--line-subtle); }
+.account-header-title { font-size: 14px; font-weight: 650; color: var(--text-primary); }
+.account-back { width: 28px; height: 28px; padding: 0; background: transparent; border: 0; border-radius: 7px; color: var(--text-secondary); cursor: pointer; display: grid; place-items: center; }
+.account-back svg { width: 18px; height: 18px; display: block; }
+.account-back:hover { background: var(--bg-surface-raised); color: var(--text-primary); }
+.account-inner { flex: 1; min-height: 0; overflow-y: auto; padding-top: 14px; }
 /* #7: 底部操作区 —— 固定在第一屏(不被评论数量挤出);之后要加按钮直接放这个容器里 */
 .comment-actions { flex: none; padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--line-subtle); display: flex; flex-direction: column; gap: 8px; }
 
@@ -217,7 +232,7 @@ body {
 .artifact-reload-btn:hover { border-color: var(--brand); color: var(--text-primary); }
 .artifact-reload-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 8px; }
 .artifact-reload-actions button { height: 28px; padding: 0 10px; border-radius: var(--r-sm); border: 1px solid var(--line-default); background: transparent; color: var(--text-secondary); cursor: pointer; font: 500 11.5px var(--font-sans); }
-.artifact-reload-actions #artifact-reload-confirm-btn { background: var(--cta-bg); color: #fff; border-color: transparent; }
+.artifact-reload-actions #artifact-reload-confirm-btn { background: var(--cta-bg); color: var(--on-cta); border-color: transparent; }
 #mode-indicator.alert-success { background: var(--success-soft); border-color: rgba(131,239,215,.4); color: var(--success); }
 #mode-indicator.alert-warning { background: var(--warning-soft); border-color: rgba(245,200,107,.4); color: var(--warning); }
 /* 浅色主题:alert 用标准暖黄/浅绿(深色主题的 mint/gold 在白底发灰,不像标准 alert) */
@@ -520,7 +535,7 @@ body {
 }
 #email-send-code-btn:disabled { opacity: .5; cursor: default; }
 #email-submit-btn {
-  background: var(--brand); color: #fff; border: none; border-radius: var(--r-md);
+  background: var(--cta-bg); color: var(--on-cta); border: none; border-radius: var(--r-md);
   height: 34px; font-size: 12px; font-weight: 500; cursor: pointer; font-family: var(--font-sans);
 }
 #email-submit-btn:hover { filter: brightness(1.08); }
@@ -538,7 +553,7 @@ body {
 }
 #invite-code-input:focus { outline: none; border-color: var(--line-focus); box-shadow: 0 0 0 3px var(--brand-soft); }
 #join-btn {
-  background: var(--cta-bg); color: #fff;
+  background: var(--cta-bg); color: var(--on-cta);
   border: 0; height: 34px; padding: 0 14px; font-size: 12px; border-radius: var(--r-md); white-space: nowrap;
   cursor: pointer; font-family: var(--font-sans); font-weight: 600;
 }
@@ -583,7 +598,7 @@ button {
 }
 .draft-acts { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 .draft-acts button { height: 30px; padding: 4px 12px; font-size: 12px; border-radius: var(--r-md); font-family: var(--font-sans); cursor: pointer; }
-.draft-acts .draft-save, .draft-acts .reply-save { background: var(--cta-bg); color: #fff; border: 0; font-weight: 600; }
+.draft-acts .draft-save, .draft-acts .reply-save { background: var(--cta-bg); color: var(--on-cta); border: 0; font-weight: 600; }
 .draft-acts .draft-cancel, .draft-acts .reply-cancel { background: transparent; color: var(--text-secondary); border: 1px solid var(--line-default); }
 
 .delete-confirm {
@@ -1045,43 +1060,46 @@ button {
 .team-caret { margin-left: auto; font-size: 10px; transition: transform .15s ease; }
 .team-block-toggle[aria-expanded="true"] .team-caret { transform: rotate(180deg); }
 .team-collapsible { padding-top: 6px; }
-.account-primary { background: var(--brand); color: #fff; border: none; font-weight: 500; }
+.account-primary { background: var(--cta-bg); color: var(--on-cta); border: none; font-weight: 500; }
 .email-branch { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-/* === 账号工作区流程(account-flow)=== */
-.account-flow-host { padding: 4px 0; }
+/* === 账号工作区流程：按已确认 Demo 的单任务层级 === */
+.account-flow-host { padding: 0; }
 .af-page { display: flex; flex-direction: column; gap: 8px; }
-.af-eyebrow { margin: 0; font-size: 11px; color: var(--text-muted); }
-.af-h2 { margin: 0; font-size: 19px; font-weight: 650; color: var(--text-primary); letter-spacing: -.01em; }
-.af-copy { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text-secondary); }
-.af-label { font-size: 12px; color: var(--text-secondary); }
-.af-input { height: 38px; width: 100%; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface-raised); color: var(--text-primary); padding: 0 11px; font: inherit; font-size: 13px; box-sizing: border-box; }
+.af-eyebrow { margin: 0 0 -5px; font-size: 12px; color: var(--text-muted); }
+.af-h2 { margin: 0; font-size: 20px; font-weight: 650; line-height: 1.25; letter-spacing: -.02em; color: var(--text-primary); }
+.af-copy { margin: 0 0 10px; font-size: 12.5px; line-height: 1.55; color: var(--text-muted); }
+.af-label { margin: 2px 0 -2px; font-size: 12px; color: var(--text-muted); }
+.af-input { height: 38px; width: 100%; border: 1px solid var(--line-default); border-radius: 9px; background: var(--bg-surface-raised); color: var(--text-primary); padding: 0 10px; font: inherit; font-size: 13px; box-sizing: border-box; }
 .af-input::placeholder { color: var(--text-faint); }
-.af-primary { height: 38px; width: 100%; border: 0; border-radius: var(--r-md); background: var(--brand); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font-sans); }
-.af-primary:hover { filter: brightness(1.08); }
+.af-primary { height: 38px; width: 100%; border: 0; border-radius: 9px; background: var(--cta-bg); color: var(--on-cta); font-size: 13px; font-weight: 650; cursor: pointer; font-family: var(--font-sans); }
+.af-primary:hover { filter: brightness(1.06); }
 .af-primary:disabled { opacity: .55; cursor: default; }
-.af-secondary { height: 38px; width: 100%; border: 1px solid var(--line-default); border-radius: var(--r-md); background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer; font-family: var(--font-sans); }
-.af-secondary:hover { background: rgba(255,255,255,.06); }
-.af-link { align-self: flex-start; background: transparent; border: 0; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 0; font-family: var(--font-sans); }
+.af-secondary { height: 38px; width: 100%; border: 1px solid var(--line-default); border-radius: 9px; background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer; font-family: var(--font-sans); }
+.af-secondary:hover { background: var(--bg-surface-raised); color: var(--text-primary); }
+.af-link { align-self: flex-start; height: auto; background: transparent; border: 0; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 0; font-family: var(--font-sans); }
 .af-link:hover { color: var(--text-primary); }
-.af-workspace { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line-default); border-radius: var(--r-md); background: var(--bg-surface-raised); }
-.af-mark { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--brand); color: #fff; font-weight: 700; font-size: 14px; flex: none; }
-.af-wtext { flex: 1; min-width: 0; }
-.af-wname { font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.af-chevron { border: 0; background: transparent; color: var(--text-muted); font-size: 18px; cursor: pointer; padding: 4px; }
-.af-list { margin-top: 6px; border-top: 1px solid var(--line-subtle); }
-.af-row { display: flex; align-items: center; justify-content: space-between; width: 100%; border: 0; border-bottom: 1px solid var(--line-subtle); background: transparent; color: var(--text-primary); text-align: left; padding: 12px 2px; font-size: 13px; cursor: pointer; font-family: var(--font-sans); }
+/* 工作区卡片已删(无上传团队图标的入口,卡片没有存在意义);团队名并入首页标题。 */
+.af-list { margin-top: 4px; border-top: 1px solid var(--line-subtle); }
+/* 整行可点 + 整行悬停态:行占满内容区宽,分割线与标题栏下边线同宽同位置(不带圆角) */
+.af-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; border: 0; border-bottom: 1px solid var(--line-subtle); border-radius: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 13px 8px; font-size: 13px; cursor: pointer; font-family: var(--font-sans); }
+.af-row:hover { background: var(--bg-surface-raised); color: var(--brand-hover); }
 .af-row:last-child { border-bottom: 0; }
-.af-row small { color: var(--text-muted); }
+.af-chev { width: 16px; height: 16px; flex: none; color: var(--text-muted); }
 .af-danger, .af-danger span { color: #cb5260; }
-.af-toast { padding: 10px; border-radius: var(--r-md); background: rgba(60,160,100,.14); color: #4ea372; font-size: 12px; }
-.af-note { margin: 4px 0 0; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
-.af-error { font-size: 12px; color: #cb5260; }
-.af-choice { display: flex; align-items: center; gap: 11px; width: 100%; border: 0; border-bottom: 1px solid var(--line-subtle); background: transparent; color: var(--text-primary); text-align: left; padding: 13px 2px; cursor: pointer; font-family: var(--font-sans); }
+.af-toast { margin: 0 0 6px; padding: 10px; border-radius: 9px; background: var(--success-soft); color: var(--success); font-size: 12px; }
+.af-fallback { display: flex; flex-direction: column; gap: 6px; margin: 0 0 6px; color: var(--text-muted); font-size: 11px; }
+.af-fallback .af-input { color: var(--text-secondary); font-size: 11px; }
+.af-note { margin: 8px 0 0; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
+.af-error { margin-top: 2px; font-size: 12px; color: var(--danger); }
+.af-status { margin-top: 2px; font-size: 12px; color: var(--brand-hover); }
+.af-choice { display: flex; align-items: center; gap: 11px; width: 100%; border: 0; border-bottom: 1px solid var(--line-subtle); border-radius: 0; background: transparent; color: var(--text-primary); text-align: left; padding: 14px 8px; cursor: pointer; font-family: var(--font-sans); }
+.af-choice:hover { background: var(--bg-surface-raised); color: var(--brand-hover); }
 .af-choice:last-child { border-bottom: 0; }
-.af-choice-icon { width: 30px; height: 30px; flex: none; border-radius: var(--r-sm); display: grid; place-items: center; background: var(--bg-surface); color: var(--brand); font-size: 15px; }
-.af-choice-text b { display: block; font-size: 13px; margin-bottom: 2px; }
+.af-choice-icon { width: 30px; height: 30px; flex: none; border-radius: 8px; display: grid; place-items: center; background: var(--bg-surface-raised); color: var(--brand); font-size: 15px; }
+.af-choice-text { min-width: 0; }
+.af-choice-text b { display: block; font-size: 13px; margin-bottom: 3px; }
 .af-choice-text span { font-size: 11.5px; color: var(--text-muted); }
-.af-member { display: flex; align-items: center; gap: 9px; padding: 9px 0; border-bottom: 1px solid var(--line-subtle); }
+.af-member { display: flex; align-items: center; gap: 9px; padding: 10px 0; border-bottom: 1px solid var(--line-subtle); }
 .af-member:last-child { border-bottom: 0; }
 .af-avatar { width: 27px; height: 27px; border-radius: 50%; display: grid; place-items: center; background: var(--bg-surface); color: var(--brand); font-size: 11px; font-weight: 600; flex: none; }
 .af-mtext { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-primary); }

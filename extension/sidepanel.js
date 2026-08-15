@@ -2020,16 +2020,33 @@
   // reload=true:显式登录后刷页(让 content-script 切到 RemoteStore 加载协同批注)。
   // silentReauth(侧边栏打开时静默重登)传 false —— 不刷页,否则会冲掉刚弹出的编辑确认窗。
   async function applySession(r, reload = true) {
+    // 有些身份入口先签发“无 active team”的 session，但仍已返回用户可用的工作区列表。
+    // 此时必须先换发第一个工作区的 session，不能把用户错误送去「加入或创建」。
+    // teams.user_teams 已按最近加入排序，首项是合理的默认恢复目标。
+    if (r && r.token && !r.team_id && Array.isArray(r.teams) && r.teams.length) {
+      const defaultTeam = r.teams[0];
+      try {
+        const switched = await fetch(BACKEND + "/auth/switch-team", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + r.token },
+          body: JSON.stringify({ team_id: defaultTeam.team_id }),
+        });
+        if (switched.ok) {
+          const j = await switched.json();
+          r = Object.assign({}, r, j, { teams: r.teams });
+        }
+      } catch (e) { /* 保留无团队状态，后续按正常引导处理 */ }
+    }
     // 持久化团队身份(team_id + team_name):account sheet 展示当前团队 + 为后续团队切换预留。
     if (Array.isArray(r.teams)) _sessionTeams = r.teams; // Google 登录带全部团队;switch 复用现存列表
     const tm = (r.teams || []).find((x) => x.team_id === r.team_id);
-    const teamName = (tm && tm.name) || "";
+    const teamName = r.team_name || (tm && tm.name) || "";
     _sessionTeam = r.team_id ? { id: r.team_id, name: teamName } : null;
     await setCfg({ mode: "synced", backend: BACKEND, session_token: r.token, user: r.user, team_id: r.team_id || "", team_name: teamName });
     _sessionUser = r.user;
-    // 登录/加入/创建/切换后回首页;若带着 join-code 完成认证,直接进加入页
-    setAccountFlow(_pendingJoinCode ? "join" : "home");
-    _pendingJoinCode = "";
+    // 登录/加入/创建/切换后:带 join-code → 加入页;无团队(注册不自动建队)→ 加入或创建页;否则回首页。
+    // 不能在这里清掉 code：join 页仍需预填它，成功加入后再清理。
+    setAccountFlow(_pendingJoinCode ? "join" : (r.team_id ? "home" : "join-or-create"));
     if (reload) {
       const tab = await getActiveTab();
       if (tab && tab.id) { try { await chrome.tabs.reload(tab.id); } catch (e) { /* 非关键 */ } }
@@ -2039,7 +2056,8 @@
   let _accountFlow = "home";      // auth|email-login|email-register|home|invite|members|switch|join-or-create|join|create
   let _authEmailOpen = false;      // auth 首屏是否展开邮箱输入
   let _accountEmail = "";          // 邮箱(跨 auth 子状态)
-  let _accountError = "";          // 当前页错误文案
+  let _accountError = "";          // 当前页错误文案(红色)
+  let _accountStatus = "";         // 当前页状态文案(主色;如登录中提示)
   let _inviteCopied = false;       // invite 页"已复制"
   let _membersCache = null;        // members 页:{items, isOwner} 或 null(未加载)
   let _confirmRemoveSub = "";      // 成员移除二次确认
@@ -2063,14 +2081,17 @@
     auth: "ws.t.account", "email-login": "ws.t.account", "email-register": "ws.t.account",
   };
   function setAccountFlow(flow, opts) {
+    const previousFlow = _accountFlow;
     _accountFlow = flow;
     if (flow !== "invite") _inviteCopied = false;
     if (flow !== "members") _confirmRemoveSub = "";
-    _accountError = (opts && opts.error) ? opts.error : (flow === _accountFlow ? _accountError : "");
-    const titleEl = document.querySelector("#account-sheet .account-header-title");
-    if (titleEl) titleEl.textContent = t(FLOW_TITLE[flow] || "ws.t.home");
+    // 错误/状态只属于触发它的那一步；切页后不能跟到下一项任务上。两者互斥(设其一清另一)。
+    if (opts && opts.error) { _accountError = opts.error; _accountStatus = ""; }
+    else if (opts && opts.status) { _accountStatus = opts.status; _accountError = ""; }
+    else if (flow !== previousFlow) { _accountError = ""; _accountStatus = ""; }
+    // 标题栏返回按钮始终可用：未登录时也必须能退出团队面板，不能把用户困在登录流里。
     const back = document.getElementById("account-back-btn");
-    if (back) back.style.visibility = (!_sessionUser || flow === "home" || flow === "auth") ? "hidden" : "visible";
+    if (back) back.style.visibility = "visible";
     renderAccountFlow();
     const f = accountHost && accountHost.querySelector("input, .af-primary");
     if (f) { try { f.focus(); } catch (e) {} }
@@ -2090,13 +2111,14 @@
     accountHost.innerHTML = (views[flow] || viewHome)();
   }
   function afErr() { return _accountError ? '<div class="af-error">' + esc(_accountError) + "</div>" : ""; }
+  function afStatus() { return _accountStatus ? '<div class="af-status">' + esc(_accountStatus) + "</div>" : ""; }
   // --- 未登录 ---
   function viewAuth() {
     if (!_authEmailOpen) {
       return '<div class="af-page"><h2 class="af-h2">' + t("ws.auth.title") + "</h2>"
         + '<p class="af-copy">' + t("ws.auth.copy") + "</p>"
         + '<button class="af-primary" data-action="google-login">' + t("login.google") + "</button>"
-        + '<button class="af-secondary" data-action="open-email">' + t("ws.auth.email") + "</button>" + afErr() + "</div>";
+        + '<button class="af-secondary" data-action="open-email">' + t("ws.auth.email") + "</button>" + afStatus() + afErr() + "</div>";
     }
     return '<div class="af-page"><h2 class="af-h2">' + t("ws.auth.title") + "</h2>"
       + '<label class="af-label">' + t("login.emailPh") + "</label>"
@@ -2118,7 +2140,6 @@
         + '<button class="af-link" data-action="resend-code">' + (_emailCooldown > 0 ? t("login.resendIn").replace("{n}", _emailCooldown) : t("ws.register.resend")) + "</button>";
     } else {
       body = '<input class="af-input" type="password" data-field="password" placeholder="' + t("login.pwPh") + '">'
-        + '<input class="af-input" type="text" data-field="invite_code" placeholder="' + t("login.invitePh") + '">'
         + '<button class="af-primary" data-action="send-code">' + t("login.sendCode") + "</button>";
     }
     return '<div class="af-page"><p class="af-eyebrow">' + esc(_accountEmail) + "</p>"
@@ -2126,29 +2147,33 @@
       + '<p class="af-copy">' + t("ws.register.copy") + "</p>" + body + afErr() + "</div>";
   }
   // --- 已登录 ---
+  // 行尾右箭头:SVG 描边图标(16px),替代原「›」字符(太小、各平台渲染不一)
+  const AF_CHEV = '<svg class="af-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>';
   function viewHome() {
     const u = _sessionUser || {}, team = _sessionTeam || {};
-    const initial = esc((team.name || u.name || "?").trim().charAt(0).toUpperCase() || "?");
     const multi = _sessionTeams.length > 1;
-    const card = '<div class="af-workspace"><div class="af-mark">' + initial + "</div>"
-      + '<div class="af-wtext"><div class="af-wname">' + esc(team.name || t("ws.unnamed")) + "</div></div>"
-      + (multi ? '<button class="af-chevron" data-action="go-switch" aria-label="' + t("ws.t.switch") + '">›</button>' : "") + "</div>";
+    // 无上传团队图标的入口 → 不再展示工作区卡片,团队名直接并入标题(「你的团队 - 名称」)。
+    // 多团队时的切换入口从卡片右上角迁到列表行(与成员/加入创建同级)。
     return '<div class="af-page"><p class="af-eyebrow">' + esc(u.name || u.id || "") + "</p>"
-      + '<h2 class="af-h2">' + t("ws.home.title") + "</h2>"
-      + '<p class="af-copy">' + t("ws.home.copy") + "</p>" + card
+      + '<h2 class="af-h2">' + esc(t("ws.home.title") + " - " + (team.name || t("ws.unnamed"))) + "</h2>"
+      + '<p class="af-copy">' + t("ws.home.copy") + "</p>"
       + '<button class="af-primary" data-action="go-invite">' + t("ws.home.invite") + "</button>"
       + '<div class="af-list">'
-      + '<button class="af-row" data-action="go-members"><span>' + t("ws.t.members") + "</span><small>›</small></button>"
-      + '<button class="af-row" data-action="go-joc"><span>' + t("ws.home.joc") + "</span><small>›</small></button>"
-      + '<button class="af-row af-danger" data-action="logout"><span>' + t("state.logout") + "</span><small>›</small></button>"
+      + '<button class="af-row" data-action="go-members"><span>' + t("ws.t.members") + "</span>" + AF_CHEV + "</button>"
+      + (multi ? '<button class="af-row" data-action="go-switch"><span>' + t("ws.t.switch") + "</span>" + AF_CHEV + "</button>" : "")
+      + '<button class="af-row" data-action="go-joc"><span>' + t("ws.home.joc") + "</span>" + AF_CHEV + "</button>"
+      + '<button class="af-row af-danger" data-action="logout"><span>' + t("state.logout") + "</span>" + AF_CHEV + "</button>"
       + "</div></div>";
   }
   function viewInvite() {
     const team = _sessionTeam || {};
     const toast = _inviteCopied ? '<div class="af-toast">' + t("ws.invite.copied") + "</div>" : "";
+    const fallback = !_inviteCopied && _accountError
+      ? '<div class="af-fallback"><span>' + t("ws.invite.fallback") + '</span><input class="af-input" type="text" readonly value="' + esc(_accountError) + '"></div>'
+      : "";
     return '<div class="af-page"><p class="af-eyebrow">' + esc(team.name || "") + "</p>"
       + '<h2 class="af-h2">' + t("ws.t.invite") + "</h2>"
-      + '<p class="af-copy">' + t("ws.invite.copy") + "</p>" + toast
+      + '<p class="af-copy">' + t("ws.invite.copy") + "</p>" + toast + fallback
       + '<button class="af-primary" data-action="gen-invite">' + t("ws.invite.gen") + "</button>"
       + '<p class="af-note">' + t("ws.invite.note") + "</p></div>";
   }
@@ -2184,7 +2209,7 @@
         + (cur ? "<span>" + t("ws.switch.current") + "</span>" : "") + "</span></button>";
     }).join("");
     return '<div class="af-page"><p class="af-eyebrow">' + t("ws.switch.eyebrow") + '</p><h2 class="af-h2">' + t("ws.t.switch") + "</h2>" + rows
-      + '<button class="af-row" data-action="go-joc"><span>' + t("ws.home.joc") + "</span><small>›</small></button></div>";
+      + '<button class="af-row" data-action="go-joc"><span>' + t("ws.home.joc") + "</span>" + AF_CHEV + "</button></div>";
   }
   function viewJoinOrCreate() {
     return '<div class="af-page"><p class="af-eyebrow">' + t("ws.t.home") + '</p><h2 class="af-h2">' + t("ws.joc.title") + "</h2>"
@@ -2201,7 +2226,7 @@
       + '<input class="af-input" type="text" data-field="team_name" placeholder="' + t("ws.create.ph") + '">'
       + '<button class="af-primary" data-action="create-workspace"' + (_accountBusy ? " disabled" : "") + ">" + t("ws.create.action") + "</button>" + afErr() + "</div>";
   }
-  function showLoggedIn(user) { _sessionUser = user; setAccountFlow("home"); }
+  function showLoggedIn(user) { _sessionUser = user; setAccountFlow(_sessionTeam ? "home" : "join-or-create"); }
   function refreshLoginState() { if (_sessionUser) renderAccountFlow(); }
   async function _authFetch(path, init) {
     const cfg = await getCfg(["session_token"]);
@@ -2245,6 +2270,8 @@
     if (_accountBusy) return;
     const code = hostField("invite_code").trim();
     if (!code) { setAccountFlow("join", { error: t("ws.join.fillCode") }); return; }
+    // 失败或网络重试时保留用户刚输入的码；join-code 预填与手输走同一份状态。
+    _pendingJoinCode = code;
     _accountBusy = true; renderAccountFlow();
     try {
       const r = await _authFetch("/auth/teams/join",
@@ -2252,7 +2279,7 @@
       const j = await r.json();
       if (!r.ok) { _accountBusy = false; setAccountFlow("join", { error: (j && j.detail) || t("ws.join.fail") }); return; }
       _pendingJoinCode = "";
-      await applySession({ token: j.token, user: j.user, team_id: j.team_id, teams: j.teams }, false);
+      await applySession({ token: j.token, user: j.user, team_id: j.team_id, team_name: j.team_name, teams: j.teams }, false);
       _accountBusy = false; showToast(t("ws.join.ok")); broadcastTeamChanged();
     } catch (e) { _accountBusy = false; setAccountFlow("join", { error: t("ws.join.fail") }); }
   }
@@ -2266,12 +2293,12 @@
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name }) });
       const j = await r.json();
       if (!r.ok) { _accountBusy = false; setAccountFlow("create", { error: (j && j.detail) || t("ws.create.fail") }); return; }
-      await applySession({ token: j.token, user: j.user, team_id: j.team_id, teams: j.teams }, false);
+      await applySession({ token: j.token, user: j.user, team_id: j.team_id, team_name: j.team_name, teams: j.teams }, false);
       _accountBusy = false; showToast(t("ws.create.ok")); broadcastTeamChanged();
     } catch (e) { _accountBusy = false; setAccountFlow("create", { error: t("ws.create.fail") }); }
   }
   async function doGoogleLogin() {
-    setAccountFlow("auth", { error: t("login.googleLoading") });
+    setAccountFlow("auth", { status: t("login.googleLoading") });
     try {
       const r = await Login.googleStart({ interactive: true });
       if (r.token) { await applySession(r); showToast(t("login.googleSuccess")); }
@@ -2327,7 +2354,7 @@
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ team_id: teamId }) });
       if (!r.ok) throw new Error("switch " + r.status);
       const j = await r.json();
-      await applySession({ token: j.token, user: j.user, team_id: j.team_id, teams: _sessionTeams }, false);
+      await applySession({ token: j.token, user: j.user, team_id: j.team_id, team_name: j.team_name, teams: _sessionTeams }, false);
       showToast(t("team.switched"));
       broadcastTeamChanged(); // 所有协同页重载(切到新团队的批注/SSE)
     } catch (e) { showToast(t("team.switchFail")); }
@@ -2351,7 +2378,7 @@
     });
     _sessionUser = null;
     _sessionTeam = null; _sessionTeams = [];
-    _authEmailOpen = false; _accountEmail = ""; _emailCodeSent = false; _membersCache = null; _pendingJoinCode = "";
+    _authEmailOpen = false; _accountEmail = ""; _emailCodeSent = false; _membersCache = null; _pendingJoinCode = ""; _accountStatus = "";
     renderPresence([]); // 登出:清掉在线人数
     setAccountFlow("auth");
   }
@@ -2520,6 +2547,8 @@
   function enterAccountView() {
     const ev = document.getElementById("view-edit");
     const cv = document.getElementById("view-comment");
+    // 账号/工作区是独占视图：CSS 状态锁阻止任何异步刷新把 Tab 或主视图重新带回。
+    document.body.classList.add("account-view-open");
     ev.classList.remove("show"); cv.classList.remove("show");
     ev.hidden = true; cv.hidden = true;
     if (tabbarEl) tabbarEl.hidden = true;
@@ -2530,6 +2559,7 @@
     setAccountFlow(_sessionUser ? "home" : "auth");
   }
   function exitAccountView() {
+    document.body.classList.remove("account-view-open");
     accountSheet.classList.remove("show");
     accountSheet.hidden = true;
     avatarBtn.classList.remove("active");
@@ -2541,7 +2571,11 @@
     if (accountSheet.classList.contains("show")) exitAccountView();
     else { enterAccountView(); closeLangSheet(); }
   });
-  if (accountBackBtn) accountBackBtn.addEventListener("click", exitAccountView);
+  if (accountBackBtn) accountBackBtn.addEventListener("click", () => {
+    // 顶栏返回遵循 Demo：子页回工作区首页；只有首页才退出账号面板。
+    if (_sessionUser && _accountFlow !== "home") setAccountFlow("home");
+    else exitAccountView();
+  });
 
   // === 语言切换(中/英/日;跟随浏览器,默认英文,可手动切换,本地存储) ===
   const langBtn = document.getElementById("lang-btn");

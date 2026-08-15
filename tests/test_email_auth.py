@@ -82,11 +82,18 @@ def test_verify_with_invite_code_joins_team(tmp_path, monkeypatch, capture_code)
     assert teams.is_member(v.json()["user"]["id"], tid)
 
 
-def test_verify_creates_default_team(tmp_path, monkeypatch, capture_code):
+def test_verify_without_invite_or_name_creates_no_team(tmp_path, monkeypatch, capture_code):
+    """注册不带邀请码/团队名 → 不自动建队:team_id 空、teams 空,但 token 可用,后续可走 /auth/teams 建队。"""
     _init(tmp_path, monkeypatch)
     _reg()
     v = client.post("/auth/email/verify", json={"email": "a@x.com", "code": capture_code["code"]})
-    assert v.status_code == 200 and v.json()["team_id"]
+    assert v.status_code == 200
+    assert v.json()["team_id"] == "" and v.json()["teams"] == []
+    H = {"Authorization": "Bearer " + v.json()["token"]}
+    assert client.get("/auth/me", headers=H).status_code == 200
+    # 无团队会话可直接创建团队(端点换发带 team_id 的新 token)
+    r = client.post("/auth/teams", json={"name": "起个名字"}, headers=H)
+    assert r.status_code == 201 and r.json()["team_id"] and r.json()["team_name"] == "起个名字"
 
 
 def test_probe_existing_vs_new(tmp_path, monkeypatch, capture_code):
@@ -105,12 +112,12 @@ def test_email_session_create_and_join_workspace(tmp_path, monkeypatch, capture_
     _init(tmp_path, monkeypatch)
     _reg(email="a@x.com")
     v = client.post("/auth/email/verify", json={"email": "a@x.com", "code": capture_code["code"]}).json()
-    assert "teams" in v and len(v["teams"]) >= 1  # verify 响应带 teams
+    assert "teams" in v and v["teams"] == []  # verify 响应带 teams(注册不自动建队)
     H = {"Authorization": "Bearer " + v["token"]}
-    # 创建新工作区(Google/email 通用)
+    # 从无团队会话创建新工作区(Google/email 通用)
     r = client.post("/auth/teams", json={"name": "新项目"}, headers=H)
     assert r.status_code == 201 and r.json()["team_name"] == "新项目"
-    assert len(r.json()["teams"]) >= 2
+    assert len(r.json()["teams"]) == 1
     new_tok = r.json()["token"]
     # 在新工作区生成邀请码 → 另一 email 用户加入
     invite = client.post("/auth/invites", headers={"Authorization": "Bearer " + new_tok}).json()["code"]
@@ -129,6 +136,12 @@ def test_email_session_create_and_join_workspace(tmp_path, monkeypatch, capture_
 def test_email_login_returns_teams(tmp_path, monkeypatch, capture_code):
     _init(tmp_path, monkeypatch)
     _reg(email="a@x.com")
-    client.post("/auth/email/verify", json={"email": "a@x.com", "code": capture_code["code"]})
+    tok = client.post("/auth/email/verify", json={"email": "a@x.com", "code": capture_code["code"]}).json()["token"]
+    # 尚无团队 → 登录返回无团队会话(不自动建队)
     lg = client.post("/auth/email/login", json={"email": "a@x.com", "password": "pw123456"}).json()
-    assert "teams" in lg and len(lg["teams"]) >= 1
+    assert "teams" in lg and lg["teams"] == [] and lg["team_id"] == ""
+    # 建队后登录带上团队
+    client.post("/auth/teams", json={"name": "T"},
+                headers={"Authorization": "Bearer " + tok})
+    lg2 = client.post("/auth/email/login", json={"email": "a@x.com", "password": "pw123456"}).json()
+    assert len(lg2["teams"]) == 1 and lg2["team_id"]
