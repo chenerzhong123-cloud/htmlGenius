@@ -61,6 +61,14 @@ htmlGenius 适合审阅 AI 生成的 HTML 原型、设计稿和网页内容。�
 
 详见[隐私政策](https://www.deuce.monster/htmlgenius/privacy.html)。
 
+## 最近更新
+
+- **v0.9.17（当前版本）**：邮箱登录与注册（无 Google 账号可用）；团队模式全面板（加入/创建/邀请/成员/重命名/转移所有权/多团队切换）；实时同步按页签省流。
+- **v0.9.16**：GitHub Copilot 可正常生成本地候选（bridge 自动读取登录凭据）；运行诊断留存与一键上报；连接检查状态实时转圈。
+- **v0.9.15**：修 Copilot 读源被拒、Codex 未登录误报「已连接」等连接问题（bridge 1.0.2）。
+
+完整历史见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+
 ## 更多
 
 - [RELEASE_NOTES.md](RELEASE_NOTES.md)：版本历史
