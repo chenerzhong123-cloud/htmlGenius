@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .models import AnnotationCreate, DocumentCreate, VersionCreate
@@ -116,6 +116,16 @@ def init_db(path: Path) -> None:
                 created_at TEXT NOT NULL,
                 mode TEXT,
                 payload TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS analytics_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                params_json TEXT NOT NULL,
+                client_ts TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(client_id, seq)
             );
             """
         )
@@ -512,6 +522,42 @@ def save_diagnostics(payload_json: str, mode: str = "manual") -> int:
             (_now(), str(mode)[:16], payload_json),
         )
         return int(cur.lastrowid)
+    finally:
+        c.close()
+
+
+def save_events(client_id: str, events: list) -> int:
+    """漏斗事件落库。UNIQUE(client_id, seq) + INSERT OR IGNORE:超时重发幂等。"""
+    c = _connect()
+    try:
+        n = 0
+        for e in events:
+            cur = c.execute(
+                "INSERT OR IGNORE INTO analytics_events(client_id, seq, name, params_json, client_ts, created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (client_id[:64], int(e["seq"]), str(e["name"])[:64],
+                 json.dumps(e.get("params") or {}, ensure_ascii=False),
+                 str(e.get("ts") or "")[:40], _now()),
+            )
+            n += cur.rowcount
+        c.commit()
+        return n
+    finally:
+        c.close()
+
+
+def prune_analytics(keep_days: int = 90) -> int:
+    """删除事件时间早于 keep_days 天的行(表大小保护)。
+    事件时间取 client_ts(客户端时钟,断网补发不污染时段),缺失回落 created_at。"""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
+    c = _connect()
+    try:
+        cur = c.execute(
+            "DELETE FROM analytics_events WHERE COALESCE(NULLIF(client_ts, ''), created_at) < ?",
+            (cutoff,),
+        )
+        c.commit()
+        return cur.rowcount
     finally:
         c.close()
 
