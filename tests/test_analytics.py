@@ -54,3 +54,67 @@ def test_prune_analytics_deletes_old_rows(tmp_path, monkeypatch):
     n = db.execute("SELECT COUNT(*) FROM analytics_events").fetchone()[0]
     db.close()
     assert n == 1
+
+
+def _post_events(payload):
+    return client.post("/api/events", json=payload)
+
+
+def _reset_limiter():
+    from server import app as app_mod
+    app_mod._events_limiter._hits.clear()
+
+
+def test_events_endpoint_happy_path(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch); _reset_limiter()
+    r = _post_events({"client_id": "cid_abcdefgh", "events": [
+        {"seq": 1, "name": "panel_open", "params": {}, "ts": "2026-08-15T00:00:00Z"},
+        {"seq": 2, "name": "login_start", "params": {"method": "email"}, "ts": "2026-08-15T00:00:01Z"},
+    ]})
+    assert r.status_code == 200 and r.json()["acked_seq"] == 2 and r.json()["inserted"] == 2
+
+
+def test_events_unknown_name_skipped_not_batch_rejected(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch); _reset_limiter()
+    r = _post_events({"client_id": "cid_abcdefgh", "events": [
+        {"seq": 1, "name": "panel_open", "params": {}, "ts": ""},
+        {"seq": 2, "name": "evil_free_text_event", "params": {}, "ts": ""},
+        {"seq": 3, "name": "edit_start", "params": {"is_local": True}, "ts": ""},
+    ]})
+    j = r.json()
+    assert r.status_code == 200 and j["rejected"] == [2] and j["acked_seq"] == 3 and j["inserted"] == 2
+
+
+def test_events_param_value_enforcement(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch); _reset_limiter()
+    r = _post_events({"client_id": "cid_abcdefgh", "events": [
+        {"seq": 1, "name": "task_failed", "params": {
+            "provider": "claude_code_cli",
+            "code": "这是一段自由文本",          # 非法 code 值 → 剥离该参数
+            "unknown_key": "x",                  # 未知键 → 剥离
+        }, "ts": ""},
+    ]})
+    assert r.status_code == 200
+    import sqlite3, json as _json
+    db = sqlite3.connect(str(tmp_path / "e.db"))
+    params = _json.loads(db.execute("SELECT params_json FROM analytics_events").fetchone()[0])
+    db.close()
+    assert params == {"provider": "claude_code_cli"}
+
+
+def test_events_too_many_per_request_413(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch); _reset_limiter()
+    evs = [{"seq": i, "name": "panel_open", "params": {}, "ts": ""} for i in range(51)]
+    assert _post_events({"client_id": "cid_abcdefgh", "events": evs}).status_code == 413
+
+
+def test_events_rate_limited_429(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch); _reset_limiter()
+    body = {"client_id": "cid_abcdefgh", "events": [{"seq": 1, "name": "panel_open", "params": {}, "ts": ""}]}
+    codes = [_post_events(body).status_code for _ in range(31)]
+    assert codes[:30] == [200] * 30 and codes[30] == 429
+
+
+def test_events_bad_client_id_422(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch); _reset_limiter()
+    assert _post_events({"client_id": "x", "events": []}).status_code == 422
