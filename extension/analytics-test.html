@@ -1,0 +1,43 @@
+<!doctype html><html><head><meta charset="utf-8"><title>analytics-core-test</title></head><body>
+<script src="analytics-core.js"></script>
+<script>
+(function () {
+  var C = window.HGAnalyticsCore;
+  var NOW = 1755300000000; // 固定时钟(2026-08-16 前后),一切时间断言基于它
+  function eq(a, b, msg) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(msg + ": " + JSON.stringify(a) + " != " + JSON.stringify(b)); }
+  try {
+    if (!C) throw new Error("HGAnalyticsCore missing");
+    // 1) cleanEvent:白名单 + 值校验
+    eq(C.cleanEvent("panel_open", {}), { name: "panel_open", params: {} }, "plain event");
+    if (C.cleanEvent("evil_event", {}) !== null) throw new Error("unknown name must be null");
+    var c = C.cleanEvent("task_failed", { provider: "codex_app_server", code: "自由文本", junk: 1 });
+    eq(c, { name: "task_failed", params: { provider: "codex_app_server" } }, "invalid value/key stripped");
+    // 2) seq 与追加
+    var q = [];
+    for (var i = 0; i < 3; i++) q = C.appendEvent(q, "panel_open", {}, NOW - i, NOW).events;
+    eq(C.nextSeq(q), 4, "nextSeq");
+    // 3) cap:容量 3 时再追加 → 丢最旧,oldestSeq 前移
+    var r = C.appendEvent(q, "panel_open", {}, NOW, NOW, 3);
+    eq(r.events.length, 3, "cap trims to 3");
+    eq(r.oldestSeq, 2, "oldestSeq after trim");
+    // 4) toFlush
+    eq(C.toFlush(q, 2).length, 1, "toFlush filters by cursor");
+    // 5) gaTimestamp 三段窗口(72h / 7d / 放弃)
+    var H = 3600000;
+    if (C.gaTimestamp(NOW - 71 * H, NOW) !== (NOW - 71 * H) * 1000) throw new Error("<=72h keeps real ts");
+    if (C.gaTimestamp(NOW - 71 * H, NOW) === null) throw new Error("<=72h must not be null");
+    if (C.gaTimestamp(NOW - 100 * H, NOW) !== (NOW - 71 * H) * 1000) throw new Error("72h~7d clamps to now-71h");
+    if (C.gaTimestamp(NOW - 8 * 24 * H, NOW) !== null) throw new Error(">7d returns null");
+    // 6) gaBatches:跳过 >7d、补 engagement_time_msec、分批 ≤20
+    var evs = [];
+    for (var s = 1; s <= 25; s++) evs.push({ seq: s, name: "panel_open", params: {}, ts: NOW - 24 * H });
+    evs.push({ seq: 26, name: "panel_open", params: {}, ts: NOW - 8 * 24 * H }); // 过老 → 跳过
+    var batches = C.gaBatches(evs, NOW);
+    if (batches.length !== 2 || batches[0].length !== 20 || batches[1].length !== 5) throw new Error("batch sizes");
+    eq(batches[0][0], { name: "panel_open", params: { engagement_time_msec: "100" }, timestamp_unix_micros: String((NOW - 24 * H) * 1000) }, "mp event shape");
+    // 7) prune:两游标都越过才删
+    eq(C.prune(evs, 20, 20).length, 6, "prune keeps seq > min(cursor)");
+    document.title = "PASS";
+  } catch (e) { document.title = "FAIL: " + (e && e.message || e); }
+})();
+</script></body></html>
