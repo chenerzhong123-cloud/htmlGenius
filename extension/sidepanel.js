@@ -438,6 +438,7 @@
       quote: _pendingSelector.quote,
       comment: comment || "",
     });
+    HGAnalytics.track("comment_create"); // 只计根评论;回复不计,避免漏斗重复计数
     _pendingSelector = null;
     draft.remove();
   }
@@ -819,6 +820,7 @@
       syncRunStateFromBackground(tab.id); // 同 tab 重进:据后台活动 run 还原运行态(终止按钮/计时器/进度窗)
     });
     loadRunHistory(); // 预载最近 3 次任务历史(展开状态栏时立即可见)
+    HGAnalytics.track("task_open", { scope: getContractMode() });
   }
   // 据后台活动 run 同步 _contractRunning:在跑 → 终止态 + 计时器 + 进度窗;不在跑 → 可发送态。
   // 修「同 tab 关掉契约页又重进,按钮误显示可发送(但 run 仍在跑)」。
@@ -1511,6 +1513,7 @@
     if (runKind === "candidate" && opts && opts.plan) payload.plan = opts.plan;
     chrome.runtime.sendMessage(payload).then((resp) => {
       if (resp && resp.ok) {
+        HGAnalytics.track("task_send", { provider: _provider, scope: draft.mode });
         setContractRunning(true);
         if (resp.run_id) _contractRunId = resp.run_id;
         // 状态栏可见:plan 确认后从 plan-review 发的 candidate 也要回 compose 看进度
@@ -1800,6 +1803,7 @@
 
   document.getElementById("edit-btn").addEventListener("click", () => {
     // 编辑态由 content-script 经 edit-state 广播同步;此处乐观翻转即时反馈
+    if (!_editing) HGAnalytics.track("edit_start", { is_local: isLocal });
     sendToContent({ type: _editing ? "disable-edit" : "enable-edit" });
     _editing = !_editing;
     renderMode();
@@ -2403,6 +2407,7 @@
       if (!r.ok) { _accountBusy = false; setAccountFlow("join", { error: (j && j.detail) || t("ws.join.fail") }); return; }
       _pendingJoinCode = "";
       await applySession({ token: j.token, user: j.user, team_id: j.team_id, team_name: j.team_name, teams: j.teams }, false, { restoreLastTeam: false });
+      HGAnalytics.track("join_workspace");
       _accountBusy = false; showToast(t("ws.join.ok")); broadcastTeamChanged();
     } catch (e) { _accountBusy = false; setAccountFlow("join", { error: t("ws.join.fail") }); }
   }
@@ -2424,6 +2429,7 @@
       const j = await r.json();
       if (!r.ok) { _accountBusy = false; setAccountFlow("create", { error: (j && j.detail) || t("ws.create.fail") }); return; }
       await applySession({ token: j.token, user: j.user, team_id: j.team_id, team_name: j.team_name, teams: j.teams }, false, { restoreLastTeam: false });
+      HGAnalytics.track("create_workspace");
       _accountBusy = false; showToast(t("ws.create.ok")); broadcastTeamChanged();
     } catch (e) { _accountBusy = false; setAccountFlow("create", { error: t("ws.create.fail") }); }
   }
@@ -2448,6 +2454,7 @@
     } catch (e) { _accountBusy = false; setAccountFlow("rename", { error: t("ws.rename.fail") }); }
   }
   async function doGoogleLogin() {
+    HGAnalytics.track("login_start", { method: "google" });
     _rememberAutoLogin = hostChecked("remember_auto_login");
     setAccountFlow("auth", { status: t("login.googleLoading") });
     try {
@@ -2456,6 +2463,7 @@
         // 只在成功完成一次用户主动登录后保存授权；失败/取消不改变原设置。
         await setAutoLogin(_rememberAutoLogin);
         await applySession(r);
+        HGAnalytics.track("login_success", { method: "google" });
         showToast(t("login.googleSuccess"));
       }
       else { setAccountFlow("auth", { error: t("login.okJoinCreate") }); }
@@ -2464,6 +2472,7 @@
   async function emailContinue() {
     _accountEmail = hostField("email").trim();
     if (!_accountEmail || _accountEmail.indexOf("@") < 0) { setAccountFlow("auth", { error: t("login.emailFillEmail") }); return; }
+    HGAnalytics.track("login_start", { method: "email" });
     try {
       const p = await Login.emailProbe(BACKEND, _accountEmail);
       setAccountFlow(p && p.exists ? "email-login" : "email-register");
@@ -2478,7 +2487,7 @@
       const r = await Login.emailLogin(BACKEND, _accountEmail, pw);
       await offerPasswordSave("email-login");
       await setAutoLogin(_rememberAutoLogin);
-      await applySession(r); showToast(t("login.emailSuccess"));
+      await applySession(r); HGAnalytics.track("login_success", { method: "email" }); showToast(t("login.emailSuccess"));
     } catch (e) { setAccountFlow("email-login", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
   }
   function startEmailCooldown(n) {
@@ -2637,6 +2646,7 @@
       if (msg.summary) pushProgress(msg.summary);
     } else if (msg.type === "bridge-completed") {
       setContractRunning(false); stopRunTimer();
+      if (msg.candidate) HGAnalytics.track("task_success", { provider: _provider });
       if (msg.candidate) showCandidateResult(msg); // 候选成功态(状态栏版本号 + 打开按钮;background 已自动新开候选页签)
       const doneText = msg.candidate ? t("bridge.candidateCompleted") : t("bridge.completed");
       setBridgeStatus(doneText, "ok");
@@ -2647,6 +2657,7 @@
       setContractRunning(false); stopRunTimer();
       if (_contractStep === "plan-running") setContractStep("compose");
       _lastFailed = { code: msg.code || null, message: msg.message || "", provider: _provider, run_kind: _contractRunKind || null, at: new Date().toISOString() };
+      HGAnalytics.track("task_failed", { provider: _provider, code: msg.code || "UNKNOWN" });
       // v0.9.x:自动上报改由 background captureDiag 在 failRun 终态负责(sidepanel 关闭也能报);此处不再重复上报。
       const failText = tBridgeFailed(msg.code, msg);
       setBridgeStatus(failText, bridgeFailClass(msg.code));
@@ -3066,6 +3077,7 @@
 
   // === 初始化 ===
   (async () => {
+    HGAnalytics.track("panel_open");
     if (window.HG_I18N) {
       await HG_I18N.init();
       HG_I18N.apply(document.body);
