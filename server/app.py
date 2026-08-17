@@ -2,16 +2,17 @@ import asyncio
 import html
 import json
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import email_auth, google, lark, sessions, storage, teams
+from . import email_auth, google, lark, ratelimit, sessions, storage, teams
 from .envutil import is_dev_env
 from .auth import (
     Session,
@@ -539,6 +540,97 @@ def submit_diagnostics(payload: dict):
     diag_id = storage.save_diagnostics(raw, mode)
     # 顺带返回 SSE 实时并发(客户端忽略也不影响),远程排查连接水位用。
     return {"ok": True, "id": diag_id, "sse": rooms.stats_snapshot()}
+
+
+# === 匿名漏斗事件(埋点双写的后端路;GA 直发在扩展侧)===
+# 无鉴权(未登录也要能报);三层防滥用:IP 限流 + 413(条数/体积) + 白名单(名与值都校验)。
+_CODE_RE = re.compile(r"^[A-Z0-9_]{1,64}$")
+
+
+def _v_enum(*allowed):
+    def v(x):
+        return x if isinstance(x, str) and x in allowed else None
+    return v
+
+
+def _v_code(x):
+    return x if isinstance(x, str) and _CODE_RE.match(x) else None
+
+
+def _v_bool(x):
+    return x if isinstance(x, bool) else None
+
+
+_PROVIDERS = ("claude_code_cli", "codex_app_server", "github_copilot")
+_SCOPES = ("precise_patch", "local_optimize", "regenerate")
+_METHODS = ("google", "email")
+EVENT_SPECS = {
+    "panel_open": {},
+    "login_start": {"method": _v_enum(*_METHODS)},
+    "login_success": {"method": _v_enum(*_METHODS)},
+    "join_workspace": {},
+    "create_workspace": {},
+    "edit_start": {"is_local": _v_bool},
+    "comment_create": {},
+    "task_open": {"scope": _v_enum(*_SCOPES)},
+    "task_send": {"provider": _v_enum(*_PROVIDERS), "scope": _v_enum(*_SCOPES)},
+    "task_success": {"provider": _v_enum(*_PROVIDERS)},
+    "task_failed": {"provider": _v_enum(*_PROVIDERS), "code": _v_code},
+}
+
+_events_limiter = ratelimit.WindowLimiter(30, 60)
+_last_prune_day = {"d": ""}
+
+
+def _now_day() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+@app.post("/api/events")
+def submit_events(request: Request, payload: dict):
+    """接收匿名漏斗事件批次。非法事件名跳过(不整批拒,防毒丸卡客户端游标);
+    未知参数键剥离;参数值做枚举/格式校验——隐私承诺(绝不带自由文本)在服务端闭环。"""
+    if not _events_limiter.allow(request.client.host if request.client else "?"):
+        raise HTTPException(status_code=429, detail="too many requests")
+    raw = json.dumps(payload, ensure_ascii=False)
+    if len(raw) > 32 * 1024:
+        raise HTTPException(status_code=413, detail="events payload too large")
+    client_id = str(payload.get("client_id") or "") if isinstance(payload, dict) else ""
+    if len(client_id) < 8 or len(client_id) > 64:
+        raise HTTPException(status_code=422, detail="client_id required")
+    events = payload.get("events") if isinstance(payload.get("events"), list) else []
+    if len(events) > 50:
+        raise HTTPException(status_code=413, detail="too many events per request")
+    accepted, rejected = [], []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        seq, name = ev.get("seq"), ev.get("name")
+        if not isinstance(seq, int) or not isinstance(name, str) or name not in EVENT_SPECS:
+            if isinstance(seq, int):
+                rejected.append(seq)
+            continue
+        raw_params = ev.get("params") if isinstance(ev.get("params"), dict) else {}
+        clean = {}
+        for k, val in raw_params.items():
+            k = str(k)[:64]
+            validator = EVENT_SPECS[name].get(k)
+            if validator is None:
+                continue
+            ok_val = validator(val)
+            if ok_val is not None:
+                clean[k] = ok_val if isinstance(ok_val, bool) else str(ok_val)[:128]
+        accepted.append({"seq": seq, "name": name[:64], "params": clean,
+                         "ts": str(ev.get("ts") or "")[:40]})
+    inserted = storage.save_events(client_id, accepted)
+    acked = max((e["seq"] for e in accepted), default=0)
+    # 惰性清理:每日首次写入时清一次(无 cron 依赖)
+    today = _now_day()
+    if _last_prune_day["d"] != today:
+        _last_prune_day["d"] = today
+        storage.prune_analytics()
+    return {"ok": True, "acked_seq": acked, "rejected": rejected, "inserted": inserted}
 
 
 # === 文档 / 版本 (BE-2:全部需 session 鉴权;HTML 响应加严格 CSP 防存储型 XSS) ===

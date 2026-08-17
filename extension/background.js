@@ -4,7 +4,7 @@
 // completion 逐字段 double-check(run_id / task_sha256 自算对照 / session UUID)→ 持久化 run+session。
 // 本版是「任务交接验收」:不产 candidate、不写回、不 reload、不重锚定批注(§1 明确不做)。
 // host 名 provider-neutral(com.htmlgenius.local_bridge):后续 Codex adapter 复用同一 host。
-importScripts("storage.js", "bridge-validate.js", "plan-validate.js", "provider-metadata.js");
+importScripts("storage.js", "bridge-validate.js", "plan-validate.js", "provider-metadata.js", "analytics-core.js");
 
 const NATIVE_HOST = "com.htmlgenius.local_bridge";
 const PROVIDER = "claude_code_cli";
@@ -80,6 +80,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 拦截跨扩展伪造(manifest 未开 externally_connectable,此为纵深防御)。native host 回送走 connectNative
   // 的 port.onMessage(onHostMessage / probe 等),不经 runtime.onMessage,故不受此校验影响。
   if (!sender || sender.id !== chrome.runtime.id) return;
+  if (msg.type === "hg-track") { trackEvent(msg.name, msg.params); return; } // 埋点:不回包,fire-and-forget
   if (msg.type === "bridge-start") {
     handleBridgeStart(msg).then(sendResponse, (e) => sendResponse({ ok: false, code: "BG_ERROR", message: String(e && e.message || e) }));
     return true;
@@ -943,3 +944,83 @@ function newPlanId() {
   return "hgp_" + (crypto.randomUUID && crypto.randomUUID().replace(/-/g, "").slice(0, 24)
     || (Date.now().toString(36) + Math.random().toString(36).slice(2, 10)));
 }
+
+// === 埋点单写者(队列/游标/网络只在此处碰 chrome.storage.local 的 hg_* 键)===
+// storage 键:hg_client_id(UUID)/ hg_events([{seq,name,params,ts(ms)}]) / hg_cursors({backend,ga}) / hg_ga({id,secret})
+const _AN_STORAGE = {
+  get() {
+    return new Promise((res) => chrome.storage.local.get(["hg_client_id", "hg_events", "hg_cursors", "hg_ga"], (r) => res(r || {})));
+  },
+  set(obj) { return new Promise((res) => chrome.storage.local.set(obj, () => res())); },
+};
+let _flushTimer = 0;
+function _analyticsBackend() {
+  // 与 captureDiag 同源:backend 存在 chrome.storage.sync,缺省回落官网地址
+  return new Promise((res) => {
+    try { chrome.storage.sync.get({ backend: "" }, (r) => res((r && r.backend) || "https://www.deuce.monster/htmlgenius")); }
+    catch (e) { res("https://www.deuce.monster/htmlgenius"); }
+  });
+}
+async function _ensureClientId(st) {
+  if (!st.hg_client_id) {
+    let id = "hgcid_" + (crypto.randomUUID ? crypto.randomUUID() : Date.now() + Math.random().toString(36).slice(2));
+    await _AN_STORAGE.set({ hg_client_id: id });
+    st.hg_client_id = id;
+  }
+  return st.hg_client_id;
+}
+async function trackEvent(name, params) {
+  try {
+    const st = await _AN_STORAGE.get();
+    await _ensureClientId(st);
+    const now = Date.now();
+    const events = Array.isArray(st.hg_events) ? st.hg_events : [];
+    const r = HGAnalyticsCore.appendEvent(events, name, params, now, now, 500);
+    let cursors = st.hg_cursors || { backend: 0, ga: 0 };
+    if (r.oldestSeq > 1 && cursors.backend < r.oldestSeq - 1) cursors.backend = r.oldestSeq - 1; // 丢最旧 → 游标钳到队列前
+    if (r.oldestSeq > 1 && cursors.ga < r.oldestSeq - 1) cursors.ga = r.oldestSeq - 1;
+    await _AN_STORAGE.set({ hg_events: r.events, hg_cursors: cursors });
+    if (_flushTimer) clearTimeout(_flushTimer); // 防抖 3s(SW 存续期内 best-effort;被杀则等下次唤醒)
+    _flushTimer = setTimeout(flushAnalytics, 3000);
+  } catch (e) { /* 埋点永不影响产品 */ }
+}
+async function flushAnalytics() {
+  try {
+    const st = await _AN_STORAGE.get();
+    if (!st.hg_client_id || !Array.isArray(st.hg_events) || !st.hg_events.length) return;
+    const clientId = st.hg_client_id;
+    let cursors = st.hg_cursors || { backend: 0, ga: 0 };
+    const now = Date.now();
+    // 路① 自建后端(全量,大陆可达):≤50 条/批;acked_seq 与 rejected 都推进游标(被拒事件不重发)
+    let pendingB = HGAnalyticsCore.toFlush(st.hg_events, cursors.backend);
+    for (let i = 0; i < pendingB.length; i += 50) {
+      const batch = pendingB.slice(i, i + 50).map((e) => ({ seq: e.seq, name: e.name, params: e.params, ts: new Date(e.ts).toISOString() }));
+      const base = await _analyticsBackend();
+      const r = await fetch(base + "/api/events", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId, events: batch }),
+      }).catch(() => null);
+      if (!r || !r.ok) return; // 本轮放弃:下次唤醒整段补发
+      const j = await r.json().catch(() => null);
+      if (j && typeof j.acked_seq === "number" && j.acked_seq > cursors.backend) cursors.backend = j.acked_seq;
+    }
+    // 路② GA4 MP 直发(能到 google 才有意义;配置为空 → 整路跳过,游标不动,靠 500 条上限兜底)
+    const ga = st.hg_ga;
+    if (ga && ga.id && ga.secret) {
+      const pendingG = HGAnalyticsCore.toFlush(st.hg_events, cursors.ga);
+      const batches = HGAnalyticsCore.gaBatches(pendingG, now);
+      let allOk = true;
+      for (const b of batches) {
+        const r = await fetch("https://www.google-analytics.com/mp/collect?measurement_id=" + encodeURIComponent(ga.id) + "&api_secret=" + encodeURIComponent(ga.secret), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ client_id: clientId, events: b }),
+        }).catch(() => null);
+        if (!r || !r.ok) { allOk = false; break; } // 2xx 即视为已提交(MP 对无效事件也回 2xx)
+      }
+      if (allOk && pendingG.length) cursors.ga = pendingG[pendingG.length - 1].seq; // 含被跳过的 >7d 事件
+    }
+    const kept = HGAnalyticsCore.prune(st.hg_events, cursors.backend, cursors.ga);
+    await _AN_STORAGE.set({ hg_events: kept, hg_cursors: cursors });
+  } catch (e) { /* 埋点永不影响产品 */ }
+}
+flushAnalytics(); // SW 启动即补发(SW 随时被杀,这是"下次唤醒"的主要钩子之一)
