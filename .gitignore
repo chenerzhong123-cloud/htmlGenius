@@ -34,3 +34,5 @@ landing/qrcode/
 
 # 社媒封面与营销素材（本地工作产物，不上传 GitHub）
 assets/social/
+.claude/worktrees/
+.claude/plans/
