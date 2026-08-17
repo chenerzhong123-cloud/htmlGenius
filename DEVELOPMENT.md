@@ -82,6 +82,8 @@ uv run uvicorn server.app:app --port 8000 --reload
 
 **邮箱登录(邮箱 + 密码 · 带 email 验证码)**:第三个 provider,与 Google/飞书并存,服务无 VPN 用户。端点 `/auth/email/{register,verify,login,resend}`;注册带邮箱验证码(验证码服务端只存 pbkdf2 哈希)。身份模型统一为 `user_id`——老 Google 数据 `user_id == google_sub`,迁移纯改名+加列、零数据改写、幂等;邮箱用户可凭邀请码加入团队、与 Google 用户协作。邮件 env 未配=日志模式(开发/测试用,验证码进服务端日志,解耦邮件基建)。
 
+**匿名使用统计(漏斗埋点 · v0.9.16)**:双写架构——扩展侧 `analytics-core.js`(纯函数:白名单/seq/游标/GA 时间窗) + `analytics.js`(页面薄壳) + background SW 单写者队列(`chrome.storage.local` 的 `hg_events`/`hg_cursors`,上限 500 条);事件经 `POST /api/events`(无鉴权、每 IP 每分钟 30 次 `WindowLimiter` 限流、每请求 ≤50 条 + 32KB 413、事件名与参数值双层白名单、`UNIQUE(client_id,seq)` 幂等、90 天惰性清理)落 `analytics_events` 表,GA4 走 Measurement Protocol 直发(`config.js` 的 `ga_measurement_id`/`ga_api_secret` 为空时整路跳过)。重试语义为"下次唤醒时整段补发"(不申请 alarms 权限);GA 补发受 72h 回填上限约束(≤72h 真实时间戳 / ≤7 天钳制 / 超出放弃)。
+
 鉴权：扩展走 `chrome.identity.launchWebAuthFlow` → `/auth/lark/login` → 飞书授权 → `/auth/lark/callback` 换 session token；后续请求带 `Authorization: Bearer <session_token>`。批注 author = 飞书 `open_id`（后端 session 注入，硬身份）。批注写后经 SSE 广播 `annotation:created` / `annotation:updated` / `annotation:deleted`；作者可编辑（`PATCH /api/annotations/:id`，跨团队/非作者 403）、删除（级联子树）自己的批注。所有数据自存自管（SQLite），不用 SaaS。
 
 **团队地基（v0.9.x · scope A）**：文档/版本按 `(team_id, document_id)` 复合主键强制隔离（修跨租户 IDOR,R-1）；流密钥生产必填（R-3 fail-closed,缺失 → SSE 票据 503）；建团者=owner,可解散团队（级联删数据）/移除成员,任意成员可生邀请码;Lark 团队=飞书租户,成员由飞书后台管（治理端点仅适用 Google 自建团队）。详见本地 `docs/2026-08-02-team-foundation-design.md`。
