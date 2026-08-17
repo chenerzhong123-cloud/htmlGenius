@@ -24,6 +24,8 @@
 
 ## 发版 / 推送 main 前必做：同步文档
 
+> **流程护栏（2026-08-17 起）**：`.claude/settings.json` 配了 Claude Code hook——push main 时 `scripts/release-check.sh` 会**阻断**文档未同步（RELEASE_NOTES/README 缺当前版本条目）的推送；push 成功后自动注入收尾清单（删已合并分支 / 部署 server 变更 / 发版打包）。紧急热修逃生门：`HG_SKIP_RELEASE_CHECK=1`，须在提交信息里说明原因。改校验规则 = 直接改该脚本并提交（git 即版本管理）。
+
 **推送到 main 前必须同步更新用户向文档，不能只提交代码。** 每次发版（含安全 / 重构批次）都要：
 
 - **`RELEASE_NOTES.md`**：文件顶部加新版本条目，写**用户可见**的变化（不写内部实现 / 审计编号），最新版本在最上。
