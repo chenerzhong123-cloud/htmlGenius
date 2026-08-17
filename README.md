@@ -1,6 +1,6 @@
 # htmlGenius
 
-<p align="center"><img src="assets/html-genius-logo-deep-mint-512x512.png" width="120" alt="htmlGenius"></p>
+<p align="center"><img src="assets/html-genius-logo.png" width="120" alt="htmlGenius"></p>
 
 > 不要再对着 AI 描述“这里改一下”。
 
