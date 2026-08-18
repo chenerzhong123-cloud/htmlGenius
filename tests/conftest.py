@@ -10,6 +10,18 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
+@pytest.fixture(autouse=True)
+def _reset_server_rate_limits():
+    """限流器为模块级单例,测试间共享进程 → 状态会跨用例泄漏(如 prod 用例烧掉的配额
+    影响后续未设 HG_ENV 的用例)。autouse 清空,保证每个用例从干净窗口开始。"""
+    from server import app
+
+    for limiter in (app._auth_limiter, app._login_limiter, app._diag_limiter,
+                    app._ann_limiter, app._events_limiter):
+        limiter._hits.clear()
+    yield
+
+
 @pytest.fixture(scope="session")
 def browser():
     from playwright.sync_api import sync_playwright

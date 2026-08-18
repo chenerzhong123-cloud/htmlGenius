@@ -14,11 +14,14 @@
     "identity",
     "nativeMessaging",
     "notifications",
-    "offscreen"
+    "offscreen",
+    "scripting"
   ],
   "host_permissions": [
     "http://localhost/*",
-    "http://127.0.0.1/*",
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
     "https://*/*",
     "file:///*"
   ],
@@ -39,27 +42,5 @@
       "16": "icons/icon16.png",
       "48": "icons/icon48.png"
     }
-  },
-  "content_scripts": [
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "vendor/purify.min.js",
-        "text-quote.js",
-        "remote-store.js",
-        "sync.js",
-        "storage.js",
-        "artifact-version.js",
-        "buildprompt.js",
-        "i18n.js",
-        "undo.js",
-        "palette.js",
-        "config.js",
-        "content-script.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ]
+  }
 }

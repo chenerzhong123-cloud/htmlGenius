@@ -135,6 +135,14 @@ def init_db(path: Path) -> None:
                 created_at TEXT NOT NULL,
                 UNIQUE(client_id, seq)
             );
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                actor TEXT,
+                team_id TEXT,
+                action TEXT NOT NULL,
+                detail TEXT
+            );
             """
         )
         # v0.2 迁移:versions 加 html_content 列(若旧库缺)
@@ -521,6 +529,23 @@ def _row_to_ann(r: sqlite3.Row) -> dict:
 
 
 # === 诊断上报(A+B:用户一键报告 / opt-in 自动上报)===
+def insert_audit_log(actor: str, team_id: str, action: str, detail: str = "") -> None:
+    """P2-10: 安全审计日志 —— 登录成功与团队治理动作(加人/转让/移除/解散)落库,
+    出事后可溯源。只增不删,不做查询端点(运维直接读 SQLite)。写失败不抛(不因审计拖垮业务)。"""
+    try:
+        c = _connect()
+        try:
+            c.execute(
+                "INSERT INTO audit_log(created_at, actor, team_id, action, detail) VALUES (?,?,?,?,?)",
+                (_now(), str(actor or "")[:200], str(team_id or "")[:200],
+                 str(action)[:64], str(detail)[:500]),
+            )
+        finally:
+            c.close()
+    except Exception as e:
+        print(f"[audit] write failed: {e!r}", flush=True)
+
+
 def save_diagnostics(payload_json: str, mode: str = "manual") -> int:
     """存一条诊断包(原始 JSON 字符串)。大小由端点封顶,此处只落库。返回 id。"""
     c = _connect()

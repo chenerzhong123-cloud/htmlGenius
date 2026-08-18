@@ -108,6 +108,23 @@ async def no_cache_static(request, call_next):
     return response
 
 
+# P2-9: 全局安全响应头(不覆盖路由已设置的 CSP 等专属头)。HSTS 仅在 https(或反代
+# X-Forwarded-Proto=https)时下发——按 spec,浏览器忽略明文 http 上的 HSTS,但避免
+# 本地 http 调试时混入无意义头。
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    # SAMEORIGIN 而非 DENY:viewer.html 需要同源 iframe(doc-frame)加载文档预览;
+    # 第三方嵌入仍被拒(clickjacking 防护不变)。
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    if request.url.scheme == "https" or forwarded == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
+
+
 # R-2(v0.9.9):移除 /docs、/samples 匿名静态挂载 —— /docs 会泄露 docs/ 内的 client_secret 与审计报告,
 # /samples 文件名内嵌 document_id(喂跨租户 IDOR)。仅保留 /static(正规静态资源)。确需对外提供时加鉴权后再挂。
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
@@ -159,13 +176,18 @@ class DevLoginIn(BaseModel):
 @app.get("/auth/lark/login")
 def lark_login(redirect: str):
     """返回飞书授权 URL + 自签 state。扩展用 launchWebAuthFlow 打开它。"""
-    state = issue_state()
+    try:
+        state = issue_state()
+    except RuntimeError:
+        # P0-3 fail-closed:生产未配 HG_LARK_APP_SECRET → state 无法安全签发,拒绝而非回退弱密钥。
+        raise HTTPException(status_code=503, detail="state secret not configured")
     return {"auth_url": lark.authorize_url(redirect, state), "state": state}
 
 
 @app.post("/auth/lark/callback")
-def lark_callback(payload: CallbackIn):
+def lark_callback(payload: CallbackIn, request: Request):
     """code -> 飞书用户信息 -> 建 session。state 必须由 /auth/lark/login 签发。"""
+    _require_rate(_auth_limiter, _client_ip(request))
     if not consume_state(payload.state):
         raise HTTPException(status_code=400, detail="bad state")
     try:
@@ -175,6 +197,7 @@ def lark_callback(payload: CallbackIn):
         print(f"[lark_callback] exchange failed: {e!r}", flush=True)
         raise HTTPException(status_code=502, detail="upstream error")
     token = sessions.create_session(info["open_id"], info["name"], info["team_id"])
+    storage.insert_audit_log(info["open_id"], info["team_id"], "login.lark")
     return {
         "token": token,
         "user": {"id": info["open_id"], "name": info["name"]},
@@ -245,11 +268,12 @@ class GoogleSessionIn(BaseModel):
 
 
 @app.post("/auth/google")
-def auth_google(payload: GoogleIn):
+def auth_google(payload: GoogleIn, request: Request):
     """Google 登录:验身份 → upsert 用户 →(可选:join 凭码 / create 新团队)→ 返回 teams。
 
     无 action 时是纯"身份 + 我的团队列表"查询(侧栏静默重登用它)。
     """
+    _require_rate(_auth_limiter, _client_ip(request))
     try:
         info = google.verify(payload.id_token)
     except Exception as e:  # token 无效/aud 不符
@@ -276,8 +300,9 @@ def auth_google(payload: GoogleIn):
 
 
 @app.post("/auth/google/session")
-def auth_google_session(payload: GoogleSessionIn):
+def auth_google_session(payload: GoogleSessionIn, request: Request):
     """选一个 team → 校验 membership → 发协同用 session token(复用 sessions)。"""
+    _require_rate(_auth_limiter, _client_ip(request))
     try:
         info = google.verify(payload.id_token)
     except Exception as e:
@@ -286,6 +311,7 @@ def auth_google_session(payload: GoogleSessionIn):
         raise HTTPException(status_code=401, detail="authentication failed")
     if not teams.is_member(info["sub"], payload.team_id):
         raise HTTPException(status_code=403, detail="not a member of this team")
+    storage.insert_audit_log(info["sub"], payload.team_id, "login.google")
     token = sessions.create_session(info["sub"], info["name"], payload.team_id)
     return {
         "token": token,
@@ -320,8 +346,9 @@ class EmailResendIn(BaseModel):
 
 
 @app.post("/auth/email/register")
-def email_register(payload: EmailRegisterIn):
+def email_register(payload: EmailRegisterIn, request: Request):
     """注册:校验 → 生成验证码 → 发邮件(未配 HG_SMTP_HOST 走日志模式)。"""
+    _require_rate(_auth_limiter, _client_ip(request))
     try:
         email_auth.start_registration(payload.email, payload.password, payload.name)
     except email_auth.EmailAuthError as e:
@@ -330,26 +357,35 @@ def email_register(payload: EmailRegisterIn):
 
 
 @app.post("/auth/email/verify")
-def email_verify(payload: EmailVerifyIn):
+def email_verify(payload: EmailVerifyIn, request: Request):
     """校验验证码 → 建用户 → team 归属(邀请码加入 / 新建 / 默认)→ 发 session。"""
+    _require_rate(_auth_limiter, _client_ip(request))
     try:
-        return email_auth.verify(payload.email, payload.code, payload.invite_code, payload.team_name)
+        result = email_auth.verify(payload.email, payload.code, payload.invite_code, payload.team_name)
+        storage.insert_audit_log(payload.email, result.get("team_id", ""), "login.email")
+        return result
     except email_auth.EmailAuthError as e:
         raise HTTPException(status_code=e.status, detail=e.detail)
 
 
 @app.post("/auth/email/login")
-def email_login(payload: EmailLoginIn):
+def email_login(payload: EmailLoginIn, request: Request):
     """邮箱+密码登录。失败不区分"邮箱不存在 / 密码错误"。"""
+    _require_rate(_auth_limiter, _client_ip(request))
+    # P0-2:密码爆破专用窗口(8 次/5min/IP+email),比通用 auth 限流更严。
+    _require_rate(_login_limiter, f"{_client_ip(request)}|{payload.email.lower()}")
     try:
-        return email_auth.login(payload.email, payload.password)
+        result = email_auth.login(payload.email, payload.password)
+        storage.insert_audit_log(payload.email, result.get("team_id", ""), "login.email")
+        return result
     except email_auth.EmailAuthError as e:
         raise HTTPException(status_code=e.status, detail=e.detail)
 
 
 @app.post("/auth/email/resend")
-def email_resend(payload: EmailResendIn):
+def email_resend(payload: EmailResendIn, request: Request):
     """重发验证码(受 60s 冷却限制)。"""
+    _require_rate(_auth_limiter, _client_ip(request))
     try:
         email_auth.resend(payload.email)
     except email_auth.EmailAuthError as e:
@@ -362,8 +398,9 @@ class EmailProbeIn(BaseModel):
 
 
 @app.post("/auth/email/probe")
-def email_probe(payload: EmailProbeIn):
+def email_probe(payload: EmailProbeIn, request: Request):
     """探测邮箱是否已注册(登录/注册分支用;暴露账号是否存在,已知权衡)。"""
+    _require_rate(_auth_limiter, _client_ip(request))
     try:
         return email_auth.probe(payload.email)
     except email_auth.EmailAuthError as e:
@@ -488,6 +525,7 @@ def add_member_by_email(team_id: str, payload: MemberByEmailIn, session: Session
     if u["user_id"] == session.open_id:
         raise HTTPException(status_code=400, detail="不能添加自己")
     teams.add_membership(u["user_id"], team_id)  # INSERT OR IGNORE → 已是成员则幂等
+    storage.insert_audit_log(session.open_id, team_id, "team.add_member", u["user_id"])
     return {"ok": True, "sub": u["user_id"], "name": u["name"]}
 
 
@@ -500,6 +538,7 @@ def transfer_team_ownership(team_id: str, payload: TransferOwnershipIn, session:
         raise HTTPException(status_code=403, detail="only owner can transfer ownership")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    storage.insert_audit_log(session.open_id, team_id, "team.transfer_ownership", payload.sub)
     return {"ok": True, "team_id": team_id, "owner_sub": payload.sub}
 
 
@@ -512,6 +551,7 @@ def remove_team_member(team_id: str, sub: str, session: Session = Depends(requir
         raise HTTPException(status_code=403, detail="only owner can remove members")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    storage.insert_audit_log(session.open_id, team_id, "team.remove_member", sub)
     return {"ok": True}
 
 
@@ -522,6 +562,7 @@ def dissolve_team(team_id: str, session: Session = Depends(require_session)):
         teams.dissolve_team(team_id, session.open_id)
     except PermissionError:
         raise HTTPException(status_code=403, detail="only owner can dissolve")
+    storage.insert_audit_log(session.open_id, team_id, "team.dissolve")
     return {"ok": True}
 
 
@@ -529,10 +570,12 @@ def dissolve_team(team_id: str, session: Session = Depends(require_session)):
 
 
 @app.post("/api/diagnostics")
-def submit_diagnostics(payload: dict):
+def submit_diagnostics(payload: dict, request: Request):
     """接收诊断包。大小封顶(128KB)防滥用;不鉴权(用户主动上报/opt-in 自动)。
     payload 由扩展构造:app/chrome/os 版本、bridge 状态、provider、最近错误、Agent 流式(可能含页面内容)。
     """
+    # P0-2:不鉴权端点必须有 IP 限流,否则可被无限刷库(写放大直接打到 SQLite)。
+    _require_rate(_diag_limiter, _client_ip(request))
     raw = json.dumps(payload, ensure_ascii=False)
     if len(raw) > 128 * 1024:
         raise HTTPException(status_code=413, detail="diagnostics payload too large")
@@ -580,6 +623,27 @@ EVENT_SPECS = {
 
 _events_limiter = ratelimit.WindowLimiter(30, 60)
 _last_prune_day = {"d": ""}
+
+# P0-2: 认证/写入/诊断接口限流(单进程内存滑动窗口,与 _events_limiter 同款实现)。
+#   _auth_limiter    20 次/min/IP  —— 所有 auth 端点(注册/验证/探测/OAuth callback)
+#   _login_limiter    8 次/5min/IP+email —— 密码登录专用(防在线爆破;key 加 email 使
+#                    分布式猜同一账号也被该账号维度卡住)
+#   _diag_limiter    10 次/min/IP  —— /api/diagnostics(不鉴权但有 128KB 上限,需防刷库)
+# 鉴权后的批注写操作按 user(而非 IP)限,避免公司出口 NAT 误伤。
+_auth_limiter = ratelimit.WindowLimiter(20, 60)
+_login_limiter = ratelimit.WindowLimiter(8, 300)
+_diag_limiter = ratelimit.WindowLimiter(10, 60)
+_ann_limiter = ratelimit.WindowLimiter(60, 60)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "?"
+
+
+def _require_rate(limiter: ratelimit.WindowLimiter, key: str) -> None:
+    # dev/test(HG_ENV 运行时判定)放宽,避免测试连打触发限流;生产按配额执行。
+    if not is_dev_env() and not limiter.allow(key):
+        raise HTTPException(status_code=429, detail="too many requests")
 
 
 def _now_day() -> str:
@@ -703,11 +767,34 @@ def get_document(document_id: str, session: Session = Depends(require_session)):
 # === 批注 (v0.5: author/team 全从 session 注入,删 X-User 头) ===
 
 
+# P1-6: 批注文本字段的控制字符清洗(纵深防御)。渲染侧已 esc(),HTML 标签属正常文本
+# 不动;只剥离 C0 控制符(\t\n\r 除外)与 DEL —— 防日志注入/终端转义/异常 Unicode 攻击面。
+_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _strip_ctrl(s):
+    return _CTRL_RE.sub("", s) if isinstance(s, str) else s
+
+
+def _sanitize_annotation(payload: AnnotationCreate) -> AnnotationCreate:
+    payload.quote = _strip_ctrl(payload.quote)
+    if payload.selector is not None:
+        payload.selector.exact = _strip_ctrl(payload.selector.exact)
+        payload.selector.prefix = _strip_ctrl(payload.selector.prefix)
+        payload.selector.suffix = _strip_ctrl(payload.selector.suffix)
+    if payload.body is not None:
+        payload.body.comment = _strip_ctrl(payload.body.comment)
+        payload.body.instruction = _strip_ctrl(payload.body.instruction)
+    return payload
+
+
 @app.post("/api/annotations")
 async def create_annotation(
     payload: AnnotationCreate, session: Session = Depends(require_session)
 ):
     # author.id = 飞书 open_id(后端 session 注入,不可伪造);team_id = session.team_id
+    _require_rate(_ann_limiter, session.open_id)
+    _sanitize_annotation(payload)
     payload.author = {"id": session.open_id, "name": session.name}
     ann = storage.save_annotation(payload, team_id=session.team_id)
     print(f"[ann] CREATE team={session.team_id} doc={payload.document_id} id={ann['id']} author={session.open_id}", flush=True)
@@ -749,7 +836,11 @@ async def update_annotation(
     aid: str, payload: AnnotationUpdate, session: Session = Depends(require_session)
 ):
     # 作者校验由 storage 做(跨团队/非作者 → PermissionError → 403);仅作者可改自己留下的评论。
+    _require_rate(_ann_limiter, session.open_id)
     patch = payload.body.model_dump(exclude_unset=True)  # BE-5:只合并实际传入的字段
+    for k in ("comment", "instruction"):  # P1-6:与 create 同款控制字符清洗
+        if k in patch:
+            patch[k] = _strip_ctrl(patch[k])
     try:
         ann = storage.update_annotation(aid, session.team_id, session.open_id, patch)
     except PermissionError:

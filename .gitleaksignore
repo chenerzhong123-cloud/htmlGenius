@@ -1,0 +1,3 @@
+# gitleaks 误报白名单(指纹格式: <commit>:<file>:<rule>:<行号>)
+# extension/manifest.json 的 "key" 是扩展公开 DER 公钥(保持扩展 ID 稳定,随商店发布本来即公开),非私钥。
+0340df717db90c69be57230511d535b357df1884:extension/manifest.json:generic-api-key:3
