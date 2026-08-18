@@ -68,7 +68,7 @@ uv run uvicorn server.app:app --port 8000 --reload
 
 | env | 用途 | 默认 |
 |---|---|---|
-| `HG_LARK_APP_ID` / `HG_LARK_APP_SECRET` | 飞书自建应用凭据（真 OAuth 必填） | — |
+| `HG_LARK_APP_ID` / `HG_LARK_APP_SECRET` | 飞书自建应用凭据（真 OAuth 必填）;v0.9.17 起 `APP_SECRET` 同时是 OAuth state 签名密钥,**生产缺失时 `/auth/lark/login` fail-closed → 503**(不再回退公开常量) | — |
 | `HG_DEFAULT_TEAM` | `tenant_key` 缺失时的 team_id 回退（单组织=单团队） | `"default"` |
 | `HG_AUTH_ALLOW_DEV` | 开放 `/auth/dev-login` 旁路（本地开发/测试，**生产必须 `0`**） | `"0"` |
 | `HG_SESSION_TTL` | session 有效期（秒） | `604800`（7 天） |
