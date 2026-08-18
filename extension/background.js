@@ -37,7 +37,63 @@ const _runsByTab = new Map();
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  ensureContentScriptsRegistered();
 });
+
+// —— P1-5 权限收敛:manifest 不再静态声明 content_scripts(静态 matches 会按必需 host 权限
+// 计入安装警告,无法收敛攻击面),改为 scripting.registerContentScripts 持久化动态注册。
+// 注册的 matches 只在「已获 host 权限」的站点注入:localhost/127.0.0.1 是必需权限立即生效;
+// https://*/* 与 file:///* 属 optional_host_permissions,用户在 Side Panel 授权后才注入,
+// 已打开页面不回溯注入 → 授权后需刷新页面(onAdded → 广播 hg-permissions-changed 引导刷新)。——
+const HG_CONTENT_SCRIPT_ID = "hg-main";
+const HG_CONTENT_SCRIPT_MATCHES = [
+  "http://localhost/*",
+  "http://127.0.0.1/*",
+  "https://*/*",
+  "file:///*"
+];
+async function ensureContentScriptsRegistered() {
+  if (!chrome.scripting || !chrome.scripting.registerContentScripts) return;
+  try {
+    const registered = await chrome.scripting.getRegisteredContentScripts();
+    if (registered && registered.some((s) => s.id === HG_CONTENT_SCRIPT_ID)) return;
+    await chrome.scripting.registerContentScripts([{
+      id: HG_CONTENT_SCRIPT_ID,
+      matches: HG_CONTENT_SCRIPT_MATCHES,
+      js: [
+        "vendor/purify.min.js",
+        "text-quote.js",
+        "remote-store.js",
+        "sync.js",
+        "storage.js",
+        "artifact-version.js",
+        "buildprompt.js",
+        "i18n.js",
+        "undo.js",
+        "palette.js",
+        "config.js",
+        "content-script.js"
+      ],
+      runAt: "document_idle",
+      persistAcrossSessions: true
+    }]);
+  } catch (e) {
+    console.warn("[hg] registerContentScripts failed", e);
+  }
+}
+ensureContentScriptsRegistered(); // SW 每次冷启动兜底(注册本身幂等且持久化,不会重复)
+
+// 授权变化(用户在 Side Panel 授予/撤销全站权限)→ 通知 Side Panel 引导刷新已打开页面
+if (chrome.permissions && chrome.permissions.onAdded) {
+  chrome.permissions.onAdded.addListener((p) => {
+    broadcast({ type: "hg-permissions-changed", added: true, origins: (p && p.origins) || [] });
+  });
+}
+if (chrome.permissions && chrome.permissions.onRemoved) {
+  chrome.permissions.onRemoved.addListener((p) => {
+    broadcast({ type: "hg-permissions-changed", added: false, origins: (p && p.origins) || [] });
+  });
+}
 
 function nowIso() { return new Date().toISOString(); }
 function newRunId() {

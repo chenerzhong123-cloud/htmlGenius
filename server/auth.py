@@ -56,7 +56,14 @@ _STATE_TTL = 300  # 秒
 
 
 def _state_secret() -> bytes:
-    return (os.environ.get("HG_LARK_APP_SECRET") or "dev-insecure-state-secret").encode()
+    """OAuth state 签名密钥。生产缺 HG_LARK_APP_SECRET → fail-closed 抛错
+    (与 _stream_secret 同款策略;绝不回退公开常量,否则 state 可被伪造做 OAuth CSRF)。"""
+    secret = os.environ.get("HG_LARK_APP_SECRET")
+    if secret:
+        return secret.encode()
+    if is_dev_env():
+        return b"dev-insecure-state-secret"
+    raise RuntimeError("HG_LARK_APP_SECRET not configured: refusing OAuth state (fail-closed)")
 
 
 def issue_state() -> str:
