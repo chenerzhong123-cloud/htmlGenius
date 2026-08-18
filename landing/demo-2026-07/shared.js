@@ -79,11 +79,11 @@
     var featureCopy = zh ? [
       ['就在 Chrome 中<br><span class="gradient">就在你想修改的地方</span>', '无需导出，无需上传，也无需在源码中反复摸索。你看到什么，就直接在原处修改什么。'],
       ['如往常一样批注<br><span class="gradient">剩下的交给 Agent</span>', '在最需要的上下文中，准确说出你的想法。行内批注为 AI 提供足够细节，让它无缝完成后续工作。'],
-      ['让批注只停留在<br><span class="gradient">你的团队之内</span>', '只与真正需要的人共享反馈，不让信息外泄。通过飞书或 Google 账号自然登录，让每个决策保持连续。']
+      ['让批注只停留在<br><span class="gradient">你的团队之内</span>', '只与真正需要的人共享反馈，不让信息外泄。登录后，让每个决策持续沉淀在正确的团队中。']
     ] : [
       ['Right inside Chrome<br><span class="gradient">Right on the point</span>', 'No exports. No uploads. No wrestling with source code. Change the words and structure you see, right where they live.'],
       ['Comment your thoughts<br><span class="gradient">Let the Agent do the rest</span>', 'Say exactly what you mean, in the context where it matters. Inline annotations give your AI the details it needs to complete the task seamlessly.'],
-      ['Keep comments<br><span class="gradient">within your team</span>', 'Share feedback with the people who need it—and no one else. Sign in naturally with your Lark or Google account, then keep every decision connected.']
+      ['Keep comments<br><span class="gradient">within your team</span>', 'Share feedback with the people who need it—and no one else. Sign in to keep every decision connected and visible only to the right team.']
     ];
     document.querySelectorAll('main > .section:not(#workflow)').forEach(function (section, index) {
       var title = section.querySelector('.feature-copy h2');
