@@ -122,69 +122,6 @@
     if (tab && tab.id) { try { await chrome.tabs.sendMessage(tab.id, { type: "panel-ping" }); } catch (e) { /* 非关键 */ } }
   }
 
-  // —— P1-5:全站 host 权限按需申请(optional_host_permissions)——
-  // 首次打开 Side Panel 检测 https://*/* 是否已授权;未授权显示引导横幅,点击按钮在用户手势内
-  // chrome.permissions.request。授权变化(本面板或扩展详情页操作)→ 提示刷新已打开页面
-  // (content script 对已打开页面不回溯注入)。
-  const SITE_PERM_ORIGINS = ["https://*/*", "file:///*"];
-  async function sitePermGranted() {
-    try { return await chrome.permissions.contains({ origins: ["https://*/*"] }); }
-    catch (e) { return false; }
-  }
-  async function syncSitePermHint() {
-    const el = document.getElementById("site-perm-hint");
-    if (!el) return;
-    el.hidden = await sitePermGranted();
-  }
-  // hotfix(0.9.17):content script 注册失败提示(注册失败曾是静默的,用户只看到页面"卡住")。
-  function showRegErrorHint(errText) {
-    const el = document.getElementById("site-perm-hint");
-    if (!el) return;
-    el.hidden = false;
-    el.querySelector("b").textContent = t("regError.title");
-    el.querySelector("span").textContent = t("regError.body") + " (" + errText.slice(0, 120) + ")";
-    const btn = document.getElementById("site-perm-btn");
-    if (btn) { btn.hidden = true; }
-  }
-  function initSitePermission() {
-    syncSitePermHint();
-    // 打开侧边栏即触发注册自愈:SW 冷启动那次注册若因任何原因失败/未跑,消息会唤醒 SW
-    // 再注册一次(幂等)。仍失败 → 显式报错横幅,不再静默卡住。
-    try {
-      chrome.runtime.sendMessage({ type: "hg-ensure-content-scripts" }).then((r) => {
-        if (r && r.ok === false) showRegErrorHint(r.error || "unknown");
-      }).catch(() => {});
-    } catch (e) { /* SW 未就绪:冷启动兜底仍会跑 */ }
-    try {
-      chrome.storage.local.get("hg_cs_reg_error").then((s) => {
-        if (s && s.hg_cs_reg_error) showRegErrorHint(s.hg_cs_reg_error);
-      }).catch(() => {});
-    } catch (e) {}
-    const btn = document.getElementById("site-perm-btn");
-    if (btn) btn.addEventListener("click", async () => {
-      // 必须在用户手势(click)内调用,不能包进 await 之后
-      try {
-        const granted = await chrome.permissions.request({ origins: SITE_PERM_ORIGINS.slice() });
-        if (!granted) return; // 用户拒绝:横幅保留,不报错
-        showToast(t("sitePerm.granted"), 6000);
-        activateActiveTab(false); // 重试激活当前页(刷新前通常仍连不上,靠下方 refreshNeeded 横幅引导)
-      } catch (e) { /* 手势过期等:静默,横幅保留 */ }
-      syncSitePermHint();
-    });
-    // 授权变化(含用户从扩展详情页撤销)→ 更新横幅 + 提示刷新
-    if (chrome.permissions && chrome.permissions.onAdded) {
-      chrome.permissions.onAdded.addListener(() => {
-        syncSitePermHint();
-        showToast(t("sitePerm.granted"), 6000);
-      });
-    }
-    if (chrome.permissions && chrome.permissions.onRemoved) {
-      chrome.permissions.onRemoved.addListener(() => {
-        syncSitePermHint();
-        showToast(t("sitePerm.revoked"), 6000);
-      });
-    }
-  }
   // 收起侧边栏:立即断开 port(同步,触发活动标签失活)+ 广播 deactivate(兜底其他标签)
   function onPanelClosing() {
     if (_panelPort) { try { _panelPort.disconnect(); } catch (e) {} _panelPort = null; }
@@ -3157,7 +3094,6 @@
       applyTheme(theme);
     });
     activateActiveTab(true); // 打开侧边栏:激活当前页 + 弹编辑确认窗(刷新前)
-    initSitePermission();
     const resp = await sendToContent({ type: "get-annotations" });
     if (resp && resp.type === "annotations-list") {
       isLocal = resp.isLocal;

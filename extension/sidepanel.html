@@ -53,11 +53,6 @@
     <button id="refresh-now-btn" class="file-access-copy" type="button" data-i18n="refreshNeeded.btn">刷新页面</button>
   </div>
   <!-- P1-5:全站 host 权限改为按需申请(optional_host_permissions),未授权时引导用户开启 -->
-  <div id="site-perm-hint" class="file-access-hint" hidden>
-    <b data-i18n="sitePerm.title">启用全站批注权限</b>
-    <span data-i18n="sitePerm.body">htmlGenius 需要你授权后才能在网页上批注和编辑。点击下方按钮授权（可随时在扩展详情页撤销）。</span>
-    <button id="site-perm-btn" class="file-access-copy" type="button" data-i18n="sitePerm.btn">启用全站批注权限</button>
-  </div>
   <button id="edit-btn" hidden>切换编辑模式</button>
   <!-- v0.8: 编辑工具区。交互展示(弹层样式等)是侧边栏自己的;但所有改动都发消息给
        content-script 的 execEdit 唯一入口执行,与页面浮动工具栏的效果完全一致。 -->

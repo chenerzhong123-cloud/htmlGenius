@@ -35,61 +35,13 @@ const _providerProbe = PlanValidate.makeProviderProbeCache();
 // tab -> { run_id, port, terminal }
 const _runsByTab = new Map();
 
-// —— P1-5 权限收敛:manifest 不再静态声明 content_scripts(静态 matches 会按必需 host 权限
-// 计入安装警告,无法收敛攻击面),改为 scripting.registerContentScripts 持久化动态注册。
-// 注册的 matches 只在「已获 host 权限」的站点注入:localhost/127.0.0.1 是必需权限立即生效;
-// https://*/* 与 file:///* 属 optional_host_permissions,用户在 Side Panel 授权后才注入,
-// 已打开页面不回溯注入 → 授权后需刷新页面(onAdded → 广播 hg-permissions-changed 引导刷新)。
-// hotfix(0.9.17):常量必须在 onInstalled 监听注册之前声明——监听回调可能在脚本顶层
-// 求值完成前触发,晚声明的 const 处于 TDZ,注册会以 ReferenceError 静默失败(曾致
-// 用户环境 registered=[]、所有页面无 content script)。
-const HG_CONTENT_SCRIPT_ID = "hg-main";
-const HG_CONTENT_SCRIPT_MATCHES = [
-  "http://localhost/*",
-  "http://127.0.0.1/*",
-  "https://*/*",
-  "file:///*"
-];
-async function ensureContentScriptsRegistered() {
-  if (!chrome.scripting || !chrome.scripting.registerContentScripts) return { ok: false, error: "scripting API unavailable" };
-  try {
-    const registered = await chrome.scripting.getRegisteredContentScripts();
-    if (registered && registered.some((s) => s.id === HG_CONTENT_SCRIPT_ID)) return { ok: true };
-    await chrome.scripting.registerContentScripts([{
-      id: HG_CONTENT_SCRIPT_ID,
-      matches: HG_CONTENT_SCRIPT_MATCHES,
-      js: [
-        "vendor/purify.min.js",
-        "text-quote.js",
-        "remote-store.js",
-        "sync.js",
-        "storage.js",
-        "artifact-version.js",
-        "buildprompt.js",
-        "i18n.js",
-        "undo.js",
-        "palette.js",
-        "config.js",
-        "content-script.js"
-      ],
-      runAt: "document_idle",
-      persistAcrossSessions: true
-    }]);
-    // 注册成功清除历史失败标记(sidepanel 据此显示/隐藏报错横幅)
-    try { chrome.storage.local.remove("hg_cs_reg_error"); } catch (_) {}
-    return { ok: true };
-  } catch (e) {
-    // hotfix(0.9.17):失败必须可见(error 级日志 + storage 标记),不再静默吞掉。
-    console.error("[hg] registerContentScripts failed", e);
-    try { chrome.storage.local.set({ hg_cs_reg_error: String(e && e.message || e) }); } catch (_) {}
-    return { ok: false, error: String(e && e.message || e) };
-  }
-}
-ensureContentScriptsRegistered(); // SW 每次冷启动兜底(注册本身幂等且持久化,不会重复)
-
+// content script 注入方式:manifest 静态 content_scripts(matches <all_urls> + 必需 host 权限)。
+// 曾在 0.9.17 尝试改为 optional_host_permissions + scripting.registerContentScripts 动态注册
+// (收窄安装时攻击面),但真实用户环境出现 registered=[] 且自愈失效的疑难问题,且"任意页批注"
+// 的产品形态决定了每个用户最终都要授全站权限——按需授权只增加摩擦。故回退到静态声明(0.9.16
+// 同款,线上验证过的行为);其余 v0.9.17 安全加固全部保留。
 chrome.runtime.onInstalled.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  ensureContentScriptsRegistered();
 });
 
 // 授权变化(用户在 Side Panel 授予/撤销全站权限)→ 通知 Side Panel 引导刷新已打开页面
@@ -146,12 +98,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 的 port.onMessage(onHostMessage / probe 等),不经 runtime.onMessage,故不受此校验影响。
   if (!sender || sender.id !== chrome.runtime.id) return;
   if (msg.type === "hg-track") { trackEvent(msg.name, msg.params); return; } // 埋点:不回包,fire-and-forget
-  if (msg.type === "hg-ensure-content-scripts") {
-    // hotfix(0.9.17):sidepanel 打开时主动触发注册自愈——SW 冷启动那次注册若因任何
-    // 原因失败/未跑,这里是第二条路径(消息会唤醒 SW,注册幂等)。
-    ensureContentScriptsRegistered().then(sendResponse);
-    return true;
-  }
   if (msg.type === "bridge-start") {
     handleBridgeStart(msg).then(sendResponse, (e) => sendResponse({ ok: false, code: "BG_ERROR", message: String(e && e.message || e) }));
     return true;
