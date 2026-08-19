@@ -14,8 +14,7 @@
     "identity",
     "nativeMessaging",
     "notifications",
-    "offscreen",
-    "scripting"
+    "offscreen"
   ],
   "host_permissions": [
     "http://localhost/*",
