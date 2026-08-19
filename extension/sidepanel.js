@@ -136,8 +136,30 @@
     if (!el) return;
     el.hidden = await sitePermGranted();
   }
+  // hotfix(0.9.17):content script 注册失败提示(注册失败曾是静默的,用户只看到页面"卡住")。
+  function showRegErrorHint(errText) {
+    const el = document.getElementById("site-perm-hint");
+    if (!el) return;
+    el.hidden = false;
+    el.querySelector("b").textContent = t("regError.title");
+    el.querySelector("span").textContent = t("regError.body") + " (" + errText.slice(0, 120) + ")";
+    const btn = document.getElementById("site-perm-btn");
+    if (btn) { btn.hidden = true; }
+  }
   function initSitePermission() {
     syncSitePermHint();
+    // 打开侧边栏即触发注册自愈:SW 冷启动那次注册若因任何原因失败/未跑,消息会唤醒 SW
+    // 再注册一次(幂等)。仍失败 → 显式报错横幅,不再静默卡住。
+    try {
+      chrome.runtime.sendMessage({ type: "hg-ensure-content-scripts" }).then((r) => {
+        if (r && r.ok === false) showRegErrorHint(r.error || "unknown");
+      }).catch(() => {});
+    } catch (e) { /* SW 未就绪:冷启动兜底仍会跑 */ }
+    try {
+      chrome.storage.local.get("hg_cs_reg_error").then((s) => {
+        if (s && s.hg_cs_reg_error) showRegErrorHint(s.hg_cs_reg_error);
+      }).catch(() => {});
+    } catch (e) {}
     const btn = document.getElementById("site-perm-btn");
     if (btn) btn.addEventListener("click", async () => {
       // 必须在用户手势(click)内调用,不能包进 await 之后
