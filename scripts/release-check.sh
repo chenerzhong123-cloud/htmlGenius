@@ -42,9 +42,32 @@ merged_branches() {
   echo "$out" | xargs echo
 }
 
+# --- 阻断:manifest.key 完整性(钉死开发扩展 ID 的公开值,坏 key = 所有未打包加载报错) ---
+check_manifest_key() {
+  local err; err=$(python3 - <<'PY'
+import json, base64, sys
+try:
+    k = json.load(open('extension/manifest.json')).get('key')
+    if not k:
+        sys.exit("manifest.key 缺失(源 manifest 必须保留 key 钉死开发扩展 ID;只有 pack.sh 在打包副本里删它)")
+    der = base64.b64decode(k, validate=True)
+    if len(der) != 294:
+        sys.exit(f"manifest.key DER 长度 {len(der)} 字节(应为 294)——疑似被改写/截断,与 git 历史比对恢复")
+    sys.exit(0)
+except SystemExit:
+    raise
+except Exception as e:
+    sys.exit(f"manifest.key 非法(base64 解码失败): {e}")
+PY
+  )
+  [[ -n "$err" ]] && fail "$err"
+  echo "${GRN}[release-check] manifest.key 完整 ✓ (294 字节 DER)${RST}" >&2
+}
+
 cmd_push() {
   [[ "${HG_SKIP_RELEASE_CHECK:-}" == "1" ]] && { note "HG_SKIP_RELEASE_CHECK=1,跳过(请记得补规范动作)"; exit 0; }
   check_docs
+  check_manifest_key
   local mb; mb=$(merged_branches)
   [[ -n "$mb" ]] && note "已并入 main 未清理的分支:${mb} —— 按「只留 main 一条长期线」约定,请 git branch -d + 删远端(收尾时把 gitignored 文档先搬出 worktree)"
   local range="origin/main..HEAD"
