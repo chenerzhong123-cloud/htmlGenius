@@ -318,6 +318,12 @@
     const staleItems = items.filter((a) => a._status === "stale");
     const byParent = {};
     openItems.forEach((a) => { const k = a.parent_id || null; (byParent[k] = byParent[k] || []).push(a); });
+    function isOwnComment(ann, user) {
+      return !!(user && user.id && ann.author && ann.author.id === user.id);
+    }
+    function authorInitial(name) {
+      return Array.from(String(name || t("author.fallback")).trim())[0] || "?";
+    }
     function buildCard(ann, depth, stale) {
       const card = document.createElement("div");
       card.className = "card" + (stale ? " stale" : "");
@@ -325,8 +331,13 @@
       if (depth) card.style.marginLeft = (depth * 14) + "px";
       const quote = (ann.quote || "").slice(0, 60);
       const comment = (ann.body && ann.body.comment) || t("card.noComment");
-      const who = (ann.author && ann.author.name) ? "[" + ann.author.name + "]" : "";
-      card.innerHTML = '<div class="quote">' + esc(quote) + '</div><div>' + esc(who + " ") + linkify(comment) + '</div>'
+      const authorName = (ann.author && ann.author.name) || t("author.fallback");
+      const own = isOwnComment(ann, _sessionUser);
+      card.innerHTML = '<div class="quote">' + esc(quote) + '</div>'
+        + '<div class="card-author"><span class="card-avatar" aria-hidden="true">' + esc(authorInitial(authorName)) + '</span>'
+        + '<span class="card-author-name">' + esc(authorName) + '</span>'
+        + '<span class="card-author-self"' + (own ? "" : " hidden") + '>' + esc(t("author.you")) + '</span></div>'
+        + '<div class="comment">' + linkify(comment) + '</div>'
         + (stale ? '<div class="stale-hint">' + esc(t("stale.hint")) + '</div>' : "");
       const acts = document.createElement("div");
       acts.className = "card-acts";
@@ -340,6 +351,8 @@
       }
       getCfg(["user", "mode"]).then((cfg) => {
         const me = cfg.user && cfg.user.id;
+        const self = card.querySelector(".card-author-self");
+        if (self) self.hidden = !isOwnComment(ann, cfg.user);
         if (cfg.mode !== "synced" || (ann.author && ann.author.id === me)) {
           const edit = document.createElement("button");
           edit.textContent = t("card.edit"); edit.title = t("card.edit");
@@ -1725,12 +1738,21 @@
   // 发送组菜单:⌄ 切换 + 重新 probe(缓存过期);agent 选 provider;外部点击关闭
   const sendToggle = document.getElementById("contract-send-toggle");
   const sendMenu = document.getElementById("contract-send-menu");
-  function closeSendMenu() { if (sendMenu) sendMenu.classList.remove("show"); if (sendToggle) sendToggle.setAttribute("aria-expanded", "false"); }
+  function closeSendMenu() {
+    if (sendMenu) { sendMenu.classList.remove("show"); sendMenu.hidden = true; }
+    if (sendToggle) sendToggle.setAttribute("aria-expanded", "false");
+  }
   if (sendToggle) sendToggle.addEventListener("click", (e) => {
     e.stopPropagation();
     queryProviders(false); // 点开下拉时若缓存过期则重探(spec §3.D)
     const open = !sendMenu.classList.contains("show");
-    if (open) { sendMenu.classList.add("show"); sendToggle.setAttribute("aria-expanded", "true"); } else closeSendMenu();
+    if (open) {
+      // `hidden` 在 Chrome UA stylesheet 中带 !important；仅加 .show 仍会被隐藏，
+      // 导致下拉里的 Connection Center 永远无法进入。
+      sendMenu.hidden = false;
+      sendMenu.classList.add("show");
+      sendToggle.setAttribute("aria-expanded", "true");
+    } else closeSendMenu();
   });
   if (sendMenu) sendMenu.addEventListener("click", (e) => {
     const ag = e.target.closest(".agent");
@@ -2336,7 +2358,7 @@
       + '<input class="af-input" type="text" data-field="team_name" placeholder="' + t("ws.create.ph") + '">'
       + '<button class="af-primary" data-action="create-workspace"' + (_accountBusy ? " disabled" : "") + ">" + t("ws.create.action") + "</button>" + afErr() + "</div>";
   }
-  function showLoggedIn(user) { _sessionUser = user; setAccountFlow(_sessionTeam ? "home" : "join-or-create"); }
+  function showLoggedIn(user) { _sessionUser = user; renderCards(_lastItems); setAccountFlow(_sessionTeam ? "home" : "join-or-create"); }
   function refreshLoginState() { if (_sessionUser) renderAccountFlow(); }
   async function _authFetch(path, init) {
     const cfg = await getCfg(["session_token"]);

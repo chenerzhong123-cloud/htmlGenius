@@ -134,6 +134,9 @@ def run_phase(tag, http_url, do_edit_and_contract=True):
             sws = ctx.service_workers
             report(f"[{tag}] SW 唤醒启动", any(s.url.startswith(f"chrome-extension://{ext_id}/") for s in sws),
                    f"count={len(sws)}")
+            sw = next((s for s in sws if s.url.startswith(f"chrome-extension://{ext_id}/")), None)
+            analytics_ready = bool(sw and sw.evaluate("typeof globalThis.HGAnalyticsCore === 'object'"))
+            report(f"[{tag}] SW 加载 analytics core", analytics_ready, f"ready={analytics_ready}")
 
             regs = sp.evaluate("async()=>{try{return await chrome.scripting.getRegisteredContentScripts()}catch(e){return ['ERR:'+e.message]}}")
             report(f"[{tag}] 动态注册表为空(revert 干净)", isinstance(regs, list) and len(regs) == 0, json.dumps(regs)[:100])

@@ -459,7 +459,15 @@ body.contract-open #account-sheet { display: none !important; }
   padding: 5px 9px; margin-bottom: 7px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.card .comment { color: var(--text-secondary); word-break: break-word; }
+.card-author { display: flex; align-items: center; gap: 7px; min-height: 22px; margin-bottom: 7px; }
+.card-avatar {
+  display: inline-grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px;
+  border-radius: 50%; background: var(--brand); color: var(--on-cta);
+  font-size: 10px; font-weight: 700; line-height: 1;
+}
+.card-author-name { color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.card-author-self { color: var(--text-muted); font-size: 10px; }
+.card .comment { color: var(--text-secondary); word-break: break-word; line-height: 1.55; }
 /* #3: 失效评论 —— 不降透明度,改 warning 左栏 + 置底分区 */
 .card.stale .quote { background: var(--warning-soft); border-left-color: var(--warning); }
 .stale-section { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--line-subtle); }

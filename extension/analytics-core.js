@@ -77,7 +77,9 @@
     var floor = Math.min(backendCursor, gaCursor);
     return events.filter(function (e) { return e.seq > floor; });
   }
-  window.HGAnalyticsCore = {
+  // 同时被 Side Panel 页面和 MV3 Service Worker 通过 importScripts() 加载；
+  // Worker 没有 window，必须使用两种上下文都具备的 globalThis。
+  globalThis.HGAnalyticsCore = {
     cleanEvent: cleanEvent, nextSeq: nextSeq, appendEvent: appendEvent,
     toFlush: toFlush, gaTimestamp: gaTimestamp, gaBatches: gaBatches, prune: prune,
   };
