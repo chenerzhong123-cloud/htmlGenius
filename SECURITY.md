@@ -12,7 +12,7 @@
 |---|---|---|
 | P0-2 | auth(20/min/IP)、密码登录(8/5min/IP+email)、diagnostics(10/min/IP)、批注写(60/min/user) 限流 | ✅ 已落地 |
 | P0-3 | 生产缺 `HG_LARK_APP_SECRET` 时 OAuth state fail-closed（503，不再回退公开常量） | ✅ 已落地 |
-| P1-5 | 扩展全站 host 权限改 `optional_host_permissions` 按需授权；content script 改 `scripting.registerContentScripts` 动态注册 | ✅ 已落地（发布新版商店包生效） |
+| P1-5 | 曾尝试将全站 host 权限改为 `optional_host_permissions` 并用动态注册收窄权限；因注册稳定性与产品“任意页批注”需求，已回退到静态 `content_scripts`，不再声明未使用的 `scripting` 权限 | ✅ 已复核 |
 | P1-6 | 批注 comment/quote/instruction 服务端剥离 C0 控制符（渲染侧已有 esc + 安全 linkify，纵深防御） | ✅ 已落地 |
 | P2-9 | 全局安全响应头：nosniff / Referrer-Policy / X-Frame-Options: SAMEORIGIN / HSTS(https) | ✅ 已落地 |
 | P2-10 | `audit_log` 表：登录成功与团队治理动作（加人/转让/移除/解散）落库 | ✅ 已落地 |
