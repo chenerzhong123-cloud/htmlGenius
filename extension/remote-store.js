@@ -54,6 +54,7 @@ window.RemoteStore = (function () {
             method: "POST",
             headers: req.headers,
             body: JSON.stringify(req.body),
+            credentials: "omit", // 鉴权只用 Bearer；禁止 file:///任意宿主页携带 Cookie 触发 CORS 凭据限制。
           });
           console.log("[hg] RS.save resp", r.status);
           if (!r.ok) throw new Error("save failed " + r.status);
@@ -67,7 +68,7 @@ window.RemoteStore = (function () {
         const url = cfg.backend + "/api/annotations?document_id=" + encodeURIComponent(docId);
         console.log("[hg] RS.list GET", url);
         try {
-          const r = await fetch(url, { headers: authHeaders(cfg) });
+          const r = await fetch(url, { headers: authHeaders(cfg), credentials: "omit" });
           console.log("[hg] RS.list resp", r.status);
           if (!r.ok) throw new Error("list failed " + r.status);
           const j = await r.json();
@@ -79,7 +80,7 @@ window.RemoteStore = (function () {
       },
       async deleteAnnotation(id) {
         const url = cfg.backend + "/api/annotations/" + encodeURIComponent(id);
-        const r = await fetch(url, { method: "DELETE", headers: authHeaders(cfg) });
+        const r = await fetch(url, { method: "DELETE", headers: authHeaders(cfg), credentials: "omit" });
         // 403 = 非作者,业务层视为删除未生效但不抛错(返回 false)
         if (!r.ok && r.status !== 403) throw new Error("delete failed " + r.status);
         return r.ok;
@@ -87,7 +88,7 @@ window.RemoteStore = (function () {
       async updateAnnotation(id, bodyPatch) {
         // PATCH /api/annotations/:id {body};作者校验由后端做,403→返回 false(非作者)
         const url = cfg.backend + "/api/annotations/" + encodeURIComponent(id);
-        const r = await fetch(url, { method: "PATCH", headers: authHeaders(cfg), body: JSON.stringify({ body: bodyPatch }) });
+        const r = await fetch(url, { method: "PATCH", headers: authHeaders(cfg), body: JSON.stringify({ body: bodyPatch }), credentials: "omit" });
         if (!r.ok && r.status !== 403) throw new Error("update failed " + r.status);
         return r.ok;
       },

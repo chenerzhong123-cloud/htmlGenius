@@ -91,6 +91,15 @@ def delete_session(token: str) -> bool:
         c.close()
 
 
+def update_user_name(open_id: str, name: str) -> None:
+    """同步该用户所有有效会话的显示名称，避免切换团队后回退旧名。"""
+    c = _connect()
+    try:
+        c.execute("UPDATE sessions SET name=? WHERE open_id=?", (name, open_id))
+    finally:
+        c.close()
+
+
 def prune_expired() -> int:
     c = _connect()
     try:

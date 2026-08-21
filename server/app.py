@@ -173,6 +173,10 @@ class DevLoginIn(BaseModel):
     team: Optional[str] = None
 
 
+class ProfileNameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
 @app.get("/auth/lark/login")
 def lark_login(redirect: str):
     """返回飞书授权 URL + 自签 state。扩展用 launchWebAuthFlow 打开它。"""
@@ -196,11 +200,12 @@ def lark_callback(payload: CallbackIn, request: Request):
         # BE-6:完整异常(含飞书响应)只 log 服务端;对客户端返通用 detail,不泄露上游细节。
         print(f"[lark_callback] exchange failed: {e!r}", flush=True)
         raise HTTPException(status_code=502, detail="upstream error")
-    token = sessions.create_session(info["open_id"], info["name"], info["team_id"])
+    name = teams.upsert_user(info["open_id"], "", info["name"], "")
+    token = sessions.create_session(info["open_id"], name, info["team_id"])
     storage.insert_audit_log(info["open_id"], info["team_id"], "login.lark")
     return {
         "token": token,
-        "user": {"id": info["open_id"], "name": info["name"]},
+        "user": {"id": info["open_id"], "name": name},
         "team_id": info["team_id"],
     }
 
@@ -210,6 +215,18 @@ def auth_me(session: Session = Depends(require_session)):
     """扩展启动时校验 session 是否仍有效;顺带返回该用户全部团队(供侧栏团队下拉)。"""
     return {"id": session.open_id, "name": session.name, "team_id": session.team_id,
             "teams": teams.user_teams(session.open_id)}
+
+
+@app.patch("/auth/me")
+def update_profile_name(payload: ProfileNameIn, session: Session = Depends(require_session)):
+    """更新当前用户的显示名称；名称属于账号，不属于某个团队。"""
+    try:
+        name = teams.update_user_name(session.open_id, payload.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    sessions.update_user_name(session.open_id, name)
+    storage.insert_audit_log(session.open_id, session.team_id, "profile.rename")
+    return {"id": session.open_id, "name": name}
 
 
 @app.post("/auth/logout")
@@ -280,7 +297,7 @@ def auth_google(payload: GoogleIn, request: Request):
         # BE-6:异常详情(JWKS 路径/PyJWT 内部状态)只 log;客户端只见通用提示。
         print(f"[auth_google] verify failed: {e!r}", flush=True)
         raise HTTPException(status_code=401, detail="authentication failed")
-    teams.upsert_user(info["sub"], info["email"], info["name"], info["picture"])
+    name = teams.upsert_user(info["sub"], info["email"], info["name"], info["picture"])
     if payload.action == "join":
         if not payload.code:
             raise HTTPException(status_code=400, detail="code required for join")
@@ -294,7 +311,7 @@ def auth_google(payload: GoogleIn, request: Request):
     return {
         "sub": info["sub"],
         "email": info["email"],
-        "name": info["name"],
+        "name": name,
         "teams": teams.user_teams(info["sub"]),
     }
 
@@ -312,10 +329,11 @@ def auth_google_session(payload: GoogleSessionIn, request: Request):
     if not teams.is_member(info["sub"], payload.team_id):
         raise HTTPException(status_code=403, detail="not a member of this team")
     storage.insert_audit_log(info["sub"], payload.team_id, "login.google")
-    token = sessions.create_session(info["sub"], info["name"], payload.team_id)
+    name = teams.upsert_user(info["sub"], info["email"], info["name"], info["picture"])
+    token = sessions.create_session(info["sub"], name, payload.team_id)
     return {
         "token": token,
-        "user": {"id": info["sub"], "name": info["name"]},
+        "user": {"id": info["sub"], "name": name},
         "team_id": payload.team_id,
     }
 

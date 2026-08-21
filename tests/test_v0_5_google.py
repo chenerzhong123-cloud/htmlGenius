@@ -100,6 +100,35 @@ def test_google_create_team_and_session(tmp_path, monkeypatch):
     assert s.status_code == 200 and s.json()["token"].startswith("sess_")
 
 
+def test_profile_name_persists_across_google_login_and_updates_sessions(tmp_path, monkeypatch):
+    _init(tmp_path)
+    _mock("g_1", "Alice", monkeypatch)
+    login = client.post("/auth/google", json={"id_token": "t", "action": "create", "team_name": "T"}).json()
+    team_id = login["teams"][0]["team_id"]
+    session = client.post("/auth/google/session", json={"id_token": "t", "team_id": team_id}).json()
+    headers = {"Authorization": "Bearer " + session["token"]}
+
+    changed = client.patch("/auth/me", json={"name": "  阿丽  "}, headers=headers)
+    assert changed.status_code == 200 and changed.json() == {"id": "g_1", "name": "阿丽"}
+    assert client.get("/auth/me", headers=headers).json()["name"] == "阿丽"
+    assert teams.team_members(team_id)[0]["name"] == "阿丽"
+
+    # OAuth 仍报告原始名称时，用户手动设置不得被覆盖。
+    again = client.post("/auth/google", json={"id_token": "t"})
+    assert again.status_code == 200 and again.json()["name"] == "阿丽"
+    new_session = client.post("/auth/google/session", json={"id_token": "t", "team_id": team_id})
+    assert new_session.status_code == 200 and new_session.json()["user"]["name"] == "阿丽"
+
+
+def test_profile_name_rejects_blank_value(tmp_path, monkeypatch):
+    _init(tmp_path)
+    _mock("g_1", "Alice", monkeypatch)
+    login = client.post("/auth/google", json={"id_token": "t", "action": "create"}).json()
+    team_id = login["teams"][0]["team_id"]
+    token = client.post("/auth/google/session", json={"id_token": "t", "team_id": team_id}).json()["token"]
+    assert client.patch("/auth/me", json={"name": "   "}, headers={"Authorization": "Bearer " + token}).status_code == 400
+
+
 def test_google_session_not_member_403(tmp_path, monkeypatch):
     _init(tmp_path)
     _mock("g_1", "Alice", monkeypatch)

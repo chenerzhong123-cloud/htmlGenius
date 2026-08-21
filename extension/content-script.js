@@ -6,11 +6,20 @@
   const { describe, anchor } = window;
   console.log("[hg] cs loaded: Storage=", typeof window.Storage, "RemoteStore=", typeof window.RemoteStore, "Sync=", typeof window.Sync);
 
+  // 扩展在 chrome://extensions 点击「重新加载」时，Chrome 不会卸载已打开页面中的旧
+  // content-script。旧实例的 selectionchange 监听还会继续运行，并留下同 ID 的工具栏；
+  // 新旧实例便会互相覆盖 UI，看起来就像“选中文字没有评论浮窗”。DOM 是各实例共享的，
+  // 所以新版启动时先移除上一实例留下的可见节点。旧监听此后只会操作已脱离 DOM 的节点。
+  document.querySelectorAll('#hg-toolbar, style[data-hg-injected="ui"], .hg-hl, .hg-inspect, .hg-select, .hg-tip, .hg-drop, .hg-draft-banner, #hg-refresh-modal').forEach((el) => el.remove());
+
   // === 协同 sync/mode:账号会话只读 chrome.storage.local ===
   // token、身份、团队必须在同一台设备上成组读取；不能把 token 放 local、身份放 sync，
   // 否则两台设备登录不同账号时会用 A 的身份显示、B 的 token 发请求。
   let _cfg = { mode: "local" };
   let _sync = null;
+  // file/data/blob 没有可供服务端安全识别的稳定网页 origin；且产品承诺本地文档评论仅自己可见。
+  // 因此即使用户已登录团队，也绝不能让这些页面进入 RemoteStore/SSE 协同链路。
+  const isPrivateLocalDocument = ["file:", "data:", "blob:"].includes(location.protocol);
   // cfg 读取异步;协同模式下保存批注需等 _cfg.session_token 就绪(RemoteStore 用它做 Authorization)。
   const cfgReady = new Promise((resolve) => {
     if (chrome.storage && chrome.storage.local) {
@@ -29,14 +38,14 @@
           }
           _cfg = Object.assign({}, _cfg, local);
           console.log("[hg] cfg:", JSON.stringify({mode:_cfg.mode, backend:_cfg.backend, hasToken:!!_cfg.session_token, hasUser:!!_cfg.user}));
-          if (_cfg.mode === "synced") {
+          if (_cfg.mode === "synced" && !isPrivateLocalDocument) {
             Storage.configure(_cfg); // 切到 RemoteStore
             // SSE 省流:仅可见页签保持实时连接;后台页签不连(切回时 onopen 全量对账补齐)。
             if (document.visibilityState === "visible") startSync();
             else console.log("[hg] SSE deferred: tab hidden at load");
             console.log("[hg] switched to RemoteStore(协同)");
           } else {
-            console.log("[hg] staying LocalStore(本地)—— storage 里 mode 不是 synced");
+            console.log("[hg] staying LocalStore(本地)——", isPrivateLocalDocument ? "本地文件不参与团队同步" : "storage 里 mode 不是 synced");
           }
           resolve(_cfg);
       });
@@ -59,7 +68,7 @@
 
   // startSync:解析 docId 后开 EventSource,回调映射到 applyRemoteChange。
   function startSync() {
-    if (!window.Sync) return;
+    if (isPrivateLocalDocument || !window.Sync) return;
     Storage.getDocumentId().then((docId) => {
       _sync = window.Sync.start({
         backend: _cfg.backend,
@@ -92,7 +101,7 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       if (_sseIdleTimer) { clearTimeout(_sseIdleTimer); _sseIdleTimer = null; }
-      if (_cfg.mode === "synced" && !_sync) startSync();
+      if (_cfg.mode === "synced" && !isPrivateLocalDocument && !_sync) startSync();
     } else {
       if (_sseIdleTimer) clearTimeout(_sseIdleTimer);
       _sseIdleTimer = setTimeout(() => {
@@ -135,6 +144,13 @@
   // 故改为 fetch 原始文件字节后直接 sha256。
   const _loadedArtifactHashReady = (isManagedArtifact && window.HgArtifactVersion)
     ? (async () => {
+        // Chrome 将每个 file:// 页面视为独立 opaque origin，连读取同一文件也会被 CORS 拦截。
+        // 直接走既有 DOM 序列化哈希，避免每次加载都制造必然失败的网络请求和误导性控制台错误。
+        if (location.protocol === "file:") {
+          const hash = await window.HgArtifactVersion.sha256Hex(
+            window.HgArtifactVersion.serializeCurrentArtifact(document.documentElement));
+          _loadedArtifactHash = hash; _renderedArtifactHash = hash; return hash;
+        }
         try {
           const resp = await fetch(_artifactUri);
           const buf = await resp.arrayBuffer();
@@ -704,13 +720,17 @@
     if (msg.type === "team-changed") {
       // 团队切换:重读 storage(新 session_token/team_id)→ 协同页整页重载,以新团队身份重载批注+SSE。
       chrome.storage.local.get(["mode"], (c) => {
-        if (c && c.mode === "synced") { try { location.reload(); } catch (e) {} }
+        // file:// 没有共享 origin，也不属于团队协同文档；团队切换不应尝试重载它。
+        // Chrome 会把 file 页面视为 opaque origin，这类重载可能报
+        // “Unsafe attempt to load URL … file: URLs are treated as unique security origins”。
+        if (c && c.mode === "synced" && !isPrivateLocalDocument) { try { location.reload(); } catch (e) {} }
         try { sendResponse({ ok: true }); } catch (e) {}
       });
       return true;
     }
     if (msg.type === "get-annotations") {
-      const sseState = () => ({ synced: _cfg.mode === "synced", sse_live: !!_sync });
+      // 本地文件即使账号全局处于团队模式，也固定走本地评论；不能让侧栏误显示“省流模式”。
+      const sseState = () => ({ synced: _cfg.mode === "synced" && !isPrivateLocalDocument, sse_live: !!_sync });
       getArtifactState().then((artifact_state) => sendResponse(Object.assign({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing, artifact_state }, sseState())))
         .catch(() => sendResponse(Object.assign({ type: "annotations-list", items: window.__hgAnnotations || [], isLocal, editing: _editing, artifact_state: artifactStateSnapshot() }, sseState())));
       return true;
@@ -926,7 +946,7 @@
 
   function broadcastUpdate() {
     // SSE 断开/重连会改变实时状态 → 一并带上,sidepanel 据此显隐「实时同步已暂停」提示。
-    chrome.runtime.sendMessage({ type: "annotations-updated", sse_live: !!_sync, synced: _cfg.mode === "synced" }).catch(() => {});
+    chrome.runtime.sendMessage({ type: "annotations-updated", sse_live: !!_sync, synced: _cfg.mode === "synced" && !isPrivateLocalDocument }).catch(() => {});
   }
 
   // #5: 与侧边栏的长连接 —— 侧边栏关闭(页面销毁)→ port 断开 → 失活(比 pagehide+异步 query 可靠)
@@ -934,10 +954,13 @@
   // 回调异步到达可能【晚于】新 activate,直接失活会误杀刚激活的状态 —— 激活确认窗被移除且不会恢复
   // (_refreshDialogShown 已置位),表现为「点刷新按钮没反应」。改为延迟失活,窗口内新 port 连上即取消。
   let _deactivateTimer = 0;
+  let _panelConnected = false;
   chrome.runtime.onConnect.addListener((port) => {
     if (port.name !== "hg-panel") return;
+    _panelConnected = true;
     if (_deactivateTimer) { clearTimeout(_deactivateTimer); _deactivateTimer = 0; } // 新连接到达:取消待执行的失活
     port.onDisconnect.addListener(() => {
+      _panelConnected = false;
       _deactivateTimer = setTimeout(() => { _deactivateTimer = 0; deactivateNow(); }, 600);
     });
   });
@@ -948,7 +971,18 @@
     if (barRAF) return;
     barRAF = requestAnimationFrame(() => {
       barRAF = 0;
-      if (!_activated && !_editing) { toolbar.classList.remove("show"); return; } // 未激活且未编辑:不弹工具栏(零打扰)。编辑中即使漏 ping 也保留工具栏。
+      if (!_activated && !_editing) {
+        // 已与侧栏建立 port 却漏收 activate（扩展 reload / file:// 注入竞态）时，
+        // 用户主动选区就是明确的恢复信号：自愈为激活态，而不是静默吞掉评论入口。
+        // file:// 页在扩展重载后最容易留下旧 message listener；它可能先响应 activate，
+        // 让当前实例没有收到激活消息。对本地文件，用户明确框选文字就是评论意图，
+        // 因而允许它直接自愈激活，不再依赖那条不可靠的历史消息。
+        if (_panelConnected || isPrivateLocalDocument) {
+          _activated = true;
+          _lastPingAt = Date.now();
+          loadAnnotations();
+        } else { toolbar.classList.remove("show"); return; }
+      } // 未激活且未编辑:不弹工具栏(零打扰)。编辑中即使漏 ping 也保留工具栏。
       const sel = document.getSelection();
       if (!sel || sel.isCollapsed || sel.rangeCount === 0) { toolbar.classList.remove("show"); closeAllPopovers(); return; }
       const rect = sel.getRangeAt(0).getBoundingClientRect();

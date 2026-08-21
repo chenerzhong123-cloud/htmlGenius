@@ -11,23 +11,49 @@ from datetime import datetime, timezone
 from .storage import _connect, _now
 
 
-def upsert_user(sub: str, email: str, name: str, picture: str) -> None:
-    """新用户插入;老用户更新 email/name/picture + 刷新 last_seen。"""
+def upsert_user(sub: str, email: str, name: str, picture: str) -> str:
+    """同步身份资料，并返回当前显示名称。
+
+    身份提供方的名称只在用户尚未自定义时更新，避免下次登录覆盖用户设置。
+    """
     c = _connect()
     try:
         now = _now()
-        if c.execute("SELECT 1 FROM users WHERE user_id=?", (sub,)).fetchone():
+        row = c.execute("SELECT name, name_custom FROM users WHERE user_id=?", (sub,)).fetchone()
+        if row:
+            display_name = row["name"] if row["name_custom"] else name
             c.execute(
                 "UPDATE users SET email=?, name=?, picture=?, last_seen=? WHERE user_id=?",
-                (email, name, picture, now, sub),
+                (email, display_name, picture, now, sub),
             )
         else:
+            display_name = name
             c.execute(
-                "INSERT INTO users(user_id, email, name, picture, first_seen, last_seen) VALUES(?,?,?,?,?,?)",
+                "INSERT INTO users(user_id, email, name, picture, first_seen, last_seen, name_custom) VALUES(?,?,?,?,?,?,0)",
                 (sub, email, name, picture, now, now),
             )
     finally:
         c.close()
+    return display_name
+
+
+def update_user_name(user_id: str, name: str) -> str:
+    """保存用户主动设置的显示名称；调用方须已完成 session 鉴权。"""
+    value = (name or "").strip()
+    if not value:
+        raise ValueError("name required")
+    c = _connect()
+    try:
+        if c.execute("UPDATE users SET name=?, name_custom=1, last_seen=? WHERE user_id=?",
+                     (value, _now(), user_id)).rowcount != 1:
+            # 兼容早期 Lark/dev session：它们可能尚未在 users 表中留下资料。
+            c.execute(
+                "INSERT INTO users(user_id, name, first_seen, last_seen, name_custom) VALUES(?,?,?,?,1)",
+                (user_id, value, _now(), _now()),
+            )
+    finally:
+        c.close()
+    return value
 
 
 def create_email_user(email: str, name: str, password_hash: str) -> str:

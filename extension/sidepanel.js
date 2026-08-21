@@ -69,6 +69,7 @@
   // 激活当前页:content-script 收到后才显示高亮/工具栏/编辑(关闭侧边栏时普通浏览零打扰)
   // showDialog=true 仅在打开侧边栏时用(弹编辑确认窗);切标签/刷新用 false(静默)
   let _panelPort = null; // #5: 与活动标签的长连接;侧边栏关闭→port 断开→content-script 失活
+  const ACTIVATION_RETRY_DELAYS = [0, 160, 420, 900];
   async function activateActiveTab(showDialog) {
     const tab = await getActiveTab();
     if (!tab || !tab.id) return;
@@ -80,14 +81,24 @@
     // 旧顺序(先断旧 port)会让 content-script 的 onDisconnect→失活 异步晚到,误杀刚激活的状态
     // (激活确认窗被移除且不恢复 → 「点刷新按钮没反应」)。配合 content-script 的延迟失活双保险。
     const oldPort = _panelPort;
-    let csReady = true;
-    try { await chrome.tabs.sendMessage(tab.id, { type: "activate", showDialog: showDialog !== false }); }
-    catch (e) { csReady = false; /* content-script 未就绪,等 onUpdated(complete) 再试 */ }
+    // file:// 页的 content script 往往比 tab 的 complete 事件更晚就绪。过去只发一次 activate，
+    // 这段短暂竞态会把页面永久留在“未激活”状态，选区自然不会显示评论工具栏。
+    let csReady = false;
+    for (const wait of ACTIVATION_RETRY_DELAYS) {
+      if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+      try {
+        const active = await getActiveTab();
+        if (!active || active.id !== tab.id) return; // 用户已切 tab，不激活旧页
+        await chrome.tabs.sendMessage(tab.id, { type: "activate", showDialog: showDialog !== false });
+        csReady = true;
+        break;
+      } catch (e) { /* content-script 尚未注入，继续短暂重试 */ }
+    }
     // file:// 页若 content script 未就绪,几乎必是「允许访问文件网址」toggle 关了(Chrome 对所有扩展默认关)。
     syncFileAccessHint(tab, csReady);
     syncRefreshHint(tab, csReady);
     // #5: 建立长连接 —— 侧边栏关闭(页面销毁)→ Chrome 自动断开 port → content-script onDisconnect 失活
-    try { _panelPort = chrome.tabs.connect(tab.id, { name: "hg-panel" }); } catch (e) {}
+    if (csReady) { try { _panelPort = chrome.tabs.connect(tab.id, { name: "hg-panel" }); } catch (e) {} }
     if (oldPort && oldPort !== _panelPort) { try { oldPort.disconnect(); } catch (e) {} } // 切标签:最后再断旧 port
   }
   // file:// 本地文件页:Chrome 默认禁止扩展访问(content script 不注入),需用户在 chrome://extensions
@@ -353,7 +364,9 @@
         const me = cfg.user && cfg.user.id;
         const self = card.querySelector(".card-author-self");
         if (self) self.hidden = !isOwnComment(ann, cfg.user);
-        if (cfg.mode !== "synced" || (ann.author && ann.author.id === me)) {
+        // 本地批注属于这台浏览器的文档数据，不属于团队成员身份。登录/切换账号后仍必须
+        // 可编辑和删除历史本地评论；只有真正的远程团队批注才按作者身份限制。
+        if (isLocal || cfg.mode !== "synced" || (ann.author && ann.author.id === me)) {
           const edit = document.createElement("button");
           edit.textContent = t("card.edit"); edit.title = t("card.edit");
           edit.addEventListener("click", (e) => { e.stopPropagation(); doEdit(ann, card); });
@@ -655,7 +668,10 @@
   let _candidateResult = null;      // 最近一次 candidate-ready 结果(只读成功态)
   let _candidateVersionLabel = null;  // 本文档候选版本号标签(来自 host "1.N" 字符串,如 "1.3")
   // v0.8.1 provider probe + plan-first 状态(spec §3.D/§5)
-  let _provider = null;             // 当前选中 provider id(仅 ready 可选)
+  // 展示默认值与实际已选 provider 必须分离：后者只能是已 ready 的 provider，
+  // 否则会让发送按钮的可用性判断卡在未就绪状态。
+  const DEFAULT_PROVIDER = "codex_app_server";
+  let _provider = null;
   let _providerStates = {};         // { providerId: probe 记录 }
   let _providerCacheAt = 0;         // probe 缓存时间戳(ms);30s 内不重探
   // 默认 provider:优先 Codex(用户偏好),Codex 不可用则退第一个 ready。
@@ -749,7 +765,13 @@
     if (contractBridge) {
       // 运行中:发送按钮 →「终止任务」(始终可点);否则恢复「发送给 {Agent}」
       if (lock) { contractBridge.textContent = t("bridge.abort"); contractBridge.disabled = false; contractBridge.classList.add("aborting"); }
-      else { contractBridge.textContent = _provider ? t("bridge.sendTo").replace("{agent}", providerLabel(_provider)) : t("bridge.run"); contractBridge.disabled = !canDispatch; contractBridge.classList.remove("aborting"); }
+      else {
+        // 连接探测期间只用 Codex 作为展示 fallback；真正发起任务仍必须等 ready provider 被选中。
+        const displayedProvider = _provider || DEFAULT_PROVIDER;
+        contractBridge.textContent = t("bridge.sendTo").replace("{agent}", providerLabel(displayedProvider));
+        contractBridge.disabled = !canDispatch;
+        contractBridge.classList.remove("aborting");
+      }
     }
     // v0.9.1:发送按钮因「非本地文档」置灰时给说明(远程网页 / 缺 artifact 不能直发;运行中不显示)。
     // 普通用户不易想到要切到本地文件,故显式提示;连接问题另有 Connection Center 与 ⌄ 教程,不在此重复。
@@ -2214,7 +2236,7 @@
     _accountFlow = flow;
     const views = {
       auth: viewAuth, "email-login": viewEmailLogin, "email-register": viewEmailRegister,
-      home: viewHome, invite: viewInvite, members: viewMembers, rename: viewRename, switch: viewSwitch,
+      home: viewHome, profile: viewProfile, invite: viewInvite, members: viewMembers, rename: viewRename, switch: viewSwitch,
       "join-or-create": viewJoinOrCreate, join: viewJoin, create: viewCreate,
     };
     accountHost.innerHTML = (views[flow] || viewHome)();
@@ -2265,10 +2287,10 @@
   function viewHome() {
     const u = _sessionUser || {}, team = _sessionTeam || {};
     const multi = _sessionTeams.length > 1;
-    // 无上传团队图标的入口 → 不再展示工作区卡片,团队名直接并入标题(「你的团队 - 名称」)。
+    // 无上传团队图标的入口 → 不再展示工作区卡片,标题只显示团队自定义名称(无名字时兜底「未命名团队」)。
     // 多团队时的切换入口从卡片右上角迁到列表行(与成员/加入创建同级)。
     return '<div class="af-page"><p class="af-eyebrow">' + esc(u.name || u.id || "") + "</p>"
-      + '<h2 class="af-h2">' + esc(t("ws.home.title") + " - " + (team.name || t("ws.unnamed"))) + "</h2>"
+      + '<h2 class="af-h2">' + esc(team.name || t("ws.unnamed")) + "</h2>"
       + '<p class="af-copy">' + t("ws.home.copy") + "</p>"
       + '<button class="af-primary" data-action="go-invite">' + t("ws.home.invite") + "</button>"
       + '<div class="af-list">'
@@ -2278,6 +2300,14 @@
       + '<button class="af-row" data-action="go-joc"><span>' + t("ws.home.joc") + "</span>" + AF_CHEV + "</button>"
       + '<button class="af-row af-danger" data-action="logout"><span>' + t("state.logout") + "</span>" + AF_CHEV + "</button>"
       + "</div></div>";
+  }
+  function viewProfile() {
+    const u = _sessionUser || {};
+    return '<form class="af-page" data-form="rename-profile"><p class="af-eyebrow">' + esc(u.name || u.id || "") + '</p>'
+      + '<h2 class="af-h2">' + t("ws.profile.title") + '</h2><p class="af-copy">' + t("ws.profile.copy") + '</p>'
+      + '<label class="af-label" for="profile-name-input">' + t("ws.profile.label") + '</label>'
+      + '<input id="profile-name-input" class="af-input" type="text" maxlength="100" required data-field="name" placeholder="' + t("ws.profile.ph") + '" value="' + esc(u.name || "") + '">'
+      + '<button class="af-primary" type="submit"' + (_accountBusy ? " disabled" : "") + '>' + t("ws.profile.action") + '</button>' + afErr() + '</form>';
   }
   function viewInvite() {
     const team = _sessionTeam || {};
@@ -2301,7 +2331,9 @@
       const name = esc(m.name || m.sub), role = m.role === "owner" ? t("ws.members.owner") : t("ws.members.member");
       const initial = esc((m.name || m.sub || "?").charAt(0).toUpperCase());
       let right = "";
-      if (_membersCache.isOwner && m.sub !== meId) {
+      if (m.sub === meId) {
+        right = '<button class="af-link af-transfer" data-action="go-profile">' + t("ws.t.profile") + "</button>";
+      } else if (_membersCache.isOwner) {
         right = (_confirmTransferSub === m.sub)
           ? '<span class="af-confirm af-transfer-confirm"><span class="af-transfer-note">' + t("ws.members.transferNote") + '</span><span><button class="af-link af-transfer" data-action="confirm-transfer" data-sub="' + esc(m.sub) + '">' + t("ws.members.confirmTransfer") + "</button>"
             + '<button class="af-link" data-action="cancel-transfer">' + t("ws.members.cancel") + "</button></span></span>"
@@ -2476,6 +2508,24 @@
       showToast(t("ws.rename.ok"));
     } catch (e) { _accountBusy = false; setAccountFlow("rename", { error: t("ws.rename.fail") }); }
   }
+  async function renameProfile() {
+    if (_accountBusy) return;
+    const name = hostField("name").trim();
+    if (!name) { setAccountFlow("profile", { error: t("ws.profile.fillName") }); return; }
+    _accountBusy = true; renderAccountFlow();
+    try {
+      const r = await _authFetch("/auth/me", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name })
+      });
+      const j = await r.json();
+      if (!r.ok) { _accountBusy = false; setAccountFlow("profile", { error: (j && j.detail) || t("ws.profile.fail") }); return; }
+      _sessionUser = Object.assign({}, _sessionUser, { name: j.name });
+      await setCfg({ user: _sessionUser });
+      _accountBusy = false;
+      setAccountFlow("home");
+      showToast(t("ws.profile.ok"));
+    } catch (e) { _accountBusy = false; setAccountFlow("profile", { error: t("ws.profile.fail") }); }
+  }
   async function doGoogleLogin() {
     HGAnalytics.track("login_start", { method: "google" });
     _rememberAutoLogin = hostChecked("remember_auto_login");
@@ -2592,6 +2642,7 @@
       case "email-register-start": sendCodeAction(); break;
       case "email-register": emailRegisterAction(); break;
       case "rename-team": renameTeam(); break;
+      case "rename-profile": renameProfile(); break;
     }
   });
   if (accountHost) accountHost.addEventListener("click", (e) => {
@@ -2600,7 +2651,7 @@
     const actEl = e.target.closest("[data-action]");
     if (!actEl) return;
     const a = actEl.dataset.action;
-    const GOTO = { "go-invite": "invite", "go-members": "members", "go-rename": "rename", "go-switch": "switch",
+    const GOTO = { "go-profile": "profile", "go-invite": "invite", "go-members": "members", "go-rename": "rename", "go-switch": "switch",
       "go-joc": "join-or-create", "go-join": "join", "go-create": "create" };
     if (GOTO[a]) {
       // 只有邀请链接带来的码才可预填；普通入口和已放弃的手输码都从空白输入开始。

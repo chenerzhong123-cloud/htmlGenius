@@ -214,6 +214,11 @@ def init_db(path: Path) -> None:
         ci2 = {row["name"] for row in c.execute("PRAGMA table_info(invites)")}
         if ci2 and "created_by_sub" in ci2 and "created_by" not in ci2:
             c.execute("ALTER TABLE invites RENAME COLUMN created_by_sub TO created_by")
+        # 用户可自行设置显示名称。保留来源名称用于首次登录/未自定义用户的资料刷新；
+        # 一旦用户主动修改，后续 OAuth 登录不得覆盖它。
+        cu2 = {row["name"] for row in c.execute("PRAGMA table_info(users)")}
+        if cu2 and "name_custom" not in cu2:
+            c.execute("ALTER TABLE users ADD COLUMN name_custom INTEGER NOT NULL DEFAULT 0")
     finally:
         c.close()
 

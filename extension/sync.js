@@ -110,6 +110,7 @@ window.Sync = (function () {
           "Content-Type": "application/json",
         },
         body: body,
+        credentials: "omit", // session 只走 Authorization，不能让宿主页 Cookie 改变 CORS 语义。
       }).catch(function () {
         /* 心跳/失败不影响主流程 */
       });
@@ -199,6 +200,7 @@ window.Sync = (function () {
           Authorization: "Bearer " + sessionToken,
           "Content-Type": "application/json",
         },
+        credentials: "omit",
       })
         .then(function (r) {
           if (!r.ok) throw new Error("ticket HTTP " + r.status);
@@ -266,6 +268,7 @@ window.Sync = (function () {
             },
             body: JSON.stringify({ doc: docId, user: user, op: "bye" }),
             keepalive: true,
+            credentials: "omit",
           }).catch(function () {});
         }
       } catch (e) {
