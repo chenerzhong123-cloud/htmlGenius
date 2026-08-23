@@ -74,3 +74,7 @@ htmlGenius 适合审阅 AI 生成的 HTML 原型、设计稿和网页内容。�
 - [RELEASE_NOTES.md](RELEASE_NOTES.md)：版本历史
 - [DEVELOPMENT.md](DEVELOPMENT.md)：开发、测试与架构说明
 - [`landing/demo-2026-07/`](landing/demo-2026-07/)：官网静态源码与发布说明
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE) 开源（与 npm 包 `@htmlgenius/bridge` 的授权声明一致）。你可以自由使用、修改和分发本项目的代码，但须保留原始版权与许可声明；软件按「现状」提供，不附带任何担保。
