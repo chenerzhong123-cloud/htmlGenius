@@ -316,6 +316,7 @@
       '<div class="ep-draghint">' + esc(t("ep.dragHint")) + '</div>';
   }
 
+  let _othersSeenTracked = false; // others_comments_seen 会话级去重(面板文档每次打开重新加载,标志随之重置)
   function renderCards(items) {
     _lastItems = items || [];
     const c = document.getElementById("annotations");
@@ -324,6 +325,12 @@
       c.innerHTML = '<div class="empty">' + esc(t("comment.empty")) + '</div>';
       updateCommentCount(0);
       return;
+    }
+    // 「看过别人的评论」代理指标:渲染列表里出现带作者且非本人的评论,每面板会话只报一次。
+    // 无 author 的(本地未同步评论)不算;_sessionUser 尚未恢复时先不报,恢复后 renderCards 会被重调再报。
+    if (!_othersSeenTracked) {
+      const hasOthers = (items || []).some((a) => a && a.author && a.author.id && (!_sessionUser || a.author.id !== _sessionUser.id));
+      if (hasOthers && _sessionUser) { _othersSeenTracked = true; HGAnalytics.track("others_comments_seen"); }
     }
     const openItems = items.filter((a) => a._status !== "stale");
     const staleItems = items.filter((a) => a._status === "stale");
@@ -465,7 +472,7 @@
       quote: _pendingSelector.quote,
       comment: comment || "",
     });
-    HGAnalytics.track("comment_create"); // 只计根评论;回复不计,避免漏斗重复计数
+    HGAnalytics.track("comment_create", { is_local: isLocal }); // 只计根评论;回复不计,避免漏斗重复计数
     _pendingSelector = null;
     draft.remove();
   }
@@ -494,7 +501,10 @@
       if (save && save.disabled) return;
       if (save) save.disabled = true;
       sendToContent({ type: "reply", parentId: parent.id, comment: ta.value || "" }).then((resp) => {
-        if (resp && resp.ok) { editor.remove(); refreshAnnotations(); return; }
+        if (resp && resp.ok) {
+          HGAnalytics.track("reply_create", { is_to_other: !!(parent.author && parent.author.id && _sessionUser && parent.author.id !== _sessionUser.id) });
+          editor.remove(); refreshAnnotations(); return;
+        }
         if (save) save.disabled = false;
         showToast(t("toast.replyFail"));
       });
@@ -1549,7 +1559,11 @@
     if (runKind === "candidate" && opts && opts.plan) payload.plan = opts.plan;
     chrome.runtime.sendMessage(payload).then((resp) => {
       if (resp && resp.ok) {
-        HGAnalytics.track("task_send", { provider: _provider, scope: draft.mode });
+        // v2 口径:task_send 仅计真正的编辑任务(candidate);plan 预跑单独计 plan_request,
+        // 计划确认后发送计 plan_confirm(流失 = plan_request − plan_confirm)。
+        if (runKind === "candidate") HGAnalytics.track("task_send", { provider: _provider, scope: draft.mode });
+        if (runKind === "plan") HGAnalytics.track("plan_request", { provider: _provider, scope: draft.mode });
+        if (runKind === "candidate" && opts && opts.plan) HGAnalytics.track("plan_confirm", { provider: _provider, scope: draft.mode });
         setContractRunning(true);
         if (resp.run_id) _contractRunId = resp.run_id;
         // 状态栏可见:plan 确认后从 plan-review 发的 candidate 也要回 compose 看进度
@@ -1715,7 +1729,10 @@
     setBridgeStatus(t("bridge.candidateRunning").replace("{agent}", providerLabel(_provider)), "running");
     expandBridgeDetail(true);
     chrome.runtime.sendMessage({ type: "bridge-patch-apply", tab_id: currentTabId, run_id: runId, confirmed_edit_ids: checked })
-      .then((resp) => { if (!resp || !resp.ok) { setContractRunning(false); stopRunTimer(); setBridgeStatus(tBridgeFailed(resp && resp.code, resp), bridgeFailClass(resp && resp.code)); } })
+      .then((resp) => {
+        if (resp && resp.ok) HGAnalytics.track("task_accept", { provider: _provider });
+        if (!resp || !resp.ok) { setContractRunning(false); stopRunTimer(); setBridgeStatus(tBridgeFailed(resp && resp.code, resp), bridgeFailClass(resp && resp.code)); }
+      })
       .catch(() => { setContractRunning(false); stopRunTimer(); setBridgeStatus(t("bridge.notInstalled"), "warn"); });
   }
   function cancelPatch() {
@@ -1849,6 +1866,7 @@
   document.getElementById("edit-btn").addEventListener("click", () => {
     // 编辑态由 content-script 经 edit-state 广播同步;此处乐观翻转即时反馈
     if (!_editing) HGAnalytics.track("edit_start", { is_local: isLocal });
+    else HGAnalytics.track("edit_end", { is_local: isLocal });
     sendToContent({ type: _editing ? "disable-edit" : "enable-edit" });
     _editing = !_editing;
     renderMode();
@@ -2404,7 +2422,7 @@
       const j = await r.json();
       if (!j.join_url) { showToast(t("team.inviteFail")); return; }
       const url = new URL(j.join_url, BACKEND || "https://deuce.monster").href;
-      try { await navigator.clipboard.writeText(url); _inviteCopied = true; _accountError = ""; }
+      try { await navigator.clipboard.writeText(url); _inviteCopied = true; _accountError = ""; HGAnalytics.track("invite_copied"); }
       catch (e) { _accountError = url; }  // 剪贴板失败 → fallback 显示只读链接
       renderAccountFlow();
     } catch (e) { showToast(t("team.inviteFail")); }
@@ -2600,6 +2618,7 @@
       if (!r.ok) throw new Error("switch " + r.status);
       const j = await r.json();
       await applySession({ token: j.token, user: j.user, team_id: j.team_id, team_name: j.team_name, teams: _sessionTeams }, false, { restoreLastTeam: false });
+      HGAnalytics.track("workspace_switch");
       showToast(t("team.switched"));
       broadcastTeamChanged(); // 所有协同页重载(切到新团队的批注/SSE)
     } catch (e) { showToast(t("team.switchFail")); }
@@ -2758,7 +2777,7 @@
     if (local.auto_login_enabled !== true) return;
     try {
       const r = await Login.googleStart({ interactive: false });
-      if (r.token) { await applySession(r, false); return; } // 静默重登不刷页(否则冲掉编辑确认窗)
+      if (r.token) { await applySession(r, false); HGAnalytics.track("session_restore", { method: "google" }); return; } // 静默重登不刷页(否则冲掉编辑确认窗)
       if (r && r.teams && r.teams.length === 0) { _sessionUser = r.user || _sessionUser; setAccountFlow("join-or-create"); return; }
     } catch (e) { /* 邮箱账号或 Google 会话失效时，继续检查已有应用 session */ }
     const cfg = await getCfg(["mode", "session_token", "team_id", "team_name"]);
@@ -2779,6 +2798,7 @@
             if (switched.ok) {
               const j = await switched.json();
               await applySession(Object.assign({}, j, { teams: me.teams }), false);
+              HGAnalytics.track("session_restore", { method: "stored" });
               return;
             }
           }
@@ -2788,6 +2808,7 @@
           _sessionTeam = cur ? { id: cur.team_id, name: cur.name, role: cur.role }
             : ((cfg.team_id || me.team_id) ? { id: cfg.team_id || me.team_id, name: cfg.team_name || "" } : null);
           showLoggedIn(me);
+          HGAnalytics.track("session_restore", { method: "stored" });
           return;
         }
       } catch (e) {}
@@ -3151,7 +3172,10 @@
 
   // === 初始化 ===
   (async () => {
-    HGAnalytics.track("panel_open");
+    try {
+      const cfg = await getLocalCfg(["session_token"]);
+      HGAnalytics.track("panel_open", { is_logged_in: !!cfg.session_token });
+    } catch (e) { HGAnalytics.track("panel_open"); }
     if (window.HG_I18N) {
       await HG_I18N.init();
       HG_I18N.apply(document.body);
