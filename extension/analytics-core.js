@@ -7,11 +7,21 @@
   var SCOPES = ["precise_patch", "local_optimize", "regenerate"];
   var METHODS = ["google", "email"];
   var SPEC = {
-    panel_open: {}, login_start: { method: METHODS }, login_success: { method: METHODS },
+    panel_open: { is_logged_in: "bool" }, login_start: { method: METHODS }, login_success: { method: METHODS },
     join_workspace: {}, create_workspace: {}, edit_start: { is_local: "bool" },
-    comment_create: {}, task_open: { scope: SCOPES },
+    comment_create: { is_local: "bool" }, task_open: { scope: SCOPES },
     task_send: { provider: PROVIDERS, scope: SCOPES },
     task_success: { provider: PROVIDERS }, task_failed: { provider: PROVIDERS, code: "code" },
+    // v2(协作/任务链路加深):session_restore 的 method 枚举 google|stored(SW 无 window,枚举值与 app.py 同步)
+    reply_create: { is_to_other: "bool" },
+    others_comments_seen: {},
+    plan_request: { provider: PROVIDERS, scope: SCOPES },
+    plan_confirm: { provider: PROVIDERS, scope: SCOPES },
+    task_accept: { provider: PROVIDERS },
+    workspace_switch: {},
+    session_restore: { method: ["google", "stored"] },
+    invite_copied: {},
+    edit_end: { is_local: "bool" },
   };
   function valueOk(rule, v) {
     if (rule === "bool") return typeof v === "boolean" ? v : undefined;

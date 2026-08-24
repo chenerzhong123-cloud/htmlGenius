@@ -3,7 +3,7 @@
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxdVz0XIYjyjE8SIkGtDNQvFgRUPxiTHh29AjFL8BdEeo+oFx30NfxKiiFF15l1YbHvQow/TOdfihan2MvDkV3y/1M5LCfWGffsYzfz9xpRJ6Hd3YY1XFlsw84HjboTQu4ki/oOqbA8mlsZ73mWE57ufvsDhihdPllzJSznV375qpYEx4mSfmcewe48tGYS77W7ddBOwMW4bFjQa/uOj+RLDbpxbGt9HBQMw+NX5sYgj25Eqq8dKZl1pBV/M4j1gG9qFqxsxy0YKCcINK7ei9H/lvIAm00qbdvtREX3oWBhPOQn1WQsR1AM7ClgbnUiQxz1BK6n2Zwdy9/Lrc/owqHwIDAQAB",
   "name": "htmlGenius",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "HTML在网页中实时编辑+精确批注修改意见+一键发送给Codex、Claude Code等Agent自动修改+团队共享批注",
   "homepage_url": "https://www.deuce.monster/htmlgenius/",
   "permissions": [

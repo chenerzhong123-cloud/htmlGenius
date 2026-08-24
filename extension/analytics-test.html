@@ -37,6 +37,22 @@
     eq(batches[0][0], { name: "panel_open", params: { engagement_time_msec: "100" }, timestamp_unix_micros: String((NOW - 24 * H) * 1000) }, "mp event shape");
     // 7) prune:两游标都越过才删
     eq(C.prune(evs, 20, 20).length, 6, "prune keeps seq > min(cursor)");
+    // 8) v2 白名单:协作/任务链路事件
+    eq(C.cleanEvent("reply_create", { is_to_other: true, junk: 1 }), { name: "reply_create", params: { is_to_other: true } }, "reply_create");
+    eq(C.cleanEvent("reply_create", { is_to_other: "yes" }), { name: "reply_create", params: {} }, "is_to_other non-bool stripped");
+    eq(C.cleanEvent("others_comments_seen", {}), { name: "others_comments_seen", params: {} }, "others_comments_seen");
+    eq(C.cleanEvent("plan_request", { provider: "codex_app_server", scope: "regenerate" }), { name: "plan_request", params: { provider: "codex_app_server", scope: "regenerate" } }, "plan_request");
+    eq(C.cleanEvent("plan_request", { scope: "全文档重写" }), { name: "plan_request", params: {} }, "plan_request bad scope stripped");
+    eq(C.cleanEvent("plan_confirm", { provider: "github_copilot", scope: "precise_patch" }).params.scope, "precise_patch", "plan_confirm");
+    eq(C.cleanEvent("task_accept", { provider: "claude_code_cli" }).params.provider, "claude_code_cli", "task_accept");
+    eq(C.cleanEvent("workspace_switch", {}), { name: "workspace_switch", params: {} }, "workspace_switch");
+    eq(C.cleanEvent("session_restore", { method: "stored" }).params.method, "stored", "session_restore stored");
+    eq(C.cleanEvent("session_restore", { method: "wechat" }), { name: "session_restore", params: {} }, "session_restore bad method stripped");
+    eq(C.cleanEvent("invite_copied", {}), { name: "invite_copied", params: {} }, "invite_copied");
+    eq(C.cleanEvent("edit_end", { is_local: false }), { name: "edit_end", params: { is_local: false } }, "edit_end");
+    eq(C.cleanEvent("panel_open", { is_logged_in: true }), { name: "panel_open", params: { is_logged_in: true } }, "panel_open v2 param");
+    eq(C.cleanEvent("comment_create", { is_local: true }), { name: "comment_create", params: { is_local: true } }, "comment_create v2 param");
+    if (C.cleanEvent("comment_edit", {}) !== null) throw new Error("comment_edit must stay non-whitelisted");
     document.title = "PASS";
   } catch (e) { document.title = "FAIL: " + (e && e.message || e); }
 })();

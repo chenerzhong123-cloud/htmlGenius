@@ -626,17 +626,27 @@ _PROVIDERS = ("claude_code_cli", "codex_app_server", "github_copilot")
 _SCOPES = ("precise_patch", "local_optimize", "regenerate")
 _METHODS = ("google", "email")
 EVENT_SPECS = {
-    "panel_open": {},
+    "panel_open": {"is_logged_in": _v_bool},
     "login_start": {"method": _v_enum(*_METHODS)},
     "login_success": {"method": _v_enum(*_METHODS)},
     "join_workspace": {},
     "create_workspace": {},
     "edit_start": {"is_local": _v_bool},
-    "comment_create": {},
+    "comment_create": {"is_local": _v_bool},
     "task_open": {"scope": _v_enum(*_SCOPES)},
     "task_send": {"provider": _v_enum(*_PROVIDERS), "scope": _v_enum(*_SCOPES)},
     "task_success": {"provider": _v_enum(*_PROVIDERS)},
     "task_failed": {"provider": _v_enum(*_PROVIDERS), "code": _v_code},
+    # v2(协作/任务链路加深):方法枚举 google|stored —— google=静默 OAuth 重登,stored=/auth/me 已有会话恢复
+    "reply_create": {"is_to_other": _v_bool},
+    "others_comments_seen": {},
+    "plan_request": {"provider": _v_enum(*_PROVIDERS), "scope": _v_enum(*_SCOPES)},
+    "plan_confirm": {"provider": _v_enum(*_PROVIDERS), "scope": _v_enum(*_SCOPES)},
+    "task_accept": {"provider": _v_enum(*_PROVIDERS)},
+    "workspace_switch": {},
+    "session_restore": {"method": _v_enum("google", "stored")},
+    "invite_copied": {},
+    "edit_end": {"is_local": _v_bool},
 }
 
 _events_limiter = ratelimit.WindowLimiter(30, 60)
