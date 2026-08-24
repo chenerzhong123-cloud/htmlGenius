@@ -118,3 +118,37 @@ def test_events_rate_limited_429(tmp_path, monkeypatch):
 def test_events_bad_client_id_422(tmp_path, monkeypatch):
     _init(tmp_path, monkeypatch); _reset_limiter()
     assert _post_events({"client_id": "x", "events": []}).status_code == 422
+
+
+def test_events_v2_new_events_accepted(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch); _reset_limiter()
+    r = _post_events({"client_id": "cid_abcdefgh", "events": [
+        {"seq": 1, "name": "reply_create", "params": {"is_to_other": True}, "ts": ""},
+        {"seq": 2, "name": "others_comments_seen", "params": {}, "ts": ""},
+        {"seq": 3, "name": "plan_request", "params": {"provider": "codex_app_server", "scope": "regenerate"}, "ts": ""},
+        {"seq": 4, "name": "plan_confirm", "params": {"provider": "codex_app_server", "scope": "regenerate"}, "ts": ""},
+        {"seq": 5, "name": "task_accept", "params": {"provider": "github_copilot"}, "ts": ""},
+        {"seq": 6, "name": "workspace_switch", "params": {}, "ts": ""},
+        {"seq": 7, "name": "session_restore", "params": {"method": "stored"}, "ts": ""},
+        {"seq": 8, "name": "invite_copied", "params": {}, "ts": ""},
+        {"seq": 9, "name": "edit_end", "params": {"is_local": True}, "ts": ""},
+        {"seq": 10, "name": "panel_open", "params": {"is_logged_in": False}, "ts": ""},
+        {"seq": 11, "name": "comment_create", "params": {"is_local": True}, "ts": ""},
+    ]})
+    j = r.json()
+    assert r.status_code == 200 and j["inserted"] == 11 and j["rejected"] == []
+
+
+def test_events_v2_invalid_values_stripped(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch); _reset_limiter()
+    r = _post_events({"client_id": "cid_abcdefgh", "events": [
+        {"seq": 1, "name": "reply_create", "params": {"is_to_other": "yes"}, "ts": ""},
+        {"seq": 2, "name": "session_restore", "params": {"method": "wechat"}, "ts": ""},
+        {"seq": 3, "name": "plan_request", "params": {"scope": "全文档重写"}, "ts": ""},
+    ]})
+    assert r.status_code == 200
+    import sqlite3, json as _json
+    db = sqlite3.connect(str(tmp_path / "e.db"))
+    rows = [r0[0] for r0 in db.execute("SELECT params_json FROM analytics_events ORDER BY seq").fetchall()]
+    db.close()
+    assert rows == ["{}", "{}", "{}"]
