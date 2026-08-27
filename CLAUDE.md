@@ -55,6 +55,14 @@ npm 废弃 bypass token（Automation/Granular）用于 direct publishing 后，�
 - **收紧（建议做）**：npmjs.com Settings → Publishing access → "Require two-factor authentication and disallow tokens" → trusted publishing 成为唯一通道；之后 revoke 旧 token、删 GitHub `NPM_TOKEN` secret（已不需要）。
 - **本地兜底（需 OTP，仅应急）**：`cd bridge && npm publish --otp=<6位码>`。`NPM_TOKEN` 在 `~/.zshenv`（`~/.npmrc` 用 `${NPM_TOKEN}` 引用）；`npm token list` 看类型（只有 Automation 曾免 OTP，**现已失效**）。仅 CI 不可用时用。
 
+## 埋点数据拉取（方案已固定，2026-08-27 起）
+
+**看埋点/分析数据不要再探索拉取方式，直接跑 `scripts/analytics-pull.sh`**（线上模式已验证可用）：
+
+- `bash scripts/analytics-pull.sh` —— 线上库报表：ssh aliyun，stdin 管道把 `scripts/analytics-report.py` 送上服务器执行，**只读 SELECT，不 scp 库文件**。报表含：漏斗（用户级）/ 留存（次日、7 日）/ 活跃（按天）/ 编辑时长（edit_start→edit_end 配对）/ 参数分布健康检查。主机与库路径可用 `HG_ANALYTICS_HOST` / `HG_ANALYTICS_DB` 覆盖（默认 aliyun / `/root/htmlGenius/annotations.db`）。
+- `bash scripts/analytics-pull.sh /path/to/annotations.db` —— 本地 sqlite 库。
+- 约束：线上 python3 < 3.7（无 fromisoformat、`%z` 不认冒号），`analytics-report.py` 必须保持纯 stdlib + 宽松时间戳解析；事件白名单镜像在 `extension/analytics-core.js`，加事件要两侧同步。
+
 ## 安全审计修复批次（2026-07-29，v0.9.10）
 
 本批次按 `docs/AUDIT-2026-07-28.md`（v1）与 `docs/AUDIT-2026-07-28-v2.md`（v2）修复。完成范围与**有意排除**项（用户决定）记录如下，避免后续重复劳动或误以为未做：

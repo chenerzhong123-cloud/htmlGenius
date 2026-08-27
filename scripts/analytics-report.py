@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """analytics_events 报表:漏斗 / 留存 / 活跃 / 编辑时长。
 
-用法:
-  本地库: python3 scripts/analytics-report.py /path/to/annotations.db
-  线上库(只读 SELECT): ssh aliyun 'python3 - /root/htmlGenius/annotations.db' < scripts/analytics-report.py
+用法(推荐一键,见 scripts/analytics-pull.sh):
+  bash scripts/analytics-pull.sh             # 线上库(只读 SELECT)
+  bash scripts/analytics-pull.sh local.db    # 本地库
+等价原始命令: ssh aliyun 'python3 - /root/htmlGenius/annotations.db' < scripts/analytics-report.py
 
 口径说明(与 spec 一致):
 - "用户" = 匿名 client_id,多 profile/重装偏大;
