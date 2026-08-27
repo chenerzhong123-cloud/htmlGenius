@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 埋点数据一键拉取(方案已固定,2026-08-27 起,勿再探索):
 #   bash scripts/analytics-pull.sh             # 线上库报表(ssh aliyun,只读 SELECT,不拷库)
+#   bash scripts/analytics-pull.sh --exclude hgcid_xxx  # 剔除自有/测试 client(线上/本地均可)
 #   bash scripts/analytics-pull.sh <db路径>    # 本地 sqlite 库
 #
 # 数据链路:extension 侧栏埋点 → server /api/analytics → 阿里云 annotations.db 的
@@ -12,8 +13,8 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 REMOTE_HOST="${HG_ANALYTICS_HOST:-aliyun}"
 REMOTE_DB="${HG_ANALYTICS_DB:-/root/htmlGenius/annotations.db}"
 
-if [ $# -eq 0 ]; then
-  exec ssh "$REMOTE_HOST" "python3 - $REMOTE_DB" < "$DIR/analytics-report.py"
+if [ $# -eq 0 ] || [ "$1" = "--exclude" ]; then
+  exec ssh "$REMOTE_HOST" "python3 - $REMOTE_DB $*" < "$DIR/analytics-report.py"
 else
-  exec python3 "$DIR/analytics-report.py" "$1"
+  exec python3 "$DIR/analytics-report.py" "$@"
 fi

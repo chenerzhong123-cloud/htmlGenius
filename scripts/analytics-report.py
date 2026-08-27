@@ -4,6 +4,7 @@
 用法(推荐一键,见 scripts/analytics-pull.sh):
   bash scripts/analytics-pull.sh             # 线上库(只读 SELECT)
   bash scripts/analytics-pull.sh local.db    # 本地库
+  bash scripts/analytics-pull.sh --exclude hgcid_xxx,hgcid_yyy   # 剔除自有/测试 client
 等价原始命令: ssh aliyun 'python3 - /root/htmlGenius/annotations.db' < scripts/analytics-report.py
 
 口径说明(与 spec 一致):
@@ -77,7 +78,7 @@ def _ts(row):
     return None
 
 
-def main(db_path: str) -> None:
+def main(db_path: str, exclude: set = frozenset()) -> None:
     db = sqlite3.connect(db_path)
     db.row_factory = sqlite3.Row
     rows = db.execute("SELECT client_id, seq, name, params_json, client_ts, created_at FROM analytics_events").fetchall()
@@ -85,6 +86,14 @@ def main(db_path: str) -> None:
     if not rows:
         print("analytics_events 表为空。")
         return
+    if exclude:
+        before = len(rows)
+        # 按前缀匹配(完整 UUID 或其前缀均可)
+        rows = [r for r in rows if not any(r["client_id"].startswith(x) for x in exclude)]
+        print(f"(已剔除自有/测试 client {','.join(sorted(exclude))}:{before - len(rows)} 条事件)\n")
+        if not rows:
+            print("剔除后无剩余数据。")
+            return
     parsed = []
     for r in rows:
         d = dict(r)
@@ -187,7 +196,12 @@ def main(db_path: str) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    argv = sys.argv[1:]
+    exclude = set()
+    if len(argv) >= 3 and argv[1] == "--exclude":
+        exclude = set(x for x in argv[2].split(",") if x)
+        argv = argv[:1] + argv[3:]
+    if len(argv) != 1:
         print(__doc__)
         sys.exit(1)
-    main(sys.argv[1])
+    main(argv[0], exclude)
