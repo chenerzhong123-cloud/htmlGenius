@@ -29,6 +29,7 @@ FUNNEL = [
     ("task_accept", "应用候选"),
     ("login_start", "发起登录"),
     ("login_success", "登录成功"),
+    ("login_failed", "登录失败"),
     ("join_workspace", "加入团队"),
     ("create_workspace", "创建团队"),
     ("workspace_switch", "切换团队"),

@@ -6,6 +6,23 @@
 window.Login = (function () {
   "use strict";
 
+  function authError(code, message, stage) {
+    var e = new Error(message);
+    e.code = code;
+    e.stage = stage;
+    return e;
+  }
+
+  function responseError(response, body, fallback, stage) {
+    var code = response.status === 400 ? "INVALID_REQUEST"
+      : response.status === 401 ? "UNAUTHORIZED"
+      : response.status === 409 ? "CONFLICT"
+      : response.status === 422 ? "INVALID_INPUT"
+      : response.status === 429 ? "RATE_LIMITED"
+      : "HTTP_ERROR";
+    return authError(code, (body && body.detail) || fallback, stage);
+  }
+
   function parseCallbackUrl(url) {
     try {
       var u = new URL(url);
@@ -55,7 +72,7 @@ window.Login = (function () {
     opts = opts || {};
     var backend = (window.HG_CONFIG && window.HG_CONFIG.backend) || "";
     var clientId = (window.HG_CONFIG && window.HG_CONFIG.google_client_id) || "";
-    if (!clientId) throw new Error("config 缺 google_client_id");
+    if (!clientId) throw authError("GOOGLE_CONFIG_MISSING", "config 缺 google_client_id", "google_config");
     var redirect = chrome.identity.getRedirectURL();  // https://<ext-id>.chromiumapp.org/
     // SUP-3:nonce 改用 CSPRNG(crypto.getRandomValues 16 字节 → base64url),替代可预测的 Math.random,防重放。
     var nonce = (function () {
@@ -70,14 +87,20 @@ window.Login = (function () {
       + "&redirect_uri=" + encodeURIComponent(redirect)
       + "&scope=" + encodeURIComponent("openid email profile")
       + "&nonce=" + encodeURIComponent(nonce);
-    var respUrl = await chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: opts.interactive !== false });
-    if (!respUrl) throw new Error("Google 授权取消");
+    var respUrl;
+    try {
+      respUrl = await chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: opts.interactive !== false });
+    } catch (e) {
+      // OAuth 原始错误可能含上游细节;UI/埋点统一使用固定错误码。
+      throw authError("OAUTH_FLOW_FAILED", "Google 授权未完成", "oauth_flow");
+    }
+    if (!respUrl) throw authError("OAUTH_FLOW_FAILED", "Google 授权取消", "oauth_flow");
     // 回调 URL:https://<ext-id>.chromiumapp.org/#id_token=<jwt>&...
     var params = new URLSearchParams(respUrl.split("#")[1] || "");
     var idToken = params.get("id_token");
     if (!idToken) {
       var err = params.get("error");
-      throw new Error("Google 未返回 id_token" + (err ? "(" + err + ": " + (params.get("error_description") || "") + ")" : ""));
+      throw authError("OAUTH_TOKEN_MISSING", "Google 未返回 id_token" + (err ? "(" + err + ")" : ""), "oauth_token");
     }
     var body = { id_token: idToken };
     if (opts.action) body.action = opts.action;
@@ -86,7 +109,10 @@ window.Login = (function () {
     var r = await fetch(backend + "/auth/google", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-    if (!r.ok) throw new Error("google login failed " + r.status);
+    if (!r.ok) {
+      var googleBody = null; try { googleBody = await r.json(); } catch (e) {}
+      throw responseError(r, googleBody, "google login failed " + r.status, "google_auth");
+    }
     var j = await r.json();
     if (!j.teams || !j.teams.length) return { teams: [], user: { id: j.sub, name: j.name } };
     var team = j.teams[0]; // 默认最近加入的
@@ -94,7 +120,10 @@ window.Login = (function () {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id_token: idToken, team_id: team.team_id }),
     });
-    if (!sr.ok) throw new Error("session failed " + sr.status);
+    if (!sr.ok) {
+      var sessionBody = null; try { sessionBody = await sr.json(); } catch (e) {}
+      throw responseError(sr, sessionBody, "session failed " + sr.status, "google_session");
+    }
     var sj = await sr.json();
     return { token: sj.token, user: sj.user, team_id: sj.team_id, teams: j.teams };
   }
@@ -107,7 +136,7 @@ window.Login = (function () {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     var j = null; try { j = await r.json(); } catch (e) {}
-    if (!r.ok) throw new Error((j && j.detail) || ("register failed " + r.status));
+    if (!r.ok) throw responseError(r, j, "register failed " + r.status, "email_register");
     return j;
   }
   async function emailVerify(backend, email, code, inviteCode, teamName) {
@@ -118,7 +147,7 @@ window.Login = (function () {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
     var j = null; try { j = await r.json(); } catch (e) {}
-    if (!r.ok) throw new Error((j && j.detail) || ("verify failed " + r.status));
+    if (!r.ok) throw responseError(r, j, "verify failed " + r.status, "email_verify");
     return j;
   }
   async function emailLogin(backend, email, password) {
@@ -126,7 +155,7 @@ window.Login = (function () {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email, password: password }),
     });
     var j = null; try { j = await r.json(); } catch (e) {}
-    if (!r.ok) throw new Error((j && j.detail) || ("login failed " + r.status));
+    if (!r.ok) throw responseError(r, j, "login failed " + r.status, "email_login");
     return j;
   }
 
@@ -135,9 +164,18 @@ window.Login = (function () {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email }),
     });
     var j = null; try { j = await r.json(); } catch (e) {}
-    if (!r.ok) throw new Error((j && j.detail) || ("probe failed " + r.status));
+    if (!r.ok) throw responseError(r, j, "probe failed " + r.status, "email_probe");
     return j;
   }
 
-  return { start: start, googleStart: googleStart, emailRegister: emailRegister, emailVerify: emailVerify, emailLogin: emailLogin, emailProbe: emailProbe, parseCallbackUrl: parseCallbackUrl, buildCallbackBody: buildCallbackBody };
+  async function emailResend(backend, email) {
+    var r = await fetch(backend + "/auth/email/resend", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: email }),
+    });
+    var j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw responseError(r, j, "resend failed " + r.status, "email_resend");
+    return j;
+  }
+
+  return { start: start, googleStart: googleStart, emailRegister: emailRegister, emailVerify: emailVerify, emailLogin: emailLogin, emailProbe: emailProbe, emailResend: emailResend, parseCallbackUrl: parseCallbackUrl, buildCallbackBody: buildCallbackBody };
 })();

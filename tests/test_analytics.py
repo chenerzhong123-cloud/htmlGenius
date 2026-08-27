@@ -152,3 +152,25 @@ def test_events_v2_invalid_values_stripped(tmp_path, monkeypatch):
     rows = [r0[0] for r0 in db.execute("SELECT params_json FROM analytics_events ORDER BY seq").fetchall()]
     db.close()
     assert rows == ["{}", "{}", "{}"]
+
+
+def test_login_failed_accepts_only_safe_enum_fields(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch); _reset_limiter()
+    r = _post_events({"client_id": "cid_abcdefgh", "events": [
+        {"seq": 1, "name": "login_failed", "params": {
+            "method": "email", "stage": "email_resend", "code": "RATE_LIMITED",
+            "app_version": "1.0.1", "raw_error": "must not persist",
+        }, "ts": ""},
+        {"seq": 2, "name": "login_failed", "params": {
+            "method": "email", "stage": "untrusted", "code": "free text", "app_version": "v1",
+        }, "ts": ""},
+    ]})
+    assert r.status_code == 200 and r.json()["inserted"] == 2
+    import sqlite3, json as _json
+    db = sqlite3.connect(str(tmp_path / "e.db"))
+    rows = [_json.loads(row[0]) for row in db.execute("SELECT params_json FROM analytics_events ORDER BY seq")]
+    db.close()
+    assert rows == [
+        {"method": "email", "stage": "email_resend", "code": "RATE_LIMITED", "app_version": "1.0.1"},
+        {"method": "email"},
+    ]

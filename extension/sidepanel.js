@@ -2190,6 +2190,7 @@
   let _confirmRemoveSub = "";      // 成员移除二次确认
   let _confirmTransferSub = "";    // 所有权转让二次确认
   let _accountBusy = false;        // 防重复提交(switch/join/create)
+  let _emailBusy = false;          // 邮箱登录/注册请求中的防重复提交锁
   let _emailCodeSent = false;      // 注册:验证码已发送
   let _emailCooldown = 0;          // 发送验证码倒计时(秒)
   let _emailCooldownTimer = null;
@@ -2558,28 +2559,42 @@
         showToast(t("login.googleSuccess"));
       }
       else { setAccountFlow("auth", { error: t("login.okJoinCreate") }); }
-    } catch (e) { setAccountFlow("auth", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
+    } catch (e) { trackLoginFailure("google", (e && e.stage) || "oauth_flow", e); setAccountFlow("auth", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
+  }
+  const LOGIN_FAILURE_CODES = new Set(["GOOGLE_CONFIG_MISSING", "OAUTH_FLOW_FAILED", "OAUTH_TOKEN_MISSING", "INVALID_REQUEST", "UNAUTHORIZED", "CONFLICT", "INVALID_INPUT", "RATE_LIMITED", "HTTP_ERROR"]);
+  function trackLoginFailure(method, stage, error) {
+    const code = error && LOGIN_FAILURE_CODES.has(error.code) ? error.code : "UNKNOWN";
+    let appVersion = "";
+    try { appVersion = chrome.runtime.getManifest().version || ""; } catch (e) {}
+    HGAnalytics.track("login_failed", { method: method, stage: stage, code: code, app_version: appVersion });
   }
   async function emailContinue() {
     _accountEmail = hostField("email").trim();
     if (!_accountEmail || _accountEmail.indexOf("@") < 0) { setAccountFlow("auth", { error: t("login.emailFillEmail") }); return; }
+    if (_emailBusy) return;
     HGAnalytics.track("login_start", { method: "email" });
+    _emailBusy = true;
     try {
       const p = await Login.emailProbe(BACKEND, _accountEmail);
+      _emailBusy = false;
       setAccountFlow(p && p.exists ? "email-login" : "email-register");
-    } catch (e) { setAccountFlow("auth", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
+    } catch (e) { _emailBusy = false; trackLoginFailure("email", "email_probe", e); setAccountFlow("auth", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
   }
   async function emailLoginAction() {
     _accountEmail = hostField("email").trim() || _accountEmail;
     const pw = hostField("password");
     if (!_accountEmail || _accountEmail.indexOf("@") < 0) { setAccountFlow("email-login", { error: t("login.emailFillEmail") }); return; }
     if (!pw) { setAccountFlow("email-login", { error: t("login.emailFillPw") }); return; }
+    if (_emailBusy) return;
+    _emailBusy = true;
     try {
       const r = await Login.emailLogin(BACKEND, _accountEmail, pw);
       await offerPasswordSave("email-login");
       await setAutoLogin(_rememberAutoLogin);
-      await applySession(r); HGAnalytics.track("login_success", { method: "email" }); showToast(t("login.emailSuccess"));
-    } catch (e) { setAccountFlow("email-login", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
+      await applySession(r);
+      _emailBusy = false;
+      HGAnalytics.track("login_success", { method: "email" }); showToast(t("login.emailSuccess"));
+    } catch (e) { _emailBusy = false; trackLoginFailure("email", "email_login", e); setAccountFlow("email-login", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
   }
   function startEmailCooldown(n) {
     _emailCooldown = n;
@@ -2595,21 +2610,38 @@
     const pw = hostField("password");
     if (!_accountEmail || _accountEmail.indexOf("@") < 0) { setAccountFlow("email-register", { error: t("login.emailFillEmail") }); return; }
     if (pw.length < 8) { setAccountFlow("email-register", { error: t("login.emailFillPw") }); return; }
+    if (_emailBusy) return;
+    _emailBusy = true;
     try {
       await Login.emailRegister(BACKEND, _accountEmail, pw);
+      _emailBusy = false;
       _emailCodeSent = true; _accountError = ""; startEmailCooldown(60); renderAccountFlow();
       showToast(t("login.codeSent"));
-    } catch (e) { setAccountFlow("email-register", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
+    } catch (e) { _emailBusy = false; trackLoginFailure("email", "email_register", e); setAccountFlow("email-register", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
+  }
+  async function resendCodeAction() {
+    if (_emailBusy || _emailCooldown > 0) return;
+    _emailBusy = true;
+    try {
+      await Login.emailResend(BACKEND, _accountEmail);
+      _emailBusy = false;
+      _accountError = ""; startEmailCooldown(60); renderAccountFlow();
+      showToast(t("login.codeSent"));
+    } catch (e) { _emailBusy = false; trackLoginFailure("email", "email_resend", e); setAccountFlow("email-register", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
   }
   async function emailRegisterAction() {
     const code = hostField("code").trim();
     if (!code) { setAccountFlow("email-register", { error: t("login.emailFillCode") }); return; }
     const inv = hostField("invite_code").trim();
+    if (_emailBusy) return;
+    _emailBusy = true;
     try {
       const r = await Login.emailVerify(BACKEND, _accountEmail, code, inv, "");
       await setAutoLogin(_rememberAutoLogin);
-      await applySession(r); showToast(t("login.emailSuccess"));
-    } catch (e) { setAccountFlow("email-register", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
+      await applySession(r);
+      _emailBusy = false;
+      showToast(t("login.emailSuccess"));
+    } catch (e) { _emailBusy = false; trackLoginFailure("email", "email_verify", e); setAccountFlow("email-register", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
   }
   async function switchTeam(teamId) {
     try {
@@ -2690,7 +2722,7 @@
       case "email-continue": emailContinue(); break;
       case "email-login": emailLoginAction(); break;
       case "send-code":
-      case "resend-code": sendCodeAction(); break;
+      case "resend-code": resendCodeAction(); break;
       case "email-register": emailRegisterAction(); break;
       case "gen-invite": genInviteAndCopy(); break;
       case "remove-member": _confirmRemoveSub = actEl.dataset.sub || ""; renderAccountFlow(); break;
