@@ -40,7 +40,7 @@
     var primary = document.querySelector('.hero .button:not(.ghost)');
     var secondary = document.querySelector('.hero .button.ghost');
     var requirements = document.querySelector('.hero-requirements');
-    if (hero) hero.innerHTML = zh ? '网页批注、HTML 实时编辑<br><span class="gradient">一键交给 AI Agent 修改</span>' : 'Edit HTML.<br>Hand the context to <span class="gradient">your AI Agent.</span>';
+    if (hero) hero.innerHTML = zh ? '修改 HTML<br>如<span class="gradient">编辑文档般自然</span>' : 'Edit HTML<br>As natural as <span class="gradient">writing a doc</span>';
     if (lead) lead.textContent = zh ? 'htmlGenius 是一款 Chrome 扩展：在任意网页上直接编辑 HTML、精确批注，再把完整上下文交给 Codex、Claude Code 或 GitHub Copilot，在本机生成可审查的候选版本。' : 'htmlGenius is an open-source Chrome extension for editing HTML in place, annotating precisely, and handing the full context to your local AI Agent.';
     document.querySelectorAll('.nav-cta').forEach(function (button) { button.textContent = zh ? '前往 Chrome 商店' : 'Chrome Store'; });
     if (primary) primary.textContent = zh ? '前往 Chrome 商店 ↗' : 'Chrome Store ↗';
