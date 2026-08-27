@@ -622,13 +622,23 @@ def _v_bool(x):
     return x if isinstance(x, bool) else None
 
 
+def _v_version(x):
+    return x if isinstance(x, str) and re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){2}", x) else None
+
+
 _PROVIDERS = ("claude_code_cli", "codex_app_server", "github_copilot")
 _SCOPES = ("precise_patch", "local_optimize", "regenerate")
 _METHODS = ("google", "email")
+_LOGIN_STAGES = ("google_config", "oauth_flow", "oauth_token", "google_auth", "google_session",
+                 "email_probe", "email_register", "email_resend", "email_verify", "email_login")
+_LOGIN_CODES = ("GOOGLE_CONFIG_MISSING", "OAUTH_FLOW_FAILED", "OAUTH_TOKEN_MISSING", "INVALID_REQUEST",
+                "UNAUTHORIZED", "CONFLICT", "INVALID_INPUT", "RATE_LIMITED", "HTTP_ERROR", "UNKNOWN")
 EVENT_SPECS = {
     "panel_open": {"is_logged_in": _v_bool},
     "login_start": {"method": _v_enum(*_METHODS)},
     "login_success": {"method": _v_enum(*_METHODS)},
+    "login_failed": {"method": _v_enum(*_METHODS), "stage": _v_enum(*_LOGIN_STAGES),
+                     "code": _v_enum(*_LOGIN_CODES), "app_version": _v_version},
     "join_workspace": {},
     "create_workspace": {},
     "edit_start": {"is_local": _v_bool},

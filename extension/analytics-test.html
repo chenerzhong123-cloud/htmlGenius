@@ -52,6 +52,8 @@
     eq(C.cleanEvent("edit_end", { is_local: false }), { name: "edit_end", params: { is_local: false } }, "edit_end");
     eq(C.cleanEvent("panel_open", { is_logged_in: true }), { name: "panel_open", params: { is_logged_in: true } }, "panel_open v2 param");
     eq(C.cleanEvent("comment_create", { is_local: true }), { name: "comment_create", params: { is_local: true } }, "comment_create v2 param");
+    eq(C.cleanEvent("login_failed", { method: "email", stage: "email_resend", code: "RATE_LIMITED", app_version: "1.0.1", raw_error: "secret" }), { name: "login_failed", params: { method: "email", stage: "email_resend", code: "RATE_LIMITED", app_version: "1.0.1" } }, "login_failed keeps only safe enum fields");
+    eq(C.cleanEvent("login_failed", { method: "email", stage: "free_text", code: "anything", app_version: "v1" }).params, { method: "email" }, "login_failed invalid values stripped");
     if (C.cleanEvent("comment_edit", {}) !== null) throw new Error("comment_edit must stay non-whitelisted");
     document.title = "PASS";
   } catch (e) { document.title = "FAIL: " + (e && e.message || e); }

@@ -6,8 +6,11 @@
   var PROVIDERS = ["claude_code_cli", "codex_app_server", "github_copilot"];
   var SCOPES = ["precise_patch", "local_optimize", "regenerate"];
   var METHODS = ["google", "email"];
+  var LOGIN_STAGES = ["google_config", "oauth_flow", "oauth_token", "google_auth", "google_session", "email_probe", "email_register", "email_resend", "email_verify", "email_login"];
+  var LOGIN_CODES = ["GOOGLE_CONFIG_MISSING", "OAUTH_FLOW_FAILED", "OAUTH_TOKEN_MISSING", "INVALID_REQUEST", "UNAUTHORIZED", "CONFLICT", "INVALID_INPUT", "RATE_LIMITED", "HTTP_ERROR", "UNKNOWN"];
   var SPEC = {
     panel_open: { is_logged_in: "bool" }, login_start: { method: METHODS }, login_success: { method: METHODS },
+    login_failed: { method: METHODS, stage: LOGIN_STAGES, code: LOGIN_CODES, app_version: "version" },
     join_workspace: {}, create_workspace: {}, edit_start: { is_local: "bool" },
     comment_create: { is_local: "bool" }, task_open: { scope: SCOPES },
     task_send: { provider: PROVIDERS, scope: SCOPES },
@@ -26,6 +29,7 @@
   function valueOk(rule, v) {
     if (rule === "bool") return typeof v === "boolean" ? v : undefined;
     if (rule === "code") return (typeof v === "string" && CODE_RE.test(v)) ? v : undefined;
+    if (rule === "version") return (typeof v === "string" && /^\d{1,3}(?:\.\d{1,3}){2}$/.test(v)) ? v : undefined;
     if (Array.isArray(rule)) return (typeof v === "string" && rule.indexOf(v) >= 0) ? v : undefined;
     return undefined;
   }
