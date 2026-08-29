@@ -37,3 +37,10 @@ assets/social/
 .claude/worktrees/
 .claude/plans/
 .mimosa/
+
+# 本地埋点报表产物(数据缓存+图表页,勿入库)
+.analytics/
+
+# 本地个人埋点图表工具(不入库,仅本机使用)
+/scripts/analytics-local.py
+/查看埋点数据.command
