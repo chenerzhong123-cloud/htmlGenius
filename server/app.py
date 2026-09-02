@@ -4,7 +4,8 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -151,7 +152,7 @@ def join_page(code: str):
 <body style="font-family:sans-serif;padding:40px;line-height:1.6">
 <h3>加入 htmlGenius 团队</h3>
 <p>邀请码:<code style="font-size:1.2em">{safe_code}</code></p>
-<p>已自动填入扩展侧边栏 → 点「Google 登录」→「加入」即可。</p>
+<p>已自动填入扩展侧边栏 → 输入邮箱和验证码即可加入，无需设置密码。</p>
 <p style="color:#888;font-size:13px">若没弹出,打开 htmlGenius 侧边栏,在「加入团队」粘贴上面的码。</p>
 </body></html>""",
         media_type="text/html; charset=utf-8",
@@ -425,6 +426,37 @@ def email_probe(payload: EmailProbeIn, request: Request):
         raise HTTPException(status_code=e.status, detail=e.detail)
 
 
+class InviteEmailRequestIn(BaseModel):
+    email: str = Field(max_length=200)
+    invite_code: str = Field(min_length=1, max_length=64)
+
+
+class InviteEmailVerifyIn(InviteEmailRequestIn):
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+@app.post("/auth/invite-email/request")
+def invite_email_request(payload: InviteEmailRequestIn, request: Request):
+    """Passwordless invite entry: validate invite, then email a short-lived code."""
+    _require_rate(_auth_limiter, _client_ip(request))
+    try:
+        return email_auth.start_invite_email(payload.email, payload.invite_code)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+
+
+@app.post("/auth/invite-email/verify")
+def invite_email_verify(payload: InviteEmailVerifyIn, request: Request):
+    """Verify mailbox ownership, join the invite's team and issue a normal session."""
+    _require_rate(_auth_limiter, _client_ip(request))
+    try:
+        result = email_auth.verify_invite_email(payload.email, payload.invite_code, payload.code)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    storage.insert_audit_log(result["user"]["id"], result["team_id"], "login.invite_email")
+    return result
+
+
 class SwitchTeamIn(BaseModel):
     team_id: str
 
@@ -628,9 +660,10 @@ def _v_version(x):
 
 _PROVIDERS = ("claude_code_cli", "codex_app_server", "github_copilot")
 _SCOPES = ("precise_patch", "local_optimize", "regenerate")
-_METHODS = ("google", "email")
+_METHODS = ("google", "email", "invite_email")
 _LOGIN_STAGES = ("google_config", "oauth_flow", "oauth_token", "google_auth", "google_session",
-                 "email_probe", "email_register", "email_resend", "email_verify", "email_login")
+                 "email_probe", "email_register", "email_resend", "email_verify", "email_login",
+                 "invite_email_request", "invite_email_verify")
 _LOGIN_CODES = ("GOOGLE_CONFIG_MISSING", "OAUTH_FLOW_FAILED", "OAUTH_TOKEN_MISSING", "INVALID_REQUEST",
                 "UNAUTHORIZED", "CONFLICT", "INVALID_INPUT", "RATE_LIMITED", "HTTP_ERROR", "UNKNOWN")
 EVENT_SPECS = {
@@ -845,6 +878,64 @@ def list_annotations(document_id: str, session: Session = Depends(require_sessio
     items = storage.list_annotations(document_id, session.team_id)
     print(f"[ann] LIST team={session.team_id} doc={document_id} -> {len(items)}", flush=True)
     return {"items": items}
+
+
+def _normalize_site_origin(raw: str) -> str:
+    """Canonicalize a client-supplied site origin without accepting paths or credentials."""
+    try:
+        parsed = urlsplit((raw or "").strip())
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            raise ValueError
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError
+        if parsed.path not in {"", "/"}:
+            raise ValueError
+        hostname = parsed.hostname.lower()
+        host = f"[{hostname}]" if ":" in hostname else hostname
+        port = parsed.port
+        if port and not ((parsed.scheme.lower() == "http" and port == 80) or
+                         (parsed.scheme.lower() == "https" and port == 443)):
+            host += f":{port}"
+        return f"{parsed.scheme.lower()}://{host}"
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="site_origin must be an HTTP(S) origin")
+
+
+@app.get("/api/site-annotations")
+def list_site_annotations(
+    site_origin: str = Query(..., max_length=500),
+    status: Literal["open", "resolved", "stale", "all"] = "open",
+    limit: int = Query(1000, ge=1, le=5000),
+    session: Session = Depends(require_session),
+):
+    """Export one team's comments for every page on an exact site origin."""
+    origin = _normalize_site_origin(site_origin)
+    items, truncated = storage.list_site_annotations(
+        session.team_id,
+        origin,
+        None if status == "all" else status,
+        limit,
+    )
+    pages: list[dict] = []
+    current: "dict | None" = None
+    for item in items:
+        if current is None or current["document_id"] != item["document_id"]:
+            parsed = urlsplit(item["document_id"])
+            current = {
+                "document_id": item["document_id"],
+                "path": parsed.path or "/",
+                "items": [],
+            }
+            pages.append(current)
+        current["items"].append(item)
+    return {
+        "site_origin": origin,
+        "status": status,
+        "total": len(items),
+        "page_count": len(pages),
+        "truncated": truncated,
+        "pages": pages,
+    }
 
 
 @app.delete("/api/annotations/{aid}")

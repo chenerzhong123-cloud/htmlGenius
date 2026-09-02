@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><title>RUNNING</title>
+<script>window.chrome={};</script>
+<script src="site-export.js"></script>
+<script>
+(function () {
+  function ok(v, msg) { if (!v) throw new Error(msg); }
+  try {
+    ok(SiteCommentExport.siteOrigin("https://Example.com:443/a?x=1") === "https://example.com", "origin");
+    ok(SiteCommentExport.siteOrigin("file:///tmp/a.html") === null, "file blocked");
+    var bundle = {
+      site_origin: "https://example.com", total: 2, truncated: false,
+      pages: [{ document_id: "https://example.com/pricing", path: "/pricing", items: [
+        { id: "a1", parent_id: null, author: {name:"A"}, quote: "Old", selector: {exact:"Old",prefix:"x",suffix:"y"}, body: {comment:"Change",action:"rewrite",instruction:"New"} },
+        { id: "a2", parent_id: "a1", author: {name:"B"}, quote: "", selector: {}, body: {comment:"Agreed",action:"none",instruction:""} }
+      ] }]
+    };
+    var compact = SiteCommentExport.compactBundle(bundle);
+    ok(compact.pages[0].comments.length === 2, "keeps replies");
+    ok(compact.pages[0].comments[1].parent_id === "a1", "parent id");
+    var prompt = SiteCommentExport.buildPrompt(bundle, "zh");
+    ok(prompt.indexOf("https://example.com/pricing") >= 0, "page url");
+    ok(prompt.indexOf("修改要求") >= 0, "zh prompt");
+    ok(prompt.indexOf("team_id") < 0, "does not leak team id");
+    document.title = "PASS";
+  } catch (e) { document.title = "FAIL: " + e.message; }
+})();
+</script>

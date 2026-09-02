@@ -174,3 +174,89 @@ def resend(email: str) -> None:
     finally:
         c.close()
     mailer.send_verification_code(email, code)
+
+
+def start_invite_email(email: str, invite_code: str) -> dict:
+    """Send a one-time code after validating an invite, with no password/account setup."""
+    email = _validate_email(email).lower()
+    invite_code = (invite_code or "").strip()
+    invite = teams.valid_invite(invite_code)
+    if not invite:
+        raise EmailAuthError(400, "邀请码无效或已过期")
+    c = _connect()
+    try:
+        row = c.execute(
+            "SELECT created_at FROM invite_email_verifications WHERE email=? AND invite_code=?",
+            (email, invite_code),
+        ).fetchone()
+        if row and _age(row["created_at"]) < _RESEND_COOLDOWN:
+            raise EmailAuthError(429, "验证码已发送,请 60 秒后再试")
+        code = security.gen_code()
+        c.execute(
+            "INSERT OR REPLACE INTO invite_email_verifications"
+            "(email, invite_code, code_hash, created_at, expires_at, attempts) VALUES(?,?,?,?,?,0)",
+            (email, invite_code, security.hash_secret(code), _now(), _expire_ts()),
+        )
+    finally:
+        c.close()
+    mailer.send_verification_code(email, code)
+    return {"verify_required": True, "team_name": invite["team_name"]}
+
+
+def verify_invite_email(email: str, invite_code: str, code: str) -> dict:
+    """Verify mailbox ownership, redeem the invite and issue the normal team session."""
+    email = _validate_email(email).lower()
+    invite_code = (invite_code or "").strip()
+    c = _connect()
+    try:
+        row = c.execute(
+            "SELECT code_hash, expires_at, attempts FROM invite_email_verifications "
+            "WHERE email=? AND invite_code=?",
+            (email, invite_code),
+        ).fetchone()
+        if row is None:
+            raise EmailAuthError(400, "请先获取验证码")
+        if datetime.now(timezone.utc) > datetime.fromisoformat(row["expires_at"]):
+            c.execute(
+                "DELETE FROM invite_email_verifications WHERE email=? AND invite_code=?",
+                (email, invite_code),
+            )
+            raise EmailAuthError(400, "验证码已过期,请重新获取")
+        if row["attempts"] >= _MAX_ATTEMPTS:
+            c.execute(
+                "DELETE FROM invite_email_verifications WHERE email=? AND invite_code=?",
+                (email, invite_code),
+            )
+            raise EmailAuthError(400, "尝试次数过多,请重新获取")
+        if not security.verify_secret(code, row["code_hash"]):
+            c.execute(
+                "UPDATE invite_email_verifications SET attempts=attempts+1 "
+                "WHERE email=? AND invite_code=?",
+                (email, invite_code),
+            )
+            raise EmailAuthError(400, "验证码错误")
+    finally:
+        c.close()
+
+    user = teams.get_or_create_invite_email_user(email)
+    team_id = teams.join_team(invite_code, user["user_id"])
+    if not team_id:
+        raise EmailAuthError(400, "邀请码无效或已过期")
+    c = _connect()
+    try:
+        c.execute(
+            "DELETE FROM invite_email_verifications WHERE email=? AND invite_code=?",
+            (email, invite_code),
+        )
+    finally:
+        c.close()
+    teams_list = teams.user_teams(user["user_id"])
+    team_name = next((t["name"] for t in teams_list if t["team_id"] == team_id), "")
+    token = sessions.create_session(user["user_id"], user["name"], team_id)
+    return {
+        "token": token,
+        "user": {"id": user["user_id"], "name": user["name"]},
+        "team_id": team_id,
+        "team_name": team_name,
+        "teams": teams_list,
+    }

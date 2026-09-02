@@ -5,8 +5,8 @@
   var CODE_RE = /^[A-Z0-9_]{1,64}$/;
   var PROVIDERS = ["claude_code_cli", "codex_app_server", "github_copilot"];
   var SCOPES = ["precise_patch", "local_optimize", "regenerate"];
-  var METHODS = ["google", "email"];
-  var LOGIN_STAGES = ["google_config", "oauth_flow", "oauth_token", "google_auth", "google_session", "email_probe", "email_register", "email_resend", "email_verify", "email_login"];
+  var METHODS = ["google", "email", "invite_email"];
+  var LOGIN_STAGES = ["google_config", "oauth_flow", "oauth_token", "google_auth", "google_session", "email_probe", "email_register", "email_resend", "email_verify", "email_login", "invite_email_request", "invite_email_verify"];
   var LOGIN_CODES = ["GOOGLE_CONFIG_MISSING", "OAUTH_FLOW_FAILED", "OAUTH_TOKEN_MISSING", "INVALID_REQUEST", "UNAUTHORIZED", "CONFLICT", "INVALID_INPUT", "RATE_LIMITED", "HTTP_ERROR", "UNKNOWN"];
   var SPEC = {
     panel_open: { is_logged_in: "bool" }, login_start: { method: METHODS }, login_success: { method: METHODS },

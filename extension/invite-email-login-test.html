@@ -1,0 +1,35 @@
+<!doctype html><meta charset="utf-8"><title>RUNNING</title>
+<script>
+(function () {
+  var calls = [];
+  window.fetch = async function (url, init) {
+    calls.push({ url: url, init: init, body: JSON.parse(init.body) });
+    if (url.indexOf("/request") >= 0) {
+      return { ok: true, status: 200, json: async function () { return { verify_required: true, team_name: "Review" }; } };
+    }
+    return { ok: true, status: 200, json: async function () {
+      return { token: "tok", user: {id: "u1", name: "reviewer@example.com"}, team_id: "t1" };
+    } };
+  };
+  window.__inviteEmailCalls = calls;
+})();
+</script>
+<script src="login.js"></script>
+<script>
+(async function () {
+  function ok(v, msg) { if (!v) throw new Error(msg); }
+  try {
+    var requested = await Login.inviteEmailRequest("https://api.test", "reviewer@example.com", "inv_123");
+    ok(requested.team_name === "Review", "request response");
+    ok(__inviteEmailCalls[0].url === "https://api.test/auth/invite-email/request", "request url");
+    ok(__inviteEmailCalls[0].body.email === "reviewer@example.com", "request email");
+    ok(__inviteEmailCalls[0].body.invite_code === "inv_123", "request invite");
+
+    var verified = await Login.inviteEmailVerify("https://api.test", "reviewer@example.com", "inv_123", "123456");
+    ok(verified.token === "tok", "verify response");
+    ok(__inviteEmailCalls[1].url === "https://api.test/auth/invite-email/verify", "verify url");
+    ok(__inviteEmailCalls[1].body.code === "123456", "verify code");
+    document.title = "PASS";
+  } catch (e) { document.title = "FAIL: " + e.message; }
+})();
+</script>

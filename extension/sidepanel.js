@@ -413,6 +413,8 @@
     // v0.6.1:无未失效顶层批注时,底部「生成修改任务」disabled 且不打开空 Composer
     const _exportBtn = document.getElementById("export-btn");
     if (_exportBtn) _exportBtn.disabled = !((byParent[null] || []).length > 0);
+    const _siteExportBtn = document.getElementById("site-export-btn");
+    if (_siteExportBtn) _siteExportBtn.hidden = !!isLocal || !_sessionUser;
   }
 
   // #2: 一键删除所有失效评论(原文已不在当前页面)
@@ -1863,6 +1865,36 @@
     });
   });
 
+  const siteExportBtn = document.getElementById("site-export-btn");
+  if (siteExportBtn) siteExportBtn.addEventListener("click", async () => {
+    if (siteExportBtn.disabled) return;
+    siteExportBtn.disabled = true;
+    siteExportBtn.textContent = t("siteExport.loading");
+    try {
+      const [tab, cfg] = await Promise.all([getActiveTab(), getCfg(["session_token", "mode"])]);
+      const origin = window.SiteCommentExport && tab ? window.SiteCommentExport.siteOrigin(tab.url || "") : null;
+      if (!origin) throw new Error(t("siteExport.unsupported"));
+      if (!cfg.session_token || cfg.mode !== "synced") throw new Error(t("siteExport.loginRequired"));
+      const response = await fetch(
+        BACKEND + "/api/site-annotations?site_origin=" + encodeURIComponent(origin) + "&status=open",
+        { headers: { Authorization: "Bearer " + cfg.session_token } },
+      );
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((data && data.detail) || t("siteExport.failed"));
+      if (!data || !data.total) { showToast(t("siteExport.empty")); return; }
+      const lang = window.HG_I18N ? window.HG_I18N.getLang() : "en";
+      const prompt = window.SiteCommentExport.buildPrompt(data, lang);
+      await navigator.clipboard.writeText(prompt);
+      showToast(t(data.truncated ? "siteExport.copiedTruncated" : "siteExport.copied")
+        .replace("{comments}", String(data.total)).replace("{pages}", String(data.page_count)));
+    } catch (e) {
+      showToast((e && e.message) || t("siteExport.failed"));
+    } finally {
+      siteExportBtn.disabled = false;
+      siteExportBtn.textContent = t("siteExport.button");
+    }
+  });
+
   document.getElementById("edit-btn").addEventListener("click", () => {
     // 编辑态由 content-script 经 edit-state 广播同步;此处乐观翻转即时反馈
     if (!_editing) HGAnalytics.track("edit_start", { is_local: isLocal });
@@ -2180,7 +2212,7 @@
     }
   }
   // === 账号工作区流程(状态机:一次一个任务;渲染进 #account-flow-host)===
-  let _accountFlow = "home";      // auth|email-login|email-register|home|invite|members|rename|switch|join-or-create|join|create
+  let _accountFlow = "home";      // auth|email-login|email-register|invite-email|home|invite|members|rename|switch|join-or-create|join|create
   let _authEmailOpen = false;      // auth 首屏是否展开邮箱输入
   let _accountEmail = "";          // 邮箱(跨 auth 子状态)
   let _accountError = "";          // 当前页错误文案(红色)
@@ -2194,6 +2226,8 @@
   let _emailCodeSent = false;      // 注册:验证码已发送
   let _emailCooldown = 0;          // 发送验证码倒计时(秒)
   let _emailCooldownTimer = null;
+  let _inviteEmailCodeSent = false; // 免密码入团:已发验证码
+  let _inviteTeamName = "";         // 服务端验证后返回的团队名
   let _pendingJoinCode = "";       // join-code 消息预填的邀请码
   let _pendingJoinIntent = false;  // 仅邀请链接可置 true，防止旧 code 劫持常规登录
   let _joinRequestCopied = false;  // 加入页的邀请请求话术已复制
@@ -2220,7 +2254,7 @@
   const FLOW_TITLE = {
     home: "ws.t.home", invite: "ws.t.invite", members: "ws.t.members", rename: "ws.t.rename", switch: "ws.t.switch",
     "join-or-create": "ws.t.joc", join: "ws.t.join", create: "ws.t.create",
-    auth: "ws.t.account", "email-login": "ws.t.account", "email-register": "ws.t.account",
+    auth: "ws.t.account", "email-login": "ws.t.account", "email-register": "ws.t.account", "invite-email": "ws.t.join",
   };
   function setAccountFlow(flow, opts) {
     const previousFlow = _accountFlow;
@@ -2236,7 +2270,7 @@
     // 标题栏是唯一的返回导航：邮箱子步骤返回登录方式，首层则退出团队面板。
     const back = document.getElementById("account-back-btn");
     if (back) {
-      const returnsToProviderChoice = !_sessionUser && (_authEmailOpen || flow === "email-login" || flow === "email-register");
+      const returnsToProviderChoice = !_sessionUser && (_authEmailOpen || flow === "email-login" || flow === "email-register" || flow === "invite-email");
       back.style.visibility = "visible";
       back.setAttribute("aria-label", returnsToProviderChoice ? t("ws.auth.back") : t("account.back"));
       back.title = returnsToProviderChoice ? t("ws.auth.back") : t("account.back");
@@ -2250,11 +2284,11 @@
     if (!accountHost) return;
     const out = !_sessionUser;
     let flow = _accountFlow;
-    if (out && ["auth", "email-login", "email-register"].indexOf(flow) < 0) flow = "auth";
-    if (!out && ["auth", "email-login", "email-register"].indexOf(flow) >= 0) flow = "home";
+    if (out && ["auth", "email-login", "email-register", "invite-email"].indexOf(flow) < 0) flow = "auth";
+    if (!out && ["auth", "email-login", "email-register", "invite-email"].indexOf(flow) >= 0) flow = "home";
     _accountFlow = flow;
     const views = {
-      auth: viewAuth, "email-login": viewEmailLogin, "email-register": viewEmailRegister,
+      auth: viewAuth, "email-login": viewEmailLogin, "email-register": viewEmailRegister, "invite-email": viewInviteEmail,
       home: viewHome, profile: viewProfile, invite: viewInvite, members: viewMembers, rename: viewRename, switch: viewSwitch,
       "join-or-create": viewJoinOrCreate, join: viewJoin, create: viewCreate,
     };
@@ -2267,6 +2301,7 @@
     if (!_authEmailOpen) {
       return '<div class="af-page"><h2 class="af-h2">' + t("ws.auth.title") + "</h2>"
         + '<p class="af-copy">' + t("ws.auth.copy") + "</p>"
+        + '<button class="af-primary" data-action="open-invite-email">' + t("inviteEmail.open") + "</button>"
         + '<button class="af-primary" data-action="google-login">' + t("login.google") + "</button>"
         + '<button class="af-secondary" data-action="open-email">' + t("ws.auth.email") + "</button>"
         + '<label class="af-check af-auto-login"><input type="checkbox" data-field="remember_auto_login"' + (_rememberAutoLogin ? " checked" : "") + '><span>' + t("login.rememberAuto") + "</span></label>" + afStatus() + afErr() + "</div>";
@@ -2299,6 +2334,24 @@
     return '<form class="af-page" data-form="' + form + '"><p class="af-eyebrow">' + esc(_accountEmail) + "</p>"
       + '<h2 class="af-h2">' + t("ws.register.title") + "</h2>"
       + '<p class="af-copy">' + t("ws.register.copy") + "</p>" + body + afErr() + "</form>";
+  }
+  function viewInviteEmail() {
+    let body, form;
+    if (_inviteEmailCodeSent) {
+      form = "invite-email-verify";
+      body = (_inviteTeamName ? '<p class="af-status">' + esc(t("inviteEmail.team").replace("{team}", _inviteTeamName)) + "</p>" : "")
+        + '<input class="af-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required data-field="code" placeholder="' + t("login.codePh") + '">'
+        + '<button class="af-primary" type="submit"' + (_emailBusy ? " disabled" : "") + '>' + t("inviteEmail.verify") + "</button>"
+        + '<button class="af-link" type="button" data-action="invite-email-resend">' + (_emailCooldown > 0 ? t("login.resendIn").replace("{n}", _emailCooldown) : t("ws.register.resend")) + "</button>";
+    } else {
+      form = "invite-email-request";
+      body = '<input class="af-input" type="text" required data-field="invite_code" placeholder="' + t("ws.join.ph") + '" value="' + esc(_pendingJoinCode) + '">'
+        + '<input class="af-input" type="email" autocomplete="email" required data-field="email" placeholder="' + t("login.emailPh") + '" value="' + esc(_accountEmail) + '">'
+        + '<button class="af-primary" type="submit"' + (_emailBusy ? " disabled" : "") + '>' + t("inviteEmail.send") + "</button>";
+    }
+    return '<form class="af-page" data-form="' + form + '"><p class="af-eyebrow">' + t("ws.t.join") + "</p>"
+      + '<h2 class="af-h2">' + t("inviteEmail.title") + "</h2>"
+      + '<p class="af-copy">' + t("inviteEmail.copy") + "</p>" + body + afErr() + "</form>";
   }
   // --- 已登录 ---
   // 行尾右箭头:SVG 描边图标(16px),替代原「›」字符(太小、各平台渲染不一)
@@ -2602,7 +2655,7 @@
     _emailCooldownTimer = setInterval(() => {
       _emailCooldown -= 1;
       if (_emailCooldown <= 0) { clearInterval(_emailCooldownTimer); _emailCooldownTimer = null; }
-      if (_accountFlow === "email-register") renderAccountFlow();
+      if (_accountFlow === "email-register" || _accountFlow === "invite-email") renderAccountFlow();
     }, 1000);
   }
   async function sendCodeAction() {
@@ -2643,6 +2696,51 @@
       showToast(t("login.emailSuccess"));
     } catch (e) { _emailBusy = false; trackLoginFailure("email", "email_verify", e); setAccountFlow("email-register", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
   }
+  async function inviteEmailRequestAction() {
+    _pendingJoinCode = hostField("invite_code").trim() || _pendingJoinCode;
+    _accountEmail = hostField("email").trim() || _accountEmail;
+    if (!_pendingJoinCode) { setAccountFlow("invite-email", { error: t("ws.join.fillCode") }); return; }
+    if (!_accountEmail || _accountEmail.indexOf("@") < 0) { setAccountFlow("invite-email", { error: t("login.emailFillEmail") }); return; }
+    if (_emailBusy) return;
+    HGAnalytics.track("login_start", { method: "invite_email" });
+    _emailBusy = true; renderAccountFlow();
+    try {
+      const r = await Login.inviteEmailRequest(BACKEND, _accountEmail, _pendingJoinCode);
+      _inviteTeamName = (r && r.team_name) || "";
+      _inviteEmailCodeSent = true;
+      _emailBusy = false; _accountError = ""; startEmailCooldown(60); renderAccountFlow();
+      showToast(t("login.codeSent"));
+    } catch (e) {
+      _emailBusy = false;
+      trackLoginFailure("invite_email", "invite_email_request", e);
+      setAccountFlow("invite-email", { error: t("login.fail") + (e && e.message ? e.message : e) });
+    }
+  }
+  async function inviteEmailVerifyAction() {
+    const code = hostField("code").trim();
+    if (!code) { setAccountFlow("invite-email", { error: t("login.emailFillCode") }); return; }
+    if (_emailBusy) return;
+    _emailBusy = true; renderAccountFlow();
+    try {
+      const r = await Login.inviteEmailVerify(BACKEND, _accountEmail, _pendingJoinCode, code);
+      // 邀请加入的目标就是免反复登录；验证一次后默认在本设备恢复已有 session。
+      await setAutoLogin(true);
+      await applySession(r, true, { restoreLastTeam: false });
+      _emailBusy = false; _inviteEmailCodeSent = false; _pendingJoinCode = ""; _pendingJoinIntent = false;
+      HGAnalytics.track("login_success", { method: "invite_email" });
+      HGAnalytics.track("join_workspace");
+      showToast(t("inviteEmail.success"));
+    } catch (e) {
+      _emailBusy = false;
+      trackLoginFailure("invite_email", "invite_email_verify", e);
+      setAccountFlow("invite-email", { error: t("login.fail") + (e && e.message ? e.message : e) });
+    }
+  }
+  async function inviteEmailResendAction() {
+    if (_emailBusy || _emailCooldown > 0) return;
+    _inviteEmailCodeSent = false;
+    await inviteEmailRequestAction();
+  }
   async function switchTeam(teamId) {
     try {
       const r = await _authFetch("/auth/switch-team",
@@ -2676,7 +2774,7 @@
     });
     _sessionUser = null;
     _sessionTeam = null; _sessionTeams = [];
-    _authEmailOpen = false; _accountEmail = ""; _emailCodeSent = false; _membersCache = null; _pendingJoinCode = ""; _pendingJoinIntent = false; _rememberAutoLogin = false; _accountStatus = "";
+    _authEmailOpen = false; _accountEmail = ""; _emailCodeSent = false; _inviteEmailCodeSent = false; _inviteTeamName = ""; _membersCache = null; _pendingJoinCode = ""; _pendingJoinIntent = false; _rememberAutoLogin = false; _accountStatus = "";
     renderPresence([]); // 登出:清掉在线人数
     setAccountFlow("auth");
   }
@@ -2692,6 +2790,8 @@
       case "email-login": emailLoginAction(); break;
       case "email-register-start": sendCodeAction(); break;
       case "email-register": emailRegisterAction(); break;
+      case "invite-email-request": inviteEmailRequestAction(); break;
+      case "invite-email-verify": inviteEmailVerifyAction(); break;
       case "rename-team": renameTeam(); break;
       case "rename-profile": renameProfile(); break;
     }
@@ -2717,6 +2817,7 @@
     }
     switch (a) {
       case "google-login": doGoogleLogin(); break;
+      case "open-invite-email": _inviteEmailCodeSent = false; _inviteTeamName = ""; setAccountFlow("invite-email"); break;
       case "open-email": _rememberAutoLogin = hostChecked("remember_auto_login"); _authEmailOpen = true; setAccountFlow("auth"); break;
       case "back-auth": _authEmailOpen = false; setAccountFlow("auth"); break;
       case "email-continue": emailContinue(); break;
@@ -2724,6 +2825,7 @@
       case "send-code":
       case "resend-code": resendCodeAction(); break;
       case "email-register": emailRegisterAction(); break;
+      case "invite-email-resend": inviteEmailResendAction(); break;
       case "gen-invite": genInviteAndCopy(); break;
       case "remove-member": _confirmRemoveSub = actEl.dataset.sub || ""; renderAccountFlow(); break;
       case "cancel-remove": _confirmRemoveSub = ""; renderAccountFlow(); break;
@@ -2746,6 +2848,7 @@
       _pendingJoinCode = msg.code;
       _pendingJoinIntent = true;
       enterAccountView({ preserveJoinCode: true });
+      setAccountFlow("invite-email");
     }
   });
 
@@ -2928,8 +3031,9 @@
   });
   if (accountBackBtn) accountBackBtn.addEventListener("click", () => {
     // 登录流程：邮箱输入/密码/验证码均回到登录方式选择；不在页面底部重复放一个「‹ 返回」。
-    if (!_sessionUser && (_authEmailOpen || _accountFlow === "email-login" || _accountFlow === "email-register")) {
+    if (!_sessionUser && (_authEmailOpen || _accountFlow === "email-login" || _accountFlow === "email-register" || _accountFlow === "invite-email")) {
       _authEmailOpen = false;
+      if (_accountFlow === "invite-email") { _inviteEmailCodeSent = false; _inviteTeamName = ""; }
       setAccountFlow("auth");
       return;
     }

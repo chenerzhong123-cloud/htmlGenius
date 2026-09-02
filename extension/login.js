@@ -177,5 +177,32 @@ window.Login = (function () {
     return j;
   }
 
-  return { start: start, googleStart: googleStart, emailRegister: emailRegister, emailVerify: emailVerify, emailLogin: emailLogin, emailProbe: emailProbe, emailResend: emailResend, parseCallbackUrl: parseCallbackUrl, buildCallbackBody: buildCallbackBody };
+  // 邀请码 + 邮箱验证码的免密码入团。服务端验证邮箱归属后直接签发普通 team session。
+  async function inviteEmailRequest(backend, email, inviteCode) {
+    var r = await fetch(backend + "/auth/invite-email/request", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email, invite_code: inviteCode }),
+    });
+    var j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw responseError(r, j, "invite email request failed " + r.status, "invite_email_request");
+    return j;
+  }
+
+  async function inviteEmailVerify(backend, email, inviteCode, code) {
+    var r = await fetch(backend + "/auth/invite-email/verify", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email, invite_code: inviteCode, code: code }),
+    });
+    var j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw responseError(r, j, "invite email verify failed " + r.status, "invite_email_verify");
+    return j;
+  }
+
+  return {
+    start: start, googleStart: googleStart,
+    emailRegister: emailRegister, emailVerify: emailVerify, emailLogin: emailLogin,
+    emailProbe: emailProbe, emailResend: emailResend,
+    inviteEmailRequest: inviteEmailRequest, inviteEmailVerify: inviteEmailVerify,
+    parseCallbackUrl: parseCallbackUrl, buildCallbackBody: buildCallbackBody,
+  };
 })();

@@ -27,6 +27,8 @@ NAMES = [
     "artifact-storage-test.html",
     "version-test.html",
     "login-test.html",
+    "invite-email-login-test.html",
+    "site-export-test.html",
 ]
 
 

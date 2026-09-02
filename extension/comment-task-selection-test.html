@@ -349,6 +349,9 @@ Object.defineProperty(window.navigator,"clipboard",{value:{writeText:(t)=>{windo
     click("#contract-close"); await sleep(120);
     fire({type:"start-comment",selector:{exact:"x"},quote:"x"}); await sleep(80);
     ok(!!$("#draft-host .draft-input.ready"), "T9 状态A新建评论→草稿带 ready 提示");
+    fire({type:"join-code",code:"inv_passwordless123"}); await sleep(120);
+    ok(!!$("[data-form='invite-email-request']"), "T10 邀请链接直达免密码邮箱加入");
+    ok($("[data-field='invite_code']") && $("[data-field='invite_code']").value==="inv_passwordless123", "T10 邀请码自动填入");
     log(bad?("\nFAIL "+bad):"\nPASS selection v2");
     document.title = bad?"FAIL: "+bad+" cases":"PASS";
   })();

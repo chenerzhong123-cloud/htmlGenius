@@ -432,14 +432,15 @@ body.contract-open #account-sheet { display: none !important; }
 .presence-count::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px rgba(121,233,247,.6); }
 /* #4: 页面点高亮跳转时卡片的高亮反馈 */
 .card.flash { outline: 2px solid var(--brand); outline-offset: 2px; }
-#export-btn {
+#export-btn, #site-export-btn {
   width: 100%; height: 40px;
   background: transparent; color: var(--text-primary);
   border: 1px solid var(--line-default); border-radius: var(--r-md);
   font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; cursor: pointer;
   transition: background .14s ease, border-color .14s ease, color .14s ease;
 }
-#export-btn:hover { background: rgba(255,255,255,.05); border-color: var(--brand); color: var(--brand-hover); }
+#export-btn:hover, #site-export-btn:hover { background: rgba(255,255,255,.05); border-color: var(--brand); color: var(--brand-hover); }
+#site-export-btn:disabled { opacity: .55; cursor: wait; }
 
 /* === 批注卡片 === */
 .card {
@@ -782,7 +783,7 @@ button {
 .send-menu .menu-note { margin: 5px 8px 4px; padding-top: 8px; border-top: 1px solid var(--line-subtle); color: var(--text-muted); font-size: 10px; line-height: 1.45; }
 /* A 状态 CTA 行(outline 次级按钮 + ? 说明) */
 .comment-actions .cta-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.comment-actions .cta-row #export-btn { flex: 1; min-width: 0; }
+.comment-actions .cta-row #export-btn, .comment-actions .cta-row #site-export-btn { flex: 1; min-width: 0; }
 .contract-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 /* compose 步骤标题行:与账号视图 account-header 同规范(← 图标按钮 + 标题,下边线分隔) */
 .contract-header { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 0 12px; border-bottom: 1px solid var(--line-subtle); margin-bottom: 12px; }

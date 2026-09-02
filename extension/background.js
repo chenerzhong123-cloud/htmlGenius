@@ -540,7 +540,7 @@ function notifyCandidateReady(versionLabel, candidateUri) {
   chrome.notifications.create(id, {
     type: "basic",
     iconUrl: chrome.runtime.getURL("icons/icon128.png"),
-    title: "htmlGenius",
+    title: "HTML Genius – AI 网页批注",
     message: (versionLabel ? ("新候选版本 V" + versionLabel + " 已生成") : "新候选版本已生成") + "，点击查看",
     priority: 2
   }, () => {});

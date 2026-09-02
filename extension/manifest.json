@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxdVz0XIYjyjE8SIkGtDNQvFgRUPxiTHh29AjFL8BdEeo+oFx30NfxKiiFF15l1YbHvQow/TOdfihan2MvDkV3y/1M5LCfWGffsYzfz9xpRJ6Hd3YY1XFlsw84HjboTQu4ki/oOqbA8mlsZ73mWE57ufvsDhihdPllzJSznV375qpYEx4mSfmcewe48tGYS77W7ddBOwMW4bFjQa/uOj+RLDbpxbGt9HBQMw+NX5sYgj25Eqq8dKZl1pBV/M4j1gG9qFqxsxy0YKCcINK7ei9H/lvIAm00qbdvtREX3oWBhPOQn1WQsR1AM7ClgbnUiQxz1BK6n2Zwdy9/Lrc/owqHwIDAQAB",
-  "name": "htmlGenius",
-  "version": "1.0.2",
-  "description": "HTML在网页中实时编辑+精确批注修改意见+一键发送给Codex、Claude Code等Agent自动修改+团队共享批注",
+  "name": "HTML Genius – AI 网页批注",
+  "version": "1.0.3",
+  "description": "直接在网页上批注和编辑，免密码邀请团队协作，一键汇总整站评论并交给 Codex、Claude Code 等 AI Agent 修改",
   "homepage_url": "https://www.deuce.monster/htmlgenius/",
   "permissions": [
     "activeTab",
@@ -34,7 +34,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "htmlGenius",
+    "default_title": "HTML Genius – AI 网页批注",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png"
