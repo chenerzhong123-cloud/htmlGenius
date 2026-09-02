@@ -390,13 +390,14 @@ body.contract-open #account-sheet { display: none !important; }
 .sp-font-pop { max-height: 320px; overflow-y: auto; }
 .sp-font-pop .li { font-size: 13px; }
 
-/* v0.6: 切换高级模式 按钮(右下角浮动)+ 元素面板占位 */
+/* 控件编辑入口：紧邻编辑工具，不使用浮动按钮，避免遮挡底部保存动作。
+   它不属于 .edit-tools，进入控件编辑后仍能用同一入口退出。 */
 .adv-mode-btn {
-  position: fixed; right: 14px; bottom: 14px; z-index: 20;
-  background: var(--bg-surface-raised); color: var(--text-secondary);
-  border: 1px solid var(--line-default); border-radius: var(--r-pill);
-  padding: 8px 14px; font: 600 11.5px/1 var(--font-sans); cursor: pointer;
-  box-shadow: var(--shadow-float); transition: background .15s, color .15s, border-color .15s;
+  width: 100%; height: 32px; margin: 0 0 12px;
+  background: var(--bg-surface); color: var(--text-secondary);
+  border: 1px dashed var(--line-default); border-radius: var(--r-md);
+  font: 600 11.5px/1 var(--font-sans); cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
 }
 .adv-mode-btn:hover { background: var(--brand-soft); color: var(--text-primary); border-color: var(--brand); }
 .adv-mode-btn.active { background: var(--brand); color: #fff; border-color: var(--brand); }

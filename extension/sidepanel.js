@@ -239,7 +239,7 @@
     const epanel = document.getElementById("element-panel");
     if (epanel) epanel.hidden = !_elementMode; // v0.6: 元素面板(M3 填内容)
     const adv = document.getElementById("adv-mode-btn");
-    if (adv) adv.hidden = true; // v0.9.1:暂时隐藏「切换高级模式」入口(对用户较难懂);元素级编辑能力保留,恢复时改回 !_editing
+    if (adv) adv.hidden = !_editing; // 仅编辑态可用；元素模式时仍显示，供用户退出该模式。
     renderArtifactControls();
   }
   function renderArtifactControls() {

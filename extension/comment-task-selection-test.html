@@ -101,6 +101,7 @@ Object.defineProperty(window.navigator,"clipboard",{value:{writeText:(t)=>{windo
     <div class="ep-hint">高级模式已开启</div>
     <div class="ep-sub">在页面上悬停看元素框、点选元素(M2);删除 / 复制 / 拖拽重排(M3-M4)</div>
   </div>
+  <button id="adv-mode-btn" class="adv-mode-btn" data-i18n="adv.enter" hidden>控件编辑</button>
   <div class="edit-tips" data-i18n-html="tips.html">选中文字 → 点选区上方「<b>评论</b>」记录意见;点「<b>开始编辑</b>」后,选中文字可改<b>样式 / 颜色 / 字号 / 对齐</b>(Ctrl+Z 撤销)</div>
   <div id="artifact-status" class="artifact-status" hidden></div>
   <div id="artifact-reload-result" class="artifact-reload-result" hidden></div>
@@ -110,7 +111,6 @@ Object.defineProperty(window.navigator,"clipboard",{value:{writeText:(t)=>{windo
     <div class="artifact-reload-actions"><button id="artifact-reload-cancel" data-i18n="artifact.cancel">取消</button><button id="artifact-reload-confirm-btn" data-i18n="artifact.confirm">继续刷新</button></div>
   </div>
   <div class="reload-hint" data-i18n="reloadHint">若评论或编辑长时间无响应,刷新当前页面即可恢复</div>
-  <button id="adv-mode-btn" class="adv-mode-btn" data-i18n="adv.enter" hidden>切换高级模式</button>
 </div>
 
 <!-- 评论视图(次级) -->
