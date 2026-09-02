@@ -54,7 +54,7 @@ def _cors_origins() -> list[str]:
 
 # BE-7: 生产(HG_ENV 非 dev)关闭 /docs /redoc /openapi.json,并改用不泄露内部代号的 title。
 app = FastAPI(
-    title="htmlGenius API",
+    title="PageTack API",
     docs_url="/docs" if is_dev_env() else None,
     redoc_url="/redoc" if is_dev_env() else None,
     openapi_url="/openapi.json" if is_dev_env() else None,
@@ -129,6 +129,11 @@ async def security_headers(request, call_next):
 # R-2(v0.9.9):移除 /docs、/samples 匿名静态挂载 —— /docs 会泄露 docs/ 内的 client_secret 与审计报告,
 # /samples 文件名内嵌 document_id(喂跨租户 IDOR)。仅保留 /static(正规静态资源)。确需对外提供时加鉴权后再挂。
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
+app.mount(
+    "/pagetack",
+    StaticFiles(directory=BASE / "landing" / "demo-2026-07", html=True),
+    name="pagetack-site",
+)
 
 
 @app.get("/health")
@@ -148,12 +153,12 @@ def join_page(code: str):
     safe_code = html.escape(code, quote=True)
     return HTMLResponse(
         f"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
-<title>加入团队 · htmlGenius</title></head>
+<title>加入团队 · PageTack</title></head>
 <body style="font-family:sans-serif;padding:40px;line-height:1.6">
-<h3>加入 htmlGenius 团队</h3>
+<h3>加入 PageTack 团队</h3>
 <p>邀请码:<code style="font-size:1.2em">{safe_code}</code></p>
 <p>已自动填入扩展侧边栏 → 输入邮箱和验证码即可加入，无需设置密码。</p>
-<p style="color:#888;font-size:13px">若没弹出,打开 htmlGenius 侧边栏,在「加入团队」粘贴上面的码。</p>
+<p style="color:#888;font-size:13px">若没弹出,打开 PageTack 侧边栏,在「加入团队」粘贴上面的码。</p>
 </body></html>""",
         media_type="text/html; charset=utf-8",
     )

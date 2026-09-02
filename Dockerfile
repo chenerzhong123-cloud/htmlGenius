@@ -13,6 +13,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY server ./server
 COPY static ./static
+COPY landing/demo-2026-07 ./landing/demo-2026-07
 
 RUN mkdir -p /data
 
