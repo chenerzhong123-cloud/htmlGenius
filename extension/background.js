@@ -438,7 +438,7 @@ async function captureDiag(runId, { outcome, code, message, compliance }) {
     backend = (cfg && cfg.backend) || "";
   } catch (_) {}
   if (autoDiag) {
-    const url = (backend || "https://www.deuce.monster/htmlgenius") + "/api/diagnostics";
+    const url = (backend || "https://pagetack-api.zeabur.app") + "/api/diagnostics";
     fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ mode: "auto" }, record)) }).catch(() => {});
   }
 }
@@ -974,8 +974,8 @@ let _flushTimer = 0;
 function _analyticsBackend() {
   // 与 captureDiag 同源:backend 存在 chrome.storage.sync,缺省回落官网地址
   return new Promise((res) => {
-    try { chrome.storage.sync.get({ backend: "" }, (r) => res((r && r.backend) || "https://www.deuce.monster/htmlgenius")); }
-    catch (e) { res("https://www.deuce.monster/htmlgenius"); }
+    try { chrome.storage.sync.get({ backend: "" }, (r) => res((r && r.backend) || "https://pagetack-api.zeabur.app")); }
+    catch (e) { res("https://pagetack-api.zeabur.app"); }
   });
 }
 async function _ensureClientId(st) {

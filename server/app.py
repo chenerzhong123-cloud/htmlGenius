@@ -371,7 +371,7 @@ class EmailResendIn(BaseModel):
 
 @app.post("/auth/email/register")
 def email_register(payload: EmailRegisterIn, request: Request):
-    """注册:校验 → 生成验证码 → 发邮件(未配 HG_SMTP_HOST 走日志模式)。"""
+    """注册:校验 → 生成验证码 → 发邮件(仅开发环境允许日志模式)。"""
     _require_rate(_auth_limiter, _client_ip(request))
     try:
         email_auth.start_registration(payload.email, payload.password, payload.name)
