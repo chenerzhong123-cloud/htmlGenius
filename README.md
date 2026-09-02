@@ -40,13 +40,13 @@ htmlGenius 适合审阅 AI 生成的 HTML 原型、设计稿和网页内容。�
 
 ### 从 Chrome Web Store 安装（推荐）
 
-打开 [htmlGenius Chrome Web Store 页面](https://chromewebstore.google.com/detail/htmlgenius/fcapmgclnpiljjlcaficmjjclkaepaon)，点击“添加至 Chrome”即可安装。安装后打开任意网页，点击工具栏的 htmlGenius 图标。
+打开 [PageTack Chrome Web Store 页面](https://chromewebstore.google.com/detail/htmlgenius/fcapmgclnpiljjlcaficmjjclkaepaon)，点击“添加至 Chrome”即可安装。安装后打开任意网页，点击工具栏的 PageTack 图标。
 
 ### 从源码加载（开发者）
 
 1. 打开 `chrome://extensions`，开启“开发者模式”。
 2. 选择“加载已解压的扩展程序”，选中本仓库的 `extension/` 目录。
-3. 打开任意网页，点击工具栏的 htmlGenius 图标。
+3. 打开任意网页，点击工具栏的 PageTack 图标。
 4. 选中文字并评论；也可以直接进入编辑模式修改页面。准备交给 AI 时，在侧边栏点击“基于评论修改文档”。
 
 ## 本机 Agent（可选）
@@ -65,7 +65,7 @@ htmlGenius 适合审阅 AI 生成的 HTML 原型、设计稿和网页内容。�
 
 ## 最近更新
 
-- **v1.0.3（当前版本）**：扩展展示名更新为「HTML Genius – AI 网页批注」；受邀成员可用邀请码 + 邮箱验证码免密码加入团队；团队成员可一键汇总当前网站全部未解决评论，复制为按页面分组的 AI 修改 Prompt。
+- **v1.0.3（当前版本）**：扩展以全新品牌名「PageTack – AI 网页批注」发布；受邀成员可用邀请码 + 邮箱验证码免密码加入团队；团队成员可一键汇总当前网站全部未解决评论，复制为按页面分组的 AI 修改 Prompt。
 - **v1.0.2**：邮箱注册验证码在 60 秒后可重新发送，重复点击不会创建并发请求；匿名统计新增脱敏的登录失败阶段、固定结果码和扩展版本，用于定位授权或验证码问题；官网补齐站点地图与搜索引擎结构化信息。
 - **v1.0.1**：匿名使用统计扩展——新增协作与任务链路指标（回复/看到他人评论/查看与确认修改计划/应用候选/切换团队等），仍完全匿名、不含任何内容与账号信息；发送任务统计口径修正（计划预跑不再计入）。
 

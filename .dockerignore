@@ -1,0 +1,7 @@
+*
+!pyproject.toml
+!uv.lock
+!server/
+!server/**
+!static/
+!static/**

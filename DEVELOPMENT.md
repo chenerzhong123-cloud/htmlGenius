@@ -83,7 +83,7 @@ uv run uvicorn server.app:app --port 8000 --reload
 
 ### Zeabur 部署
 
-仓库根目录的 `zbpack.json` 固定使用 Python 3.12、uv 与 Uvicorn。首次部署后必须在 Zeabur 为服务挂载持久卷到 `/data`，并设置 `HTMLEDITOR_DB=/data/annotations.db`；否则 SQLite 会随重新部署丢失。生产环境还必须设置 `HG_ENV=production`、随机生成的 `HG_STREAM_SECRET`，以及上表中的 SMTP 发信变量。部署后至少检查 `/healthz`、邮箱验证码投递、免密码邀请加入和整站评论导出。
+仓库根目录的 `Dockerfile` 固定使用 Python 3.12、uv 与 Uvicorn，并只安装生产依赖；这样可避免 Zeabur 因开发依赖中的 Playwright 自动安装浏览器。`zbpack.json` 保留为非 Docker 构建器的启动配置。首次部署后必须在 Zeabur 为服务挂载持久卷到 `/data`；镜像已设置 `HTMLEDITOR_DB=/data/annotations.db`，未挂卷时 SQLite 会随重新部署丢失。生产环境还必须设置 `HG_ENV=production`、随机生成的 `HG_STREAM_SECRET`，以及上表中的 SMTP 发信变量。部署后至少检查 `/healthz`、邮箱验证码投递、免密码邀请加入和整站评论导出。
 
 **邮箱登录(邮箱 + 密码 · 带 email 验证码)**:第三个 provider,与 Google/飞书并存,服务无 VPN 用户。端点 `/auth/email/{register,verify,login,resend}`;注册带邮箱验证码(验证码服务端只存 pbkdf2 哈希)。身份模型统一为 `user_id`——老 Google 数据 `user_id == google_sub`,迁移纯改名+加列、零数据改写、幂等;邮箱用户可凭邀请码加入团队、与 Google 用户协作。邮件 env 未配=日志模式(开发/测试用,验证码进服务端日志,解耦邮件基建)。
 
