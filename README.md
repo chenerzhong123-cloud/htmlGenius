@@ -40,7 +40,7 @@ htmlGenius 适合审阅 AI 生成的 HTML 原型、设计稿和网页内容。�
 
 ### 从 Chrome Web Store 安装（推荐）
 
-打开 [PageTack Chrome Web Store 页面](https://chromewebstore.google.com/detail/htmlgenius/fcapmgclnpiljjlcaficmjjclkaepaon)，点击“添加至 Chrome”即可安装。安装后打开任意网页，点击工具栏的 PageTack 图标。
+打开 [PageTack Chrome Web Store 页面](https://chromewebstore.google.com/detail/jmafkpbgpkjojjgaaiojcafbdgpglola)，点击“添加至 Chrome”即可安装。安装后打开任意网页，点击工具栏的 PageTack 图标。
 
 ### 从源码加载（开发者）
 
@@ -67,9 +67,9 @@ htmlGenius 适合审阅 AI 生成的 HTML 原型、设计稿和网页内容。�
 
 ## 最近更新
 
-- **v1.0.6（当前版本）**：网页评论组件失联时会自动重新连接并重放当前操作，不再要求刷新网页；评论动作可从账号视图自动返回草稿输入，并在网页折叠原生选区时使用最近的有效选区兜底。
+- **v1.0.7（当前版本）**：换用原创 PageTack 图标，移除侧边栏顶部 Home 图标，并把扩展内的商店身份更新为当前 PageTack 项目。
+- **v1.0.6**：网页评论组件失联时会自动重新连接并重放当前操作，不再要求刷新网页；评论动作可从账号视图自动返回草稿输入，并在网页折叠原生选区时使用最近的有效选区兜底。
 - **v1.0.5**：评论保存会等待服务器确认后再清理草稿，可稳定连续提交多条评论；失败时保留输入内容并给出明确提示。
-- **v1.0.4**：修复验证码倒计时重建输入框、登录后网页评论被跨域策略拦截、邀请链接路径错误等问题；保留已分享旧邀请链接的兼容，并补齐 Chrome 商店版扩展 ID 的服务端连接支持。
 
 完整历史见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
