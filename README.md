@@ -49,6 +49,8 @@ htmlGenius 适合审阅 AI 生成的 HTML 原型、设计稿和网页内容。�
 3. 打开任意网页，点击工具栏的 PageTack 图标。
 4. 选中文字并评论；也可以直接进入编辑模式修改页面。准备交给 AI 时，在侧边栏点击“基于评论修改文档”。
 
+本地测试不要解压 `dist/PageTack-<版本>.zip`：它是 Chrome Web Store 上传包，按商店要求移除了固定 ID，多次解压加载可能产生多个扩展副本。需要便携本地包时运行 `bash scripts/pack-local.sh`，解压生成的 `PageTack-<版本>-local-test.zip` 后加载；该包保留固定开发 ID，只用于开发者模式，不能上传商店。
+
 ## 本机 Agent（可选）
 
 不安装本机连接组件，也可以把评论复制为结构化 Prompt，粘到任何 AI 对话框中。
