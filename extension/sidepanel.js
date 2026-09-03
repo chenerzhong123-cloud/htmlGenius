@@ -2649,13 +2649,25 @@
       HGAnalytics.track("login_success", { method: "email" }); showToast(t("login.emailSuccess"));
     } catch (e) { _emailBusy = false; trackLoginFailure("email", "email_login", e); setAccountFlow("email-login", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
   }
+  function updateEmailCooldownLabel() {
+    if (!accountHost) return;
+    const label = _emailCooldown > 0
+      ? t("login.resendIn").replace("{n}", _emailCooldown)
+      : t("ws.register.resend");
+    accountHost.querySelectorAll('[data-action="resend-code"], [data-action="invite-email-resend"]').forEach((button) => {
+      button.textContent = label;
+    });
+  }
   function startEmailCooldown(n) {
     _emailCooldown = n;
     if (_emailCooldownTimer) clearInterval(_emailCooldownTimer);
+    updateEmailCooldownLabel();
     _emailCooldownTimer = setInterval(() => {
-      _emailCooldown -= 1;
+      _emailCooldown = Math.max(0, _emailCooldown - 1);
       if (_emailCooldown <= 0) { clearInterval(_emailCooldownTimer); _emailCooldownTimer = null; }
-      if (_accountFlow === "email-register" || _accountFlow === "invite-email") renderAccountFlow();
+      // 只更新倒计时按钮，不重建整个表单。重建会每秒替换验证码输入框，
+      // 造成焦点丢失、已输入内容清空，最终无法提交。
+      if (_accountFlow === "email-register" || _accountFlow === "invite-email") updateEmailCooldownLabel();
     }, 1000);
   }
   async function sendCodeAction() {

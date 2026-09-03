@@ -48,6 +48,7 @@ def _cors_origins() -> list[str]:
         return [o.strip() for o in env.split(",") if o.strip()]
     return [
         "chrome-extension://ppobilnafpchnmjjflgafohnbdjlbbac",
+        "chrome-extension://jmafkpbgpkjojjgaaiojcafbdgpglola",
         "https://www.deuce.monster",
     ]
 
