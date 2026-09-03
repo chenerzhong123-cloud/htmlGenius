@@ -464,19 +464,32 @@
     });
   }
 
-  function commitDraft() {
+  async function commitDraft() {
     const draft = document.querySelector(".draft-card");
     if (!draft || !_pendingSelector) return;
+    const save = draft.querySelector(".draft-save");
+    if (save && save.disabled) return;
     const comment = draft.querySelector(".draft-input").value;
-    sendToContent({
+    const pending = _pendingSelector;
+    if (save) { save.disabled = true; save.textContent = t("draft.saving"); }
+    const response = await sendToContent({
       type: "commit-comment",
-      selector: _pendingSelector.selector,
-      quote: _pendingSelector.quote,
+      selector: pending.selector,
+      quote: pending.quote,
       comment: comment || "",
     });
-    HGAnalytics.track("comment_create", { is_local: isLocal }); // 只计根评论;回复不计,避免漏斗重复计数
-    _pendingSelector = null;
-    draft.remove();
+    // 用户可能在网络等待期间又选了一段文字。旧请求的回包不得
+    // 清除新草稿，只处理自己发起时对应的节点和 selector。
+    if (!draft.isConnected || _pendingSelector !== pending) return;
+    if (response && response.ok) {
+      HGAnalytics.track("comment_create", { is_local: isLocal }); // 只计服务端/本地确认成功的根评论
+      _pendingSelector = null;
+      draft.remove();
+      await refreshAnnotations();
+      return;
+    }
+    if (save) { save.disabled = false; save.textContent = t("draft.save"); }
+    showToast(t("toast.commentFail"));
   }
 
   function cancelDraft() {
