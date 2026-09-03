@@ -3,6 +3,17 @@
 (function () {
   "use strict";
 
+  // executeScript 自动恢复可能在同一页面再次加载本文件。让新实例接管，并让已支持
+  // dispose 的旧实例立即停止响应，避免多个消息监听器争抢同一条评论操作。
+  try {
+    if (window.__hgContentInstance && typeof window.__hgContentInstance.dispose === "function") {
+      window.__hgContentInstance.dispose();
+    }
+  } catch (e) {}
+  const _contentInstance = { alive: true, dispose: null };
+  window.__hgContentInstance = _contentInstance;
+  const isCurrentInstance = () => _contentInstance.alive && window.__hgContentInstance === _contentInstance;
+
   const { describe, anchor } = window;
   console.log("[hg] cs loaded: Storage=", typeof window.Storage, "RemoteStore=", typeof window.RemoteStore, "Sync=", typeof window.Sync);
 
@@ -134,6 +145,9 @@
   let _artifactVerificationError = false;
   // v0.9.6: 重载时检测到的未提交草稿(待用户在页内横幅上选「恢复/丢弃」),不再静默应用
   let _pendingDraft = null;
+  let _pendingCommentRequest = null;
+  let _commentDeliveryTimer = 0;
+  let _commentRequestSeq = 0;
   // v0.9.6: 草稿态同步给侧边栏(点亮/熄灭保存按钮微标)。sidepanel 未打开时 sendMessage 会 reject,吞掉即可
   function broadcastUnsaved(unsaved) {
     try { chrome.runtime.sendMessage({ type: "unsaved-state", unsaved: !!unsaved }).catch(() => {}); } catch (e) {}
@@ -687,7 +701,12 @@
     const btn = e.target.closest("button[data-act]");
     if (!btn) return;
     const act = btn.dataset.act;
-    if (act === "comment") { toolbar.classList.remove("show"); execEdit({ kind: "comment" }); return; }
+    if (act === "comment") {
+      toolbar.classList.remove("show");
+      const result = execEdit({ kind: "comment" });
+      if (!result.ok) notifyNoSelection();
+      return;
+    }
     // #1: B/I/U/S 走统一入口 —— 原生 toggle(再点取消)+ 每次改动都入撤销历史
     if (act === "bold" || act === "italic" || act === "underline" || act === "strike") { execEdit({ kind: "toggle", cmd: act }); closeAllPopovers(); }
     else if (act === "clear") { execEdit({ kind: "clear" }); closeAllPopovers(); }
@@ -717,6 +736,7 @@
   // content script → side panel: chrome.runtime.sendMessage
   // side panel → content script: chrome.tabs.sendMessage
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!isCurrentInstance()) return;
     if (msg.type === "team-changed") {
       // 团队切换:重读 storage(新 session_token/team_id)→ 协同页整页重载,以新团队身份重载批注+SSE。
       chrome.storage.local.get(["mode"], (c) => {
@@ -833,6 +853,7 @@
       _lastPingAt = Date.now();
       if (!wasActive) loadAnnotations(); // 首次激活:渲染批注高亮
       if (_pendingDraft) showDraftRestoreBanner(); // 草稿提示只在 Side Panel 已打开时展示
+      deliverPendingComment();
       if (showDialog && !_refreshDialogShown && !_editing) { _refreshDialogShown = true; showRefreshDialog(); }
       sendResponse({ ok: true, isLocal: isLocal });
     } else if (msg.type === "panel-ping") {
@@ -842,6 +863,7 @@
       _lastPingAt = Date.now();
       if (!wasActive) loadAnnotations();
       if (_pendingDraft) showDraftRestoreBanner();
+      deliverPendingComment();
       sendResponse({ ok: true });
     } else if (msg.type === "deactivate") {
       // #1: 侧边栏收起 → 立即失活(隐藏浮窗/高亮,退出编辑)
@@ -956,6 +978,7 @@
   let _deactivateTimer = 0;
   let _panelConnected = false;
   chrome.runtime.onConnect.addListener((port) => {
+    if (!isCurrentInstance()) return;
     if (port.name !== "hg-panel") return;
     _panelConnected = true;
     if (_deactivateTimer) { clearTimeout(_deactivateTimer); _deactivateTimer = 0; } // 新连接到达:取消待执行的失活
@@ -968,6 +991,7 @@
   // === selectionchange → toolbar 定位(rAF 防抖) ===
   let barRAF = 0;
   document.addEventListener("selectionchange", () => {
+    if (!isCurrentInstance()) return;
     if (barRAF) return;
     barRAF = requestAnimationFrame(() => {
       barRAF = 0;
@@ -998,14 +1022,57 @@
   // === 批注创建 ===
   // v0.4.1: 不再用浏览器 prompt。捕获选区后通知 sidepanel 开草稿块内联编辑,
   // 用户在侧边栏提交(commit-comment)时才真正落库。
-  async function createAnnotation() {
+  function scheduleCommentDelivery(request) {
+    if (!isCurrentInstance() || _pendingCommentRequest !== request) return;
+    if (Date.now() > request.expires_at || request.attempts >= 5) {
+      _pendingCommentRequest = null;
+      console.warn("[hg] comment draft delivery timed out");
+      return;
+    }
+    if (_commentDeliveryTimer) clearTimeout(_commentDeliveryTimer);
+    const delays = [0, 80, 240, 600, 1200];
+    _commentDeliveryTimer = setTimeout(() => {
+      _commentDeliveryTimer = 0;
+      deliverPendingComment();
+    }, delays[request.attempts] || 1200);
+  }
+  function deliverPendingComment() {
+    const request = _pendingCommentRequest;
+    if (!request || request.delivering || !isCurrentInstance()) return;
+    request.delivering = true;
+    request.attempts += 1;
+    chrome.runtime.sendMessage({
+      type: "start-comment", request_id: request.request_id,
+      selector: request.selector, quote: request.quote,
+    }).then((reply) => {
+      request.delivering = false;
+      if (_pendingCommentRequest !== request) return;
+      if (reply && reply.ok) { _pendingCommentRequest = null; return; }
+      scheduleCommentDelivery(request);
+    }).catch(() => {
+      request.delivering = false;
+      if (_pendingCommentRequest === request) scheduleCommentDelivery(request);
+    });
+  }
+  function createAnnotation() {
     const sel = document.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
-    const range = sel.getRangeAt(0);
+    let range = sel && sel.rangeCount && !sel.isCollapsed ? sel.getRangeAt(0).cloneRange() : null;
+    // 某些网页会在 toolbar 的 click 到达前折叠原生选区；使用最近一次仍挂在文档上的
+    // 非折叠选区兜底，避免同一次明确点击被静默吞掉。
+    if (!range || !rangeInDocument(range)) {
+      range = _lastRange && rangeInDocument(_lastRange) && !_lastRange.collapsed ? _lastRange.cloneRange() : null;
+    }
+    if (!range) return { ok: false, code: "NO_SELECTION" };
     const selector = describe(range, document.body);
-    if (!selector || !selector.exact) return;
-    chrome.runtime.sendMessage({ type: "start-comment", selector, quote: selector.exact }).catch(() => {});
-    sel.removeAllRanges();
+    if (!selector || !selector.exact) return { ok: false, code: "NO_SELECTION" };
+    const request = {
+      request_id: "comment_" + Date.now().toString(36) + "_" + (++_commentRequestSeq).toString(36),
+      selector, quote: selector.exact, attempts: 0, delivering: false, expires_at: Date.now() + 5000,
+    };
+    _pendingCommentRequest = request;
+    deliverPendingComment();
+    if (sel) sel.removeAllRanges();
+    return { ok: true };
   }
 
   // 把选区与缓存选区(_lastRange/_lastCursor)重锚定到新包裹/重插的内容上。
@@ -1220,8 +1287,7 @@
         if (!clearFormat()) return { ok: false, code: "NO_SELECTION" };
         break;
       case "comment":
-        createAnnotation();
-        return { ok: true };
+        return createAnnotation();
       default:
         return { ok: false, code: "BAD_OP" };
     }
@@ -1360,11 +1426,13 @@
   }
   // #3b/v0.6: _lastRange=非折叠选区(取色);_lastCursor=任意位(emoji 插入)。分开存,避免光标覆盖取色选区。
   document.addEventListener("selectionchange", () => {
-    if (!_editing) return;
+    if (!isCurrentInstance()) return;
     const sel = document.getSelection();
     if (!sel || !sel.rangeCount) return;
     const r = sel.getRangeAt(0).cloneRange();
-    if (sel.isCollapsed) _lastCursor = r; else { _lastRange = r; _lastCursor = r; }
+    // 评论在查看模式也可用，因此非折叠选区始终缓存；光标与文字编辑相关，只在编辑态缓存。
+    if (sel.isCollapsed) { if (_editing) _lastCursor = r; }
+    else { _lastRange = r; if (_editing) _lastCursor = r; }
   });
 
   // 撤销 + 粘贴:本地/远程均可编辑 → 全局注册(仅 _editing 时拦截,免得抢页面原生快捷键);版本持久化仅本地。
@@ -1568,7 +1636,21 @@
   }
 
   // #1: 心跳看门狗 —— 侧边栏「关闭」事件偶尔不触发时,连续 ~12s 收不到 ping 也自动失活(兜底)
-  setInterval(() => { if (_activated && Date.now() - _lastPingAt > 12000) deactivateNow(); }, 3000);
+  const _watchdogTimer = setInterval(() => {
+    if (isCurrentInstance() && _activated && Date.now() - _lastPingAt > 12000) deactivateNow();
+  }, 3000);
+
+  _contentInstance.dispose = () => {
+    if (!_contentInstance.alive) return;
+    _contentInstance.alive = false;
+    if (_watchdogTimer) clearInterval(_watchdogTimer);
+    if (_commentDeliveryTimer) clearTimeout(_commentDeliveryTimer);
+    if (_sseIdleTimer) clearTimeout(_sseIdleTimer);
+    if (_deactivateTimer) clearTimeout(_deactivateTimer);
+    if (barRAF) cancelAnimationFrame(barRAF);
+    if (_sync) { try { _sync.stop(); } catch (e) {} _sync = null; }
+    document.querySelectorAll('#hg-toolbar, style[data-hg-injected="ui"], .hg-hl, .hg-inspect, .hg-select, .hg-tip, .hg-drop, .hg-draft-banner, #hg-refresh-modal').forEach((el) => el.remove());
+  };
 
   // === 初始化 ===
   (async () => {

@@ -1,7 +1,8 @@
 <!doctype html><html lang="zh-CN"><head>
 <meta charset="UTF-8"><link rel="stylesheet" href="sidepanel.css">
 <script>
-window.__captured = { runtime: [], tabMessages: [] };
+window.__captured = { runtime: [], tabMessages: [], scriptInjections: [] };
+window.__failNextContentMessage = false;
 window.__hgMsgs = [];
 window.fire = (m) => (window.__hgMsgs||[]).forEach((fn) => { try { fn(m); } catch (e) {} });
 window.$$sel = (s) => Array.from(document.querySelectorAll(s));
@@ -15,7 +16,8 @@ const __ITEMS = [
 window.chrome = {
   storage:{sync:{get:(k,cb)=>cb({})},local:{get:(k,cb)=>cb({hg_lang:"zh"})},onChanged:{addListener:()=>{}}},
   runtime:{id:"x", sendMessage:(m)=>{ if(m.type==="bridge-query-latest-candidate") return Promise.resolve({ok:true,run:null}); window.__captured.runtime.push(m); return Promise.resolve({ok:true}); }, onMessage:{addListener:(fn)=>{ window.__hgMsgs.push(fn); }}},
-  tabs:{query:(o,cb)=>{const t=[{id:1,url:"file:///t/r.html"}]; if(cb)cb(t); else return Promise.resolve(t);}, sendMessage:(id,m)=>{ window.__captured.tabMessages.push(m); if(m.type==="get-annotations") return Promise.resolve({type:"annotations-list",items:__ITEMS,isLocal:true,editing:false,artifact_state:null}); if(m.type==="get-export") return Promise.resolve({type:"export-data",items:__ITEMS,artifact:{title:"T",url:"file:///t/r.html",isLocal:true},logicalDocumentId:"hgd",loadedArtifactHash:"sha256:"+"1".repeat(64)}); return Promise.resolve({ok:true}); }, connect:()=>({disconnect:()=>{},onDisconnect:{addListener:()=>{}}}), onActivated:{addListener:()=>{}}, onUpdated:{addListener:()=>{}}, reload:()=>{}},
+  tabs:{query:(o,cb)=>{const t=[{id:1,url:"file:///t/r.html"}]; if(cb)cb(t); else return Promise.resolve(t);}, sendMessage:(id,m)=>{ window.__captured.tabMessages.push(m); if(window.__failNextContentMessage){window.__failNextContentMessage=false;return Promise.reject(new Error("mock missing content script"));} if(m.type==="get-annotations") return Promise.resolve({type:"annotations-list",items:__ITEMS,isLocal:true,editing:false,artifact_state:null}); if(m.type==="get-export") return Promise.resolve({type:"export-data",items:__ITEMS,artifact:{title:"T",url:"file:///t/r.html",isLocal:true},logicalDocumentId:"hgd",loadedArtifactHash:"sha256:"+"1".repeat(64)}); return Promise.resolve({ok:true}); }, connect:()=>({disconnect:()=>{},onDisconnect:{addListener:()=>{}}}), onActivated:{addListener:()=>{}}, onUpdated:{addListener:()=>{}}, reload:()=>{}},
+  scripting:{executeScript:(o)=>{window.__captured.scriptInjections.push(o.files||["probe"]);return Promise.resolve(o.func?[{result:true}]:[]);}},
   identity:{getRedirectURL:()=>"x",launchWebAuthFlow:()=>Promise.reject(new Error("mock"))}
 };
 Object.defineProperty(window.navigator,"clipboard",{value:{writeText:(t)=>{window.__captured.clipboard=window.__captured.clipboard||[];window.__captured.clipboard.push(t);return Promise.resolve();}},configurable:true});
@@ -356,6 +358,15 @@ Object.defineProperty(window.navigator,"clipboard",{value:{writeText:(t)=>{windo
     const committed=window.__captured.tabMessages.filter((m)=>m.type==="commit-comment");
     ok(committed.length===2 && committed[0].comment==="first" && committed[1].comment==="second", "T12 连续保存两条评论");
     ok(!$("#draft-host .draft-card"), "T12 每次成功回包后清理当前草稿");
+    click("#avatar"); await sleep(80);
+    ok(document.body.classList.contains("account-view-open"), "T13 账号视图已打开");
+    fire({type:"start-comment",request_id:"account-comment",selector:{exact:"z"},quote:"z"}); await sleep(80);
+    ok(!document.body.classList.contains("account-view-open") && !!$("#draft-host .draft-card"), "T13 页面评论自动退出账号视图并显示草稿");
+    click("#draft-host .draft-cancel");
+    window.__failNextContentMessage=true;
+    click("#act-comment"); await sleep(220);
+    ok(window.__captured.scriptInjections.some((x)=>x.length===1&&x[0]==="content-script.js"), "T14 页面脚本失联后自动补注入，无需刷新");
+    ok(window.__captured.tabMessages.filter((m)=>m.type==="create-comment").length===2, "T14 自动恢复后重放原评论操作");
     fire({type:"join-code",code:"inv_passwordless123"}); await sleep(120);
     ok(!!$("[data-form='invite-email-request']"), "T10 邀请链接直达免密码邮箱加入");
     ok($("[data-field='invite_code']") && $("[data-field='invite_code']").value==="inv_passwordless123", "T10 邀请码自动填入");

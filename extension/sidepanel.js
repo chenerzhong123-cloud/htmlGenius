@@ -26,12 +26,62 @@
     return tabs[0];
   }
 
+  const CONTENT_SCRIPT_FILES = [
+    "vendor/purify.min.js", "text-quote.js", "remote-store.js", "sync.js", "storage.js",
+    "artifact-version.js", "buildprompt.js", "i18n.js", "undo.js", "palette.js", "config.js",
+    "content-script.js",
+  ];
+  const _contentRecoveryByTab = new Map();
+  function canInjectInto(tab) {
+    const url = String((tab && tab.url) || "");
+    return /^(https?|file):/i.test(url);
+  }
+  async function recoverContentScript(tab, showDialog) {
+    if (!tab || !tab.id || !canInjectInto(tab) || !chrome.scripting || !chrome.scripting.executeScript) return false;
+    if (_contentRecoveryByTab.has(tab.id)) return _contentRecoveryByTab.get(tab.id);
+    const recovery = (async () => {
+      try {
+        // 若依赖脚本仍在，只重载主控制器，避免重复执行带顶层 const 的 storage/text-quote；
+        // 若页面是在扩展安装前打开的，则一次补齐完整依赖链。
+        const probe = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => !!(window.describe && window.anchor && window.Storage && window.HG_I18N && window.HG_CONFIG),
+        });
+        const depsReady = !!(probe && probe[0] && probe[0].result);
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id }, files: depsReady ? ["content-script.js"] : CONTENT_SCRIPT_FILES,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        const active = await getActiveTab();
+        if (!active || active.id !== tab.id) return false;
+        const reply = await chrome.tabs.sendMessage(tab.id, { type: "activate", showDialog: showDialog !== false });
+        return !!(reply && reply.ok);
+      } catch (e) {
+        console.log("content script recovery failed:", e);
+        return false;
+      } finally {
+        _contentRecoveryByTab.delete(tab.id);
+      }
+    })();
+    _contentRecoveryByTab.set(tab.id, recovery);
+    return recovery;
+  }
+
   async function sendToContent(msg) {
     const tab = await getActiveTab();
     if (!tab) return null;
     currentTabId = tab.id;
     try { return await chrome.tabs.sendMessage(tab.id, msg); }
-    catch (e) { console.log("content script not ready:", e); return null; }
+    catch (e) {
+      console.log("content script not ready:", e);
+      // 扩展刚安装/更新、页面长时间挂起或 content-script 上下文失效时，无需让用户刷新网页：
+      // 对普通网页自动补注入一次，再重放原操作。Chrome 内部页仍按平台限制保持不可注入。
+      if (await recoverContentScript(tab, false)) {
+        try { return await chrome.tabs.sendMessage(tab.id, msg); }
+        catch (retryError) { console.log("content script retry failed:", retryError); }
+      }
+      return null;
+    }
   }
   // 重拉当前 tab 评论并刷新评论卡(+ 若 contract 开则同步本轮快照)。切 tab / 评论变化时用。
   // sendToContent 已把 currentTabId 更新为活动 tab → sidepanel 按 tab 独立显示评论。
@@ -94,12 +144,15 @@
         break;
       } catch (e) { /* content-script 尚未注入，继续短暂重试 */ }
     }
+    // 静态注入失效时（如扩展刚更新但网页早已打开），主动补注入，无需用户刷新页面。
+    if (!csReady) csReady = await recoverContentScript(tab, showDialog);
     // file:// 页若 content script 未就绪,几乎必是「允许访问文件网址」toggle 关了(Chrome 对所有扩展默认关)。
     syncFileAccessHint(tab, csReady);
     syncRefreshHint(tab, csReady);
     // #5: 建立长连接 —— 侧边栏关闭(页面销毁)→ Chrome 自动断开 port → content-script onDisconnect 失活
     if (csReady) { try { _panelPort = chrome.tabs.connect(tab.id, { name: "hg-panel" }); } catch (e) {} }
     if (oldPort && oldPort !== _panelPort) { try { oldPort.disconnect(); } catch (e) {} } // 切标签:最后再断旧 port
+    return csReady;
   }
   // file:// 本地文件页:Chrome 默认禁止扩展访问(content script 不注入),需用户在 chrome://extensions
   // 手动开「允许访问文件网址」。检测到 file:// 页 CS 未就绪 → 显示提示;CS 就绪或非 file:// → 隐藏。
@@ -148,16 +201,32 @@
   window.addEventListener("beforeunload", onPanelClosing);
 
   // 接收 content-script 消息
-  chrome.runtime.onMessage.addListener((msg, sender) => {
+  const _handledCommentRequests = new Set();
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === "annotations-updated") {
       refreshAnnotations();
     } else if (msg.type === "presence") {
       renderPresence(msg.users);
     } else if (msg.type === "start-comment") {
+      const requestId = String(msg.request_id || "");
+      if (requestId && _handledCommentRequests.has(requestId)) {
+        if (sendResponse) sendResponse({ ok: true, duplicate: true });
+        return;
+      }
       // issue 4:若正处于「整理评论/创建任务」流程(sheet 打开),草稿会被 sheet 盖住、用户无处输入 →
       // 不开草稿,改显示醒目提示,引导先返回收件箱。否则正常开草稿。
       if (_contractOpen) { showBlockNotice(); }
-      else { hideBlockNotice(); showDraft(msg.selector, msg.quote); }
+      else {
+        // 账号/团队页会用 CSS 隐藏评论视图。收到页面上的评论动作时自动回到评论页，
+        // 避免草稿已创建却完全不可见，表现成“Comment 没反应”。
+        if (document.body.classList.contains("account-view-open")) exitAccountView();
+        hideBlockNotice(); showDraft(msg.selector, msg.quote);
+      }
+      if (requestId) {
+        _handledCommentRequests.add(requestId);
+        if (_handledCommentRequests.size > 32) _handledCommentRequests.delete(_handledCommentRequests.values().next().value);
+      }
+      if (sendResponse) sendResponse({ ok: true, blocked: !!_contractOpen });
     } else if (msg.type === "edit-state") {
       // content-script 切换编辑态后同步按钮(确认窗「刷新」/ 手动「开始编辑」均经此)
       _editing = !!msg.editing;
@@ -3308,7 +3377,11 @@
       if (incoming) reconcileTabRun(incoming);
     })();
   });
-  chrome.tabs.onUpdated.addListener((_id, info) => { if (info && info.status === "complete") { activateActiveTab(false); refreshAnnotations(); } });
+  chrome.tabs.onUpdated.addListener((_id, info) => {
+    if (info && info.status === "complete") {
+      (async () => { await activateActiveTab(false); await refreshAnnotations(); })();
+    }
+  });
   chrome.tabs.onRemoved.addListener((tabId) => { _tabStates.delete(tabId); });
   // #1: 心跳 —— 只要侧边栏开着就持续 ping 活动标签(收起后停止 → content-script 看门狗失活)
   setInterval(pingActiveTab, 4000);
@@ -3351,7 +3424,7 @@
       }
       applyTheme(theme);
     });
-    activateActiveTab(true); // 打开侧边栏:激活当前页 + 弹编辑确认窗(刷新前)
+    await activateActiveTab(true); // 打开侧边栏:先确保页面脚本就绪，再读取评论，避免初始化竞态
     const resp = await sendToContent({ type: "get-annotations" });
     if (resp && resp.type === "annotations-list") {
       isLocal = resp.isLocal;
