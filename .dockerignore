@@ -1,0 +1,10 @@
+*
+!pyproject.toml
+!uv.lock
+!server/
+!server/**
+!static/
+!static/**
+!landing/
+!landing/demo-2026-07/
+!landing/demo-2026-07/**

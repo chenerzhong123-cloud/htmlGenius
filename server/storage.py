@@ -111,6 +111,15 @@ def init_db(path: Path) -> None:
                 expires_at TEXT NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS invite_email_verifications (
+                email TEXT NOT NULL,
+                invite_code TEXT NOT NULL,
+                code_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (email, invite_code)
+            );
             CREATE TABLE IF NOT EXISTS diagnostics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT NOT NULL,
@@ -219,6 +228,15 @@ def init_db(path: Path) -> None:
         cu2 = {row["name"] for row in c.execute("PRAGMA table_info(users)")}
         if cu2 and "name_custom" not in cu2:
             c.execute("ALTER TABLE users ADD COLUMN name_custom INTEGER NOT NULL DEFAULT 0")
+        # 索引必须在老库补齐 annotations.team_id 之后创建，否则历史表会在启动迁移前失败。
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_annotations_team_document_created "
+            "ON annotations(team_id, document_id, created_at)"
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_annotations_team_status_document "
+            "ON annotations(team_id, status, document_id)"
+        )
     finally:
         c.close()
 
@@ -490,6 +508,43 @@ def list_annotations(document_id: str, team_id: str = "default") -> list[dict]:
     finally:
         c.close()
     return [_row_to_ann(r) for r in rows]
+
+
+def list_site_annotations(
+    team_id: str,
+    site_origin: str,
+    status: "str | None" = "open",
+    limit: int = 1000,
+) -> tuple[list[dict], bool]:
+    """Return one team's annotations for every page under an exact HTTP origin.
+
+    Remote document ids are stored as ``origin + pathname``.  Matching either
+    the bare origin or ``origin/…`` prevents ``example.com.evil`` from being
+    included.  One extra row is read so callers can report truncation instead
+    of silently returning an incomplete AI task.
+    """
+    capped = max(1, min(int(limit), 5000))
+    # ``_`` 与 ``%`` 在 LIKE 中是通配符；虽然常规域名很少包含它们，仍需转义，
+    # 否则同一团队里人工构造的 document_id 可能混入另一个 origin 的导出。
+    escaped_origin = site_origin.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    params: list[object] = [team_id, site_origin, escaped_origin + "/%"]
+    status_sql = ""
+    if status:
+        status_sql = " AND status=?"
+        params.append(status)
+    params.append(capped + 1)
+    c = _connect()
+    try:
+        rows = c.execute(
+            "SELECT * FROM annotations WHERE team_id=? "
+            "AND (document_id=? OR document_id LIKE ? ESCAPE '\\')" + status_sql +
+            " ORDER BY document_id, created_at LIMIT ?",
+            params,
+        ).fetchall()
+    finally:
+        c.close()
+    truncated = len(rows) > capped
+    return [_row_to_ann(r) for r in rows[:capped]], truncated
 
 
 def get_document(team_id: str, document_id: str) -> dict | None:

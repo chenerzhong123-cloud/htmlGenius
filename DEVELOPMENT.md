@@ -28,7 +28,8 @@ cd bridge && node --test test/        # Native Host / bridge 逻辑：native 帧
 node tests/test_undo_history.js       # 撤销/重做状态机（纯逻辑）
 # 浏览器测试页（在浏览器或 jsdom 中打开，document.title 报 PASS/FAIL）：
 #   extension/*-test.html（change-contract / buildprompt / artifact-version / artifact-storage /
-#   apply-delta / sync / remote-store / version / login / comment-task-selection）
+#   apply-delta / sync / remote-store / version / login / invite-email-login / site-export /
+#   comment-task-selection）
 ```
 
 浏览器测试页可用 **jsdom** 无头驱动（注入 `crypto.webcrypto` + `indexedDB`(fake-indexeddb) + `fetch` 后 `runScripts:"dangerously"`，轮询 `document.title`）；390px 三态截图用 **puppeteer-core + 系统 Chrome（headful）**。`/tmp` 下常备 `puppeteer-core / jsdom / fake-indexeddb` 用于本地复现与截图。真实 Claude Code 运行属手工 smoke（消耗本机额度），自动化用假 CLI 覆盖，**不得伪造通过**。
@@ -41,12 +42,12 @@ node tests/test_undo_history.js       # 撤销/重做状态机（纯逻辑）
 uv run pytest -v          # 仅多人协同自托管后端
 ```
 
-覆盖：健康检查 / 数据模型 / SQLite 存储 / HTTP API / 定位算法 / 端到端重定位 / UI e2e / 编辑器·工具栏·序列化·sanitize / 版本管理 / v0.4 协同（schema 迁移 · SSE 房间 · 写后广播 · presence GC · 仅作者删除级联）/ v0.5 飞书 OAuth（sessions · lark 客户端 · require_session · /auth 端点 · 硬身份作者）/ v0.5.1 评论编辑（PATCH 作者校验 · 跨团队/非作者 403 · 不存在 404）。
+覆盖：健康检查 / 数据模型 / SQLite 存储 / HTTP API / 定位算法 / 端到端重定位 / UI e2e / 编辑器·工具栏·序列化·sanitize / 版本管理 / v0.4 协同（schema 迁移 · SSE 房间 · 写后广播 · presence GC · 仅作者删除级联）/ v0.5 飞书 OAuth（sessions · lark 客户端 · require_session · /auth 端点 · 硬身份作者）/ v0.5.1 评论编辑（PATCH 作者校验 · 跨团队/非作者 403 · 不存在 404）/ 邀请码 + 邮箱验证码免密码入团 / 按团队与网站 origin 聚合未解决评论。
 
 ## 架构（Chrome 扩展 + 本机 Agent 桥，主形态）
 
 - **content-script**（注入页面）：text-quote 定位、非侵入 overlay、富文本/元素级编辑、`get-export`/`artifact-update-ready` 受控消费（打开新版本 + 重锚）。
-- **sidepanel**：评论收件箱 / 评论选择流 / Change Contract 表单 / 本机 Agent 发送与只读结果态；状态机用 `data-step="select|compose"` 显式表达，临时选择只存内存。
+- **sidepanel**：评论收件箱 / 评论选择流 / 整站评论 Prompt 导出 / 邀请码 + 邮箱免密码入团 / Change Contract 表单 / 本机 Agent 发送与只读结果态；状态机用 `data-step="select|compose"` 显式表达，临时选择只存内存。
 - **background**（service worker）：`bridge-start` 严格校验（自取 artifact state、`run_kind` 透传、restructure 拒绝 candidate）→ 连 Native Host → 路由 host 事件 → completion 逐字段双校验。v0.9.13：「精准修补」+ provider 支持 `patch` 时内部升级为 `patch_preview`/`patch_apply` 两阶段（预览可确认 / 直接应用，坏 JSON 自动回落 candidate）。
 - **bridge/**（Node Native Messaging host，`com.htmlgenius.local_bridge`，provider-neutral）：`claude-cli.mjs`（固定 argv、`shell:false`、auth、超时）、`task-bundle.mjs`（规范化 JSON + SHA-256 + 固定 prompt）、`candidate-workspace.mjs`（source 快照 + manifest + sibling + 形态/路径校验）、`patch-edits.mjs`（v0.9.13 确定性编辑：编辑 schema 校验 + 范围映射 + 文本级外科应用，未改字节逐字保留）、`host-runner.mjs`（handoff / candidate / plan / patch 编排）。
 - **安全模型**：source 永不自动覆盖；Claude 只写 workspace 内 candidate，host 校验后复制 sibling；run 记录只存元数据；无 promote/overwrite/auto-accept 路径。candidate 的 `--allowed-tools` 仅 `Read,Glob,Grep,Write`，handoff / patch 仅只读（patch 模式 Claude 只输出结构化编辑 JSON、不写任何文件，由 host 确定性应用）。
@@ -80,7 +81,15 @@ uv run uvicorn server.app:app --port 8000 --reload
 | `HG_SMTP_USER` / `HG_SMTP_PASS` | SMTP 登录账号 / 密码(阿里云邮件推送=发信地址 + 控制台设的 SMTP 密码;个人邮箱=邮箱地址 + 授权码) | — |
 | `HG_SMTP_FROM` | 发件人地址(默认取 `HG_SMTP_USER`) | — |
 
+### Zeabur 部署
+
+仓库根目录的 `Dockerfile` 固定使用 Python 3.12、uv 与 Uvicorn，并只安装生产依赖；这样可避免 Zeabur 因开发依赖中的 Playwright 自动安装浏览器。`zbpack.json` 保留为非 Docker 构建器的启动配置。首次部署后必须在 Zeabur 为服务挂载持久卷到 `/data`；镜像已设置 `HTMLEDITOR_DB=/data/annotations.db`，未挂卷时 SQLite 会随重新部署丢失。生产环境还必须设置 `HG_ENV=production`、随机生成的 `HG_STREAM_SECRET`，以及上表中的 SMTP 发信变量。部署后至少检查 `/healthz`、邮箱验证码投递、免密码邀请加入和整站评论导出。
+
 **邮箱登录(邮箱 + 密码 · 带 email 验证码)**:第三个 provider,与 Google/飞书并存,服务无 VPN 用户。端点 `/auth/email/{register,verify,login,resend}`;注册带邮箱验证码(验证码服务端只存 pbkdf2 哈希)。身份模型统一为 `user_id`——老 Google 数据 `user_id == google_sub`,迁移纯改名+加列、零数据改写、幂等;邮箱用户可凭邀请码加入团队、与 Google 用户协作。邮件 env 未配=日志模式(开发/测试用,验证码进服务端日志,解耦邮件基建)。
+
+**免密码邀请加入**：受邀者调用 `/auth/invite-email/request` 提交邀请码与邮箱；服务端先校验邀请，再发送 6 位、10 分钟有效且最多尝试 5 次的验证码。`/auth/invite-email/verify` 验证邮箱归属后原子兑换邀请、创建或复用邮箱身份并签发普通 team session，全程不设置或存储密码。客户端默认在当前设备启用该 session 的自动恢复。
+
+**整站评论导出**：`GET /api/site-annotations?site_origin=https://example.com&status=open` 必须携带 session，只查询当前 `team_id` 且 `document_id` 属于精确 HTTP(S) origin 的评论；默认上限 1000、最大 5000，并显式返回 `truncated`。扩展将结果按页面分组、剔除团队标识后生成结构化 Prompt 并仅写入本机剪贴板。
 
 **匿名使用统计(漏斗埋点 · v0.9.16)**:双写架构——扩展侧 `analytics-core.js`(纯函数:白名单/seq/游标/GA 时间窗) + `analytics.js`(页面薄壳) + background SW 单写者队列(`chrome.storage.local` 的 `hg_events`/`hg_cursors`,上限 500 条);事件经 `POST /api/events`(无鉴权、每 IP 每分钟 30 次 `WindowLimiter` 限流、每请求 ≤50 条 + 32KB 413、事件名与参数值双层白名单、`UNIQUE(client_id,seq)` 幂等、90 天惰性清理)落 `analytics_events` 表,GA4 走 Measurement Protocol 直发(`config.js` 的 `ga_measurement_id`/`ga_api_secret` 为空时整路跳过)。重试语义为"下次唤醒时整段补发"(不申请 alarms 权限);GA 补发受 72h 回填上限约束(≤72h 真实时间戳 / ≤7 天钳制 / 超出放弃)。
 

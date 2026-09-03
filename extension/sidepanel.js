@@ -26,12 +26,62 @@
     return tabs[0];
   }
 
+  const CONTENT_SCRIPT_FILES = [
+    "vendor/purify.min.js", "text-quote.js", "remote-store.js", "sync.js", "storage.js",
+    "artifact-version.js", "buildprompt.js", "i18n.js", "undo.js", "palette.js", "config.js",
+    "content-script.js",
+  ];
+  const _contentRecoveryByTab = new Map();
+  function canInjectInto(tab) {
+    const url = String((tab && tab.url) || "");
+    return /^(https?|file):/i.test(url);
+  }
+  async function recoverContentScript(tab, showDialog) {
+    if (!tab || !tab.id || !canInjectInto(tab) || !chrome.scripting || !chrome.scripting.executeScript) return false;
+    if (_contentRecoveryByTab.has(tab.id)) return _contentRecoveryByTab.get(tab.id);
+    const recovery = (async () => {
+      try {
+        // 若依赖脚本仍在，只重载主控制器，避免重复执行带顶层 const 的 storage/text-quote；
+        // 若页面是在扩展安装前打开的，则一次补齐完整依赖链。
+        const probe = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => !!(window.describe && window.anchor && window.Storage && window.HG_I18N && window.HG_CONFIG),
+        });
+        const depsReady = !!(probe && probe[0] && probe[0].result);
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id }, files: depsReady ? ["content-script.js"] : CONTENT_SCRIPT_FILES,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        const active = await getActiveTab();
+        if (!active || active.id !== tab.id) return false;
+        const reply = await chrome.tabs.sendMessage(tab.id, { type: "activate", showDialog: showDialog !== false });
+        return !!(reply && reply.ok);
+      } catch (e) {
+        console.log("content script recovery failed:", e);
+        return false;
+      } finally {
+        _contentRecoveryByTab.delete(tab.id);
+      }
+    })();
+    _contentRecoveryByTab.set(tab.id, recovery);
+    return recovery;
+  }
+
   async function sendToContent(msg) {
     const tab = await getActiveTab();
     if (!tab) return null;
     currentTabId = tab.id;
     try { return await chrome.tabs.sendMessage(tab.id, msg); }
-    catch (e) { console.log("content script not ready:", e); return null; }
+    catch (e) {
+      console.log("content script not ready:", e);
+      // 扩展刚安装/更新、页面长时间挂起或 content-script 上下文失效时，无需让用户刷新网页：
+      // 对普通网页自动补注入一次，再重放原操作。Chrome 内部页仍按平台限制保持不可注入。
+      if (await recoverContentScript(tab, false)) {
+        try { return await chrome.tabs.sendMessage(tab.id, msg); }
+        catch (retryError) { console.log("content script retry failed:", retryError); }
+      }
+      return null;
+    }
   }
   // 重拉当前 tab 评论并刷新评论卡(+ 若 contract 开则同步本轮快照)。切 tab / 评论变化时用。
   // sendToContent 已把 currentTabId 更新为活动 tab → sidepanel 按 tab 独立显示评论。
@@ -94,12 +144,15 @@
         break;
       } catch (e) { /* content-script 尚未注入，继续短暂重试 */ }
     }
+    // 静态注入失效时（如扩展刚更新但网页早已打开），主动补注入，无需用户刷新页面。
+    if (!csReady) csReady = await recoverContentScript(tab, showDialog);
     // file:// 页若 content script 未就绪,几乎必是「允许访问文件网址」toggle 关了(Chrome 对所有扩展默认关)。
     syncFileAccessHint(tab, csReady);
     syncRefreshHint(tab, csReady);
     // #5: 建立长连接 —— 侧边栏关闭(页面销毁)→ Chrome 自动断开 port → content-script onDisconnect 失活
     if (csReady) { try { _panelPort = chrome.tabs.connect(tab.id, { name: "hg-panel" }); } catch (e) {} }
     if (oldPort && oldPort !== _panelPort) { try { oldPort.disconnect(); } catch (e) {} } // 切标签:最后再断旧 port
+    return csReady;
   }
   // file:// 本地文件页:Chrome 默认禁止扩展访问(content script 不注入),需用户在 chrome://extensions
   // 手动开「允许访问文件网址」。检测到 file:// 页 CS 未就绪 → 显示提示;CS 就绪或非 file:// → 隐藏。
@@ -148,16 +201,32 @@
   window.addEventListener("beforeunload", onPanelClosing);
 
   // 接收 content-script 消息
-  chrome.runtime.onMessage.addListener((msg, sender) => {
+  const _handledCommentRequests = new Set();
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === "annotations-updated") {
       refreshAnnotations();
     } else if (msg.type === "presence") {
       renderPresence(msg.users);
     } else if (msg.type === "start-comment") {
+      const requestId = String(msg.request_id || "");
+      if (requestId && _handledCommentRequests.has(requestId)) {
+        if (sendResponse) sendResponse({ ok: true, duplicate: true });
+        return;
+      }
       // issue 4:若正处于「整理评论/创建任务」流程(sheet 打开),草稿会被 sheet 盖住、用户无处输入 →
       // 不开草稿,改显示醒目提示,引导先返回收件箱。否则正常开草稿。
       if (_contractOpen) { showBlockNotice(); }
-      else { hideBlockNotice(); showDraft(msg.selector, msg.quote); }
+      else {
+        // 账号/团队页会用 CSS 隐藏评论视图。收到页面上的评论动作时自动回到评论页，
+        // 避免草稿已创建却完全不可见，表现成“Comment 没反应”。
+        if (document.body.classList.contains("account-view-open")) exitAccountView();
+        hideBlockNotice(); showDraft(msg.selector, msg.quote);
+      }
+      if (requestId) {
+        _handledCommentRequests.add(requestId);
+        if (_handledCommentRequests.size > 32) _handledCommentRequests.delete(_handledCommentRequests.values().next().value);
+      }
+      if (sendResponse) sendResponse({ ok: true, blocked: !!_contractOpen });
     } else if (msg.type === "edit-state") {
       // content-script 切换编辑态后同步按钮(确认窗「刷新」/ 手动「开始编辑」均经此)
       _editing = !!msg.editing;
@@ -413,6 +482,8 @@
     // v0.6.1:无未失效顶层批注时,底部「生成修改任务」disabled 且不打开空 Composer
     const _exportBtn = document.getElementById("export-btn");
     if (_exportBtn) _exportBtn.disabled = !((byParent[null] || []).length > 0);
+    const _siteExportBtn = document.getElementById("site-export-btn");
+    if (_siteExportBtn) _siteExportBtn.hidden = !!isLocal || !_sessionUser;
   }
 
   // #2: 一键删除所有失效评论(原文已不在当前页面)
@@ -462,19 +533,32 @@
     });
   }
 
-  function commitDraft() {
+  async function commitDraft() {
     const draft = document.querySelector(".draft-card");
     if (!draft || !_pendingSelector) return;
+    const save = draft.querySelector(".draft-save");
+    if (save && save.disabled) return;
     const comment = draft.querySelector(".draft-input").value;
-    sendToContent({
+    const pending = _pendingSelector;
+    if (save) { save.disabled = true; save.textContent = t("draft.saving"); }
+    const response = await sendToContent({
       type: "commit-comment",
-      selector: _pendingSelector.selector,
-      quote: _pendingSelector.quote,
+      selector: pending.selector,
+      quote: pending.quote,
       comment: comment || "",
     });
-    HGAnalytics.track("comment_create", { is_local: isLocal }); // 只计根评论;回复不计,避免漏斗重复计数
-    _pendingSelector = null;
-    draft.remove();
+    // 用户可能在网络等待期间又选了一段文字。旧请求的回包不得
+    // 清除新草稿，只处理自己发起时对应的节点和 selector。
+    if (!draft.isConnected || _pendingSelector !== pending) return;
+    if (response && response.ok) {
+      HGAnalytics.track("comment_create", { is_local: isLocal }); // 只计服务端/本地确认成功的根评论
+      _pendingSelector = null;
+      draft.remove();
+      await refreshAnnotations();
+      return;
+    }
+    if (save) { save.disabled = false; save.textContent = t("draft.save"); }
+    showToast(t("toast.commentFail"));
   }
 
   function cancelDraft() {
@@ -1371,7 +1455,7 @@
   // 注:Chrome 禁止扩展编程打开 chrome:// 页面(tabs.create 报 Cannot access a chrome:// URL),故只能复制由用户粘贴。
   // 用 Chrome Web Store 官方扩展 ID(非 chrome.runtime.id):商店版用户装的即此 ID;本地 unpacked 版的 runtime.id 是
   // manifest key 派生的开发 ID,与商店 ID 不同,故写死官方 ID 保证复制链接恒指向官方扩展详情页。
-  const OFFICIAL_EXTENSION_ID = "fcapmgclnpiljjlcaficmjjclkaepaon";
+  const OFFICIAL_EXTENSION_ID = "jmafkpbgpkjojjgaaiojcafbdgpglola";
   if (fileAccessCopy) fileAccessCopy.addEventListener("click", () => connCopy("chrome://extensions/?id=" + OFFICIAL_EXTENSION_ID, "fileAccess.copied", fileAccessCopy));
   if (connRepairCancel) connRepairCancel.addEventListener("click", () => { if (connRepairConfirm) connRepairConfirm.hidden = true; });
   if (connRepairOk) connRepairOk.addEventListener("click", async () => {
@@ -1863,6 +1947,36 @@
     });
   });
 
+  const siteExportBtn = document.getElementById("site-export-btn");
+  if (siteExportBtn) siteExportBtn.addEventListener("click", async () => {
+    if (siteExportBtn.disabled) return;
+    siteExportBtn.disabled = true;
+    siteExportBtn.textContent = t("siteExport.loading");
+    try {
+      const [tab, cfg] = await Promise.all([getActiveTab(), getCfg(["session_token", "mode"])]);
+      const origin = window.SiteCommentExport && tab ? window.SiteCommentExport.siteOrigin(tab.url || "") : null;
+      if (!origin) throw new Error(t("siteExport.unsupported"));
+      if (!cfg.session_token || cfg.mode !== "synced") throw new Error(t("siteExport.loginRequired"));
+      const response = await fetch(
+        BACKEND + "/api/site-annotations?site_origin=" + encodeURIComponent(origin) + "&status=open",
+        { headers: { Authorization: "Bearer " + cfg.session_token } },
+      );
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((data && data.detail) || t("siteExport.failed"));
+      if (!data || !data.total) { showToast(t("siteExport.empty")); return; }
+      const lang = window.HG_I18N ? window.HG_I18N.getLang() : "en";
+      const prompt = window.SiteCommentExport.buildPrompt(data, lang);
+      await navigator.clipboard.writeText(prompt);
+      showToast(t(data.truncated ? "siteExport.copiedTruncated" : "siteExport.copied")
+        .replace("{comments}", String(data.total)).replace("{pages}", String(data.page_count)));
+    } catch (e) {
+      showToast((e && e.message) || t("siteExport.failed"));
+    } finally {
+      siteExportBtn.disabled = false;
+      siteExportBtn.textContent = t("siteExport.button");
+    }
+  });
+
   document.getElementById("edit-btn").addEventListener("click", () => {
     // 编辑态由 content-script 经 edit-state 广播同步;此处乐观翻转即时反馈
     if (!_editing) HGAnalytics.track("edit_start", { is_local: isLocal });
@@ -2180,7 +2294,7 @@
     }
   }
   // === 账号工作区流程(状态机:一次一个任务;渲染进 #account-flow-host)===
-  let _accountFlow = "home";      // auth|email-login|email-register|home|invite|members|rename|switch|join-or-create|join|create
+  let _accountFlow = "home";      // auth|email-login|email-register|invite-email|home|invite|members|rename|switch|join-or-create|join|create
   let _authEmailOpen = false;      // auth 首屏是否展开邮箱输入
   let _accountEmail = "";          // 邮箱(跨 auth 子状态)
   let _accountError = "";          // 当前页错误文案(红色)
@@ -2194,6 +2308,8 @@
   let _emailCodeSent = false;      // 注册:验证码已发送
   let _emailCooldown = 0;          // 发送验证码倒计时(秒)
   let _emailCooldownTimer = null;
+  let _inviteEmailCodeSent = false; // 免密码入团:已发验证码
+  let _inviteTeamName = "";         // 服务端验证后返回的团队名
   let _pendingJoinCode = "";       // join-code 消息预填的邀请码
   let _pendingJoinIntent = false;  // 仅邀请链接可置 true，防止旧 code 劫持常规登录
   let _joinRequestCopied = false;  // 加入页的邀请请求话术已复制
@@ -2220,7 +2336,7 @@
   const FLOW_TITLE = {
     home: "ws.t.home", invite: "ws.t.invite", members: "ws.t.members", rename: "ws.t.rename", switch: "ws.t.switch",
     "join-or-create": "ws.t.joc", join: "ws.t.join", create: "ws.t.create",
-    auth: "ws.t.account", "email-login": "ws.t.account", "email-register": "ws.t.account",
+    auth: "ws.t.account", "email-login": "ws.t.account", "email-register": "ws.t.account", "invite-email": "ws.t.join",
   };
   function setAccountFlow(flow, opts) {
     const previousFlow = _accountFlow;
@@ -2236,7 +2352,7 @@
     // 标题栏是唯一的返回导航：邮箱子步骤返回登录方式，首层则退出团队面板。
     const back = document.getElementById("account-back-btn");
     if (back) {
-      const returnsToProviderChoice = !_sessionUser && (_authEmailOpen || flow === "email-login" || flow === "email-register");
+      const returnsToProviderChoice = !_sessionUser && (_authEmailOpen || flow === "email-login" || flow === "email-register" || flow === "invite-email");
       back.style.visibility = "visible";
       back.setAttribute("aria-label", returnsToProviderChoice ? t("ws.auth.back") : t("account.back"));
       back.title = returnsToProviderChoice ? t("ws.auth.back") : t("account.back");
@@ -2250,11 +2366,11 @@
     if (!accountHost) return;
     const out = !_sessionUser;
     let flow = _accountFlow;
-    if (out && ["auth", "email-login", "email-register"].indexOf(flow) < 0) flow = "auth";
-    if (!out && ["auth", "email-login", "email-register"].indexOf(flow) >= 0) flow = "home";
+    if (out && ["auth", "email-login", "email-register", "invite-email"].indexOf(flow) < 0) flow = "auth";
+    if (!out && ["auth", "email-login", "email-register", "invite-email"].indexOf(flow) >= 0) flow = "home";
     _accountFlow = flow;
     const views = {
-      auth: viewAuth, "email-login": viewEmailLogin, "email-register": viewEmailRegister,
+      auth: viewAuth, "email-login": viewEmailLogin, "email-register": viewEmailRegister, "invite-email": viewInviteEmail,
       home: viewHome, profile: viewProfile, invite: viewInvite, members: viewMembers, rename: viewRename, switch: viewSwitch,
       "join-or-create": viewJoinOrCreate, join: viewJoin, create: viewCreate,
     };
@@ -2267,6 +2383,7 @@
     if (!_authEmailOpen) {
       return '<div class="af-page"><h2 class="af-h2">' + t("ws.auth.title") + "</h2>"
         + '<p class="af-copy">' + t("ws.auth.copy") + "</p>"
+        + '<button class="af-primary" data-action="open-invite-email">' + t("inviteEmail.open") + "</button>"
         + '<button class="af-primary" data-action="google-login">' + t("login.google") + "</button>"
         + '<button class="af-secondary" data-action="open-email">' + t("ws.auth.email") + "</button>"
         + '<label class="af-check af-auto-login"><input type="checkbox" data-field="remember_auto_login"' + (_rememberAutoLogin ? " checked" : "") + '><span>' + t("login.rememberAuto") + "</span></label>" + afStatus() + afErr() + "</div>";
@@ -2299,6 +2416,24 @@
     return '<form class="af-page" data-form="' + form + '"><p class="af-eyebrow">' + esc(_accountEmail) + "</p>"
       + '<h2 class="af-h2">' + t("ws.register.title") + "</h2>"
       + '<p class="af-copy">' + t("ws.register.copy") + "</p>" + body + afErr() + "</form>";
+  }
+  function viewInviteEmail() {
+    let body, form;
+    if (_inviteEmailCodeSent) {
+      form = "invite-email-verify";
+      body = (_inviteTeamName ? '<p class="af-status">' + esc(t("inviteEmail.team").replace("{team}", _inviteTeamName)) + "</p>" : "")
+        + '<input class="af-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required data-field="code" placeholder="' + t("login.codePh") + '">'
+        + '<button class="af-primary" type="submit"' + (_emailBusy ? " disabled" : "") + '>' + t("inviteEmail.verify") + "</button>"
+        + '<button class="af-link" type="button" data-action="invite-email-resend">' + (_emailCooldown > 0 ? t("login.resendIn").replace("{n}", _emailCooldown) : t("ws.register.resend")) + "</button>";
+    } else {
+      form = "invite-email-request";
+      body = '<input class="af-input" type="text" required data-field="invite_code" placeholder="' + t("ws.join.ph") + '" value="' + esc(_pendingJoinCode) + '">'
+        + '<input class="af-input" type="email" autocomplete="email" required data-field="email" placeholder="' + t("login.emailPh") + '" value="' + esc(_accountEmail) + '">'
+        + '<button class="af-primary" type="submit"' + (_emailBusy ? " disabled" : "") + '>' + t("inviteEmail.send") + "</button>";
+    }
+    return '<form class="af-page" data-form="' + form + '"><p class="af-eyebrow">' + t("ws.t.join") + "</p>"
+      + '<h2 class="af-h2">' + t("inviteEmail.title") + "</h2>"
+      + '<p class="af-copy">' + t("inviteEmail.copy") + "</p>" + body + afErr() + "</form>";
   }
   // --- 已登录 ---
   // 行尾右箭头:SVG 描边图标(16px),替代原「›」字符(太小、各平台渲染不一)
@@ -2394,7 +2529,7 @@
       + '<button class="af-choice" data-action="go-create"><span class="af-choice-icon">＋</span><span class="af-choice-text"><b>' + t("ws.create.title") + '</b><span>' + t("ws.create.sub") + "</span></span></button></div>";
   }
   function viewJoin() {
-    const exampleUrl = new URL("/htmlgenius/join?code=inv_a1b2c3d4e5f6", BACKEND || "https://deuce.monster").href;
+    const exampleUrl = new URL("/join?code=inv_a1b2c3d4e5f6", BACKEND || "https://deuce.monster").href;
     const request = t("ws.join.request");
     return '<div class="af-page"><p class="af-eyebrow">' + t("ws.t.join") + '</p><h2 class="af-h2">' + t("ws.join.title") + '</h2><p class="af-copy">' + t("ws.join.copy") + "</p>"
       + '<input class="af-input" type="text" data-field="invite_code" placeholder="' + t("ws.join.ph") + '" value="' + esc(_pendingJoinCode) + '">'
@@ -2596,13 +2731,25 @@
       HGAnalytics.track("login_success", { method: "email" }); showToast(t("login.emailSuccess"));
     } catch (e) { _emailBusy = false; trackLoginFailure("email", "email_login", e); setAccountFlow("email-login", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
   }
+  function updateEmailCooldownLabel() {
+    if (!accountHost) return;
+    const label = _emailCooldown > 0
+      ? t("login.resendIn").replace("{n}", _emailCooldown)
+      : t("ws.register.resend");
+    accountHost.querySelectorAll('[data-action="resend-code"], [data-action="invite-email-resend"]').forEach((button) => {
+      button.textContent = label;
+    });
+  }
   function startEmailCooldown(n) {
     _emailCooldown = n;
     if (_emailCooldownTimer) clearInterval(_emailCooldownTimer);
+    updateEmailCooldownLabel();
     _emailCooldownTimer = setInterval(() => {
-      _emailCooldown -= 1;
+      _emailCooldown = Math.max(0, _emailCooldown - 1);
       if (_emailCooldown <= 0) { clearInterval(_emailCooldownTimer); _emailCooldownTimer = null; }
-      if (_accountFlow === "email-register") renderAccountFlow();
+      // 只更新倒计时按钮，不重建整个表单。重建会每秒替换验证码输入框，
+      // 造成焦点丢失、已输入内容清空，最终无法提交。
+      if (_accountFlow === "email-register" || _accountFlow === "invite-email") updateEmailCooldownLabel();
     }, 1000);
   }
   async function sendCodeAction() {
@@ -2643,6 +2790,51 @@
       showToast(t("login.emailSuccess"));
     } catch (e) { _emailBusy = false; trackLoginFailure("email", "email_verify", e); setAccountFlow("email-register", { error: t("login.fail") + (e && e.message ? e.message : e) }); }
   }
+  async function inviteEmailRequestAction() {
+    _pendingJoinCode = hostField("invite_code").trim() || _pendingJoinCode;
+    _accountEmail = hostField("email").trim() || _accountEmail;
+    if (!_pendingJoinCode) { setAccountFlow("invite-email", { error: t("ws.join.fillCode") }); return; }
+    if (!_accountEmail || _accountEmail.indexOf("@") < 0) { setAccountFlow("invite-email", { error: t("login.emailFillEmail") }); return; }
+    if (_emailBusy) return;
+    HGAnalytics.track("login_start", { method: "invite_email" });
+    _emailBusy = true; renderAccountFlow();
+    try {
+      const r = await Login.inviteEmailRequest(BACKEND, _accountEmail, _pendingJoinCode);
+      _inviteTeamName = (r && r.team_name) || "";
+      _inviteEmailCodeSent = true;
+      _emailBusy = false; _accountError = ""; startEmailCooldown(60); renderAccountFlow();
+      showToast(t("login.codeSent"));
+    } catch (e) {
+      _emailBusy = false;
+      trackLoginFailure("invite_email", "invite_email_request", e);
+      setAccountFlow("invite-email", { error: t("login.fail") + (e && e.message ? e.message : e) });
+    }
+  }
+  async function inviteEmailVerifyAction() {
+    const code = hostField("code").trim();
+    if (!code) { setAccountFlow("invite-email", { error: t("login.emailFillCode") }); return; }
+    if (_emailBusy) return;
+    _emailBusy = true; renderAccountFlow();
+    try {
+      const r = await Login.inviteEmailVerify(BACKEND, _accountEmail, _pendingJoinCode, code);
+      // 邀请加入的目标就是免反复登录；验证一次后默认在本设备恢复已有 session。
+      await setAutoLogin(true);
+      await applySession(r, true, { restoreLastTeam: false });
+      _emailBusy = false; _inviteEmailCodeSent = false; _pendingJoinCode = ""; _pendingJoinIntent = false;
+      HGAnalytics.track("login_success", { method: "invite_email" });
+      HGAnalytics.track("join_workspace");
+      showToast(t("inviteEmail.success"));
+    } catch (e) {
+      _emailBusy = false;
+      trackLoginFailure("invite_email", "invite_email_verify", e);
+      setAccountFlow("invite-email", { error: t("login.fail") + (e && e.message ? e.message : e) });
+    }
+  }
+  async function inviteEmailResendAction() {
+    if (_emailBusy || _emailCooldown > 0) return;
+    _inviteEmailCodeSent = false;
+    await inviteEmailRequestAction();
+  }
   async function switchTeam(teamId) {
     try {
       const r = await _authFetch("/auth/switch-team",
@@ -2676,7 +2868,7 @@
     });
     _sessionUser = null;
     _sessionTeam = null; _sessionTeams = [];
-    _authEmailOpen = false; _accountEmail = ""; _emailCodeSent = false; _membersCache = null; _pendingJoinCode = ""; _pendingJoinIntent = false; _rememberAutoLogin = false; _accountStatus = "";
+    _authEmailOpen = false; _accountEmail = ""; _emailCodeSent = false; _inviteEmailCodeSent = false; _inviteTeamName = ""; _membersCache = null; _pendingJoinCode = ""; _pendingJoinIntent = false; _rememberAutoLogin = false; _accountStatus = "";
     renderPresence([]); // 登出:清掉在线人数
     setAccountFlow("auth");
   }
@@ -2692,6 +2884,8 @@
       case "email-login": emailLoginAction(); break;
       case "email-register-start": sendCodeAction(); break;
       case "email-register": emailRegisterAction(); break;
+      case "invite-email-request": inviteEmailRequestAction(); break;
+      case "invite-email-verify": inviteEmailVerifyAction(); break;
       case "rename-team": renameTeam(); break;
       case "rename-profile": renameProfile(); break;
     }
@@ -2717,6 +2911,7 @@
     }
     switch (a) {
       case "google-login": doGoogleLogin(); break;
+      case "open-invite-email": _inviteEmailCodeSent = false; _inviteTeamName = ""; setAccountFlow("invite-email"); break;
       case "open-email": _rememberAutoLogin = hostChecked("remember_auto_login"); _authEmailOpen = true; setAccountFlow("auth"); break;
       case "back-auth": _authEmailOpen = false; setAccountFlow("auth"); break;
       case "email-continue": emailContinue(); break;
@@ -2724,6 +2919,7 @@
       case "send-code":
       case "resend-code": resendCodeAction(); break;
       case "email-register": emailRegisterAction(); break;
+      case "invite-email-resend": inviteEmailResendAction(); break;
       case "gen-invite": genInviteAndCopy(); break;
       case "remove-member": _confirmRemoveSub = actEl.dataset.sub || ""; renderAccountFlow(); break;
       case "cancel-remove": _confirmRemoveSub = ""; renderAccountFlow(); break;
@@ -2746,6 +2942,7 @@
       _pendingJoinCode = msg.code;
       _pendingJoinIntent = true;
       enterAccountView({ preserveJoinCode: true });
+      setAccountFlow("invite-email");
     }
   });
 
@@ -2928,8 +3125,9 @@
   });
   if (accountBackBtn) accountBackBtn.addEventListener("click", () => {
     // 登录流程：邮箱输入/密码/验证码均回到登录方式选择；不在页面底部重复放一个「‹ 返回」。
-    if (!_sessionUser && (_authEmailOpen || _accountFlow === "email-login" || _accountFlow === "email-register")) {
+    if (!_sessionUser && (_authEmailOpen || _accountFlow === "email-login" || _accountFlow === "email-register" || _accountFlow === "invite-email")) {
       _authEmailOpen = false;
+      if (_accountFlow === "invite-email") { _inviteEmailCodeSent = false; _inviteTeamName = ""; }
       setAccountFlow("auth");
       return;
     }
@@ -3048,14 +3246,6 @@
   });
   const diagAuto = document.getElementById("diag-auto-toggle");
   if (diagAuto) diagAuto.addEventListener("change", () => setCfg({ hgAutoDiag: !!diagAuto.checked }));
-
-  // v0.9.9 前往官网(header 主页按钮 → 新标签打开;URL 取 manifest.homepage_url,与商店/仓库同源)
-  const websiteBtn = document.getElementById("website-btn");
-  if (websiteBtn) websiteBtn.addEventListener("click", () => {
-    const url = (chrome.runtime.getManifest().homepage_url) || "https://www.deuce.monster/htmlgenius/";
-    try { chrome.tabs.create({ url }).catch(() => { window.open(url, "_blank"); }); }
-    catch (e) { window.open(url, "_blank"); }
-  });
 
   // 点击外部关三个浮层
   document.addEventListener("click", (e) => {
@@ -3179,7 +3369,11 @@
       if (incoming) reconcileTabRun(incoming);
     })();
   });
-  chrome.tabs.onUpdated.addListener((_id, info) => { if (info && info.status === "complete") { activateActiveTab(false); refreshAnnotations(); } });
+  chrome.tabs.onUpdated.addListener((_id, info) => {
+    if (info && info.status === "complete") {
+      (async () => { await activateActiveTab(false); await refreshAnnotations(); })();
+    }
+  });
   chrome.tabs.onRemoved.addListener((tabId) => { _tabStates.delete(tabId); });
   // #1: 心跳 —— 只要侧边栏开着就持续 ping 活动标签(收起后停止 → content-script 看门狗失活)
   setInterval(pingActiveTab, 4000);
@@ -3222,7 +3416,7 @@
       }
       applyTheme(theme);
     });
-    activateActiveTab(true); // 打开侧边栏:激活当前页 + 弹编辑确认窗(刷新前)
+    await activateActiveTab(true); // 打开侧边栏:先确保页面脚本就绪，再读取评论，避免初始化竞态
     const resp = await sendToContent({ type: "get-annotations" });
     if (resp && resp.type === "annotations-list") {
       isLocal = resp.isLocal;

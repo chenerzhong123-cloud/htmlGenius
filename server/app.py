@@ -4,7 +4,8 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,26 +35,28 @@ DB_PATH = Path(os.environ.get("HTMLEDITOR_DB", BASE / "annotations.db"))
 # BE-3 / BE-7: 环境判定统一在 envutil.is_dev_env(app/auth 共用,避免循环 import)。
 
 
-# BE-9: 显式 CORS origin 列表替代 allow_origins=["*"]。默认放:
+# BE-9: 显式扩展/官网 origin 列表，并允许 http(s) 宿主网页 origin。默认放:
 #   - 扩展 origin(chrome-extension://<扩展ID>,ID 由 manifest key 的 SHA256 推导)
 #   - 官网 https://www.deuce.monster
-# HG_CORS_ORIGINS(env,逗号分隔)可整体覆盖/追加。注意:content-script 在宿主页面
-# 发起的请求 Origin 是宿主页(如 https://open.feishu.cn)—— 若直接由 content-script
-# 跨域调后端,需把宿主 origin 也加入 HG_CORS_ORIGINS;推荐经 background SW 中转
-# (其 fetch 的 Origin 为扩展自身,已在默认列表内)。
+# content-script 在被标注网页中发起团队同步，Origin 是宿主网页（如
+# https://www.seozzr.com），而 PageTack 需要在任意 http(s) 站点工作，因此用严格
+# scheme 正则允许这些 origin。这不放宽鉴权：团队 API 仍必须携带 Bearer session，
+# allow_credentials=False 也不会带宿主 Cookie。HG_CORS_ORIGINS(env,逗号分隔)仍可整体覆盖
+# 显式列表，但 http(s) 宿主站点保持允许，否则登录后批注会全部被浏览器拦截。
 def _cors_origins() -> list[str]:
     env = os.environ.get("HG_CORS_ORIGINS", "").strip()
     if env:
         return [o.strip() for o in env.split(",") if o.strip()]
     return [
         "chrome-extension://ppobilnafpchnmjjflgafohnbdjlbbac",
+        "chrome-extension://jmafkpbgpkjojjgaaiojcafbdgpglola",
         "https://www.deuce.monster",
     ]
 
 
 # BE-7: 生产(HG_ENV 非 dev)关闭 /docs /redoc /openapi.json,并改用不泄露内部代号的 title。
 app = FastAPI(
-    title="htmlGenius API",
+    title="PageTack API",
     docs_url="/docs" if is_dev_env() else None,
     redoc_url="/redoc" if is_dev_env() else None,
     openapi_url="/openapi.json" if is_dev_env() else None,
@@ -74,6 +77,7 @@ if not is_dev_env() and not (
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
+    allow_origin_regex=r"^https?://[^/]+$",
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
@@ -128,6 +132,11 @@ async def security_headers(request, call_next):
 # R-2(v0.9.9):移除 /docs、/samples 匿名静态挂载 —— /docs 会泄露 docs/ 内的 client_secret 与审计报告,
 # /samples 文件名内嵌 document_id(喂跨租户 IDOR)。仅保留 /static(正规静态资源)。确需对外提供时加鉴权后再挂。
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
+app.mount(
+    "/pagetack",
+    StaticFiles(directory=BASE / "landing" / "demo-2026-07", html=True),
+    name="pagetack-site",
+)
 
 
 @app.get("/health")
@@ -141,18 +150,23 @@ def root():
 
 
 @app.get("/join")
+@app.get("/htmlgenius/join", include_in_schema=False)
 def join_page(code: str):
-    """加入链接落地页。扩展的 content-script 检测 ?code → 自动塞进侧边栏。"""
+    """加入链接落地页。扩展的 content-script 检测 ?code → 自动塞进侧边栏。
+
+    ``/htmlgenius/join`` 是 v1.0.3 已复制出去的旧链接，保留兼容入口，
+    避免已发送邀请在修正生成路径后立即失效。
+    """
     # BE-1:code 是无校验的 query 参数,必须 HTML 转义后再插入,否则反射型 XSS。
     safe_code = html.escape(code, quote=True)
     return HTMLResponse(
         f"""<!doctype html><html lang="zh"><head><meta charset="utf-8">
-<title>加入团队 · htmlGenius</title></head>
+<title>加入团队 · PageTack</title></head>
 <body style="font-family:sans-serif;padding:40px;line-height:1.6">
-<h3>加入 htmlGenius 团队</h3>
+<h3>加入 PageTack 团队</h3>
 <p>邀请码:<code style="font-size:1.2em">{safe_code}</code></p>
-<p>已自动填入扩展侧边栏 → 点「Google 登录」→「加入」即可。</p>
-<p style="color:#888;font-size:13px">若没弹出,打开 htmlGenius 侧边栏,在「加入团队」粘贴上面的码。</p>
+<p>已自动填入扩展侧边栏 → 输入邮箱和验证码即可加入，无需设置密码。</p>
+<p style="color:#888;font-size:13px">若没弹出,打开 PageTack 侧边栏,在「加入团队」粘贴上面的码。</p>
 </body></html>""",
         media_type="text/html; charset=utf-8",
     )
@@ -365,7 +379,7 @@ class EmailResendIn(BaseModel):
 
 @app.post("/auth/email/register")
 def email_register(payload: EmailRegisterIn, request: Request):
-    """注册:校验 → 生成验证码 → 发邮件(未配 HG_SMTP_HOST 走日志模式)。"""
+    """注册:校验 → 生成验证码 → 发邮件(仅开发环境允许日志模式)。"""
     _require_rate(_auth_limiter, _client_ip(request))
     try:
         email_auth.start_registration(payload.email, payload.password, payload.name)
@@ -423,6 +437,37 @@ def email_probe(payload: EmailProbeIn, request: Request):
         return email_auth.probe(payload.email)
     except email_auth.EmailAuthError as e:
         raise HTTPException(status_code=e.status, detail=e.detail)
+
+
+class InviteEmailRequestIn(BaseModel):
+    email: str = Field(max_length=200)
+    invite_code: str = Field(min_length=1, max_length=64)
+
+
+class InviteEmailVerifyIn(InviteEmailRequestIn):
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+@app.post("/auth/invite-email/request")
+def invite_email_request(payload: InviteEmailRequestIn, request: Request):
+    """Passwordless invite entry: validate invite, then email a short-lived code."""
+    _require_rate(_auth_limiter, _client_ip(request))
+    try:
+        return email_auth.start_invite_email(payload.email, payload.invite_code)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+
+
+@app.post("/auth/invite-email/verify")
+def invite_email_verify(payload: InviteEmailVerifyIn, request: Request):
+    """Verify mailbox ownership, join the invite's team and issue a normal session."""
+    _require_rate(_auth_limiter, _client_ip(request))
+    try:
+        result = email_auth.verify_invite_email(payload.email, payload.invite_code, payload.code)
+    except email_auth.EmailAuthError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    storage.insert_audit_log(result["user"]["id"], result["team_id"], "login.invite_email")
+    return result
 
 
 class SwitchTeamIn(BaseModel):
@@ -506,7 +551,7 @@ def team_rename(team_id: str, payload: TeamRenameIn, session: Session = Depends(
 def create_invite(session: Session = Depends(require_session)):
     """当前 session 的 team 生成邀请码(任意成员可生)。"""
     code = teams.create_invite(session.team_id, session.open_id)
-    return {"code": code, "team_id": session.team_id, "join_url": f"/htmlgenius/join?code={code}"}
+    return {"code": code, "team_id": session.team_id, "join_url": f"/join?code={code}"}
 
 
 # === 团队治理(owner 守卫;仅适用 Google 自建团队,Lark 团队无 membership 行) ===
@@ -628,9 +673,10 @@ def _v_version(x):
 
 _PROVIDERS = ("claude_code_cli", "codex_app_server", "github_copilot")
 _SCOPES = ("precise_patch", "local_optimize", "regenerate")
-_METHODS = ("google", "email")
+_METHODS = ("google", "email", "invite_email")
 _LOGIN_STAGES = ("google_config", "oauth_flow", "oauth_token", "google_auth", "google_session",
-                 "email_probe", "email_register", "email_resend", "email_verify", "email_login")
+                 "email_probe", "email_register", "email_resend", "email_verify", "email_login",
+                 "invite_email_request", "invite_email_verify")
 _LOGIN_CODES = ("GOOGLE_CONFIG_MISSING", "OAUTH_FLOW_FAILED", "OAUTH_TOKEN_MISSING", "INVALID_REQUEST",
                 "UNAUTHORIZED", "CONFLICT", "INVALID_INPUT", "RATE_LIMITED", "HTTP_ERROR", "UNKNOWN")
 EVENT_SPECS = {
@@ -845,6 +891,64 @@ def list_annotations(document_id: str, session: Session = Depends(require_sessio
     items = storage.list_annotations(document_id, session.team_id)
     print(f"[ann] LIST team={session.team_id} doc={document_id} -> {len(items)}", flush=True)
     return {"items": items}
+
+
+def _normalize_site_origin(raw: str) -> str:
+    """Canonicalize a client-supplied site origin without accepting paths or credentials."""
+    try:
+        parsed = urlsplit((raw or "").strip())
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            raise ValueError
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError
+        if parsed.path not in {"", "/"}:
+            raise ValueError
+        hostname = parsed.hostname.lower()
+        host = f"[{hostname}]" if ":" in hostname else hostname
+        port = parsed.port
+        if port and not ((parsed.scheme.lower() == "http" and port == 80) or
+                         (parsed.scheme.lower() == "https" and port == 443)):
+            host += f":{port}"
+        return f"{parsed.scheme.lower()}://{host}"
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="site_origin must be an HTTP(S) origin")
+
+
+@app.get("/api/site-annotations")
+def list_site_annotations(
+    site_origin: str = Query(..., max_length=500),
+    status: Literal["open", "resolved", "stale", "all"] = "open",
+    limit: int = Query(1000, ge=1, le=5000),
+    session: Session = Depends(require_session),
+):
+    """Export one team's comments for every page on an exact site origin."""
+    origin = _normalize_site_origin(site_origin)
+    items, truncated = storage.list_site_annotations(
+        session.team_id,
+        origin,
+        None if status == "all" else status,
+        limit,
+    )
+    pages: list[dict] = []
+    current: "dict | None" = None
+    for item in items:
+        if current is None or current["document_id"] != item["document_id"]:
+            parsed = urlsplit(item["document_id"])
+            current = {
+                "document_id": item["document_id"],
+                "path": parsed.path or "/",
+                "items": [],
+            }
+            pages.append(current)
+        current["items"].append(item)
+    return {
+        "site_origin": origin,
+        "status": status,
+        "total": len(items),
+        "page_count": len(pages),
+        "truncated": truncated,
+        "pages": pages,
+    }
 
 
 @app.delete("/api/annotations/{aid}")

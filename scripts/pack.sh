@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# scripts/pack.sh — 打包 htmlGenius 扩展为 Chrome Web Store 上传 zip
+# scripts/pack.sh — 打包 PageTack 扩展为 Chrome Web Store 上传 zip
 #
-# 产物:dist/htmlGenius-<version>.zip,manifest.json 在 zip 根目录(商店要求)。
+# 产物:dist/PageTack-<version>.zip,manifest.json 在 zip 根目录(商店要求)。
 # 设计要点:
 #   - 以 extension/ 全量为根,排除 *-test.html 开发页与系统垃圾;
 #   - 密钥 / pem / db 本就不在 extension/ 内,这里再加自检兜底;
@@ -18,7 +18,7 @@ fi
 # 从 manifest 读版本号('"version"' 不会误匹配 "manifest_version":前者 v 前是引号,后者 v 前是下划线)
 VERSION=$(grep -m1 '"version"' "$EXT/manifest.json" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
 if [ -z "${VERSION:-}" ]; then echo "❌ 解析版本失败"; exit 1; fi
-echo "📦 打包 htmlGenius v$VERSION"
+echo "📦 打包 PageTack v$VERSION"
 
 DIST="$ROOT/dist"
 STAGE="$(mktemp -d)"
@@ -41,7 +41,7 @@ find "$STAGE" -name '.DS_Store' -delete
 node -e "const fs=require('fs');const f=process.argv[1];const m=JSON.parse(fs.readFileSync(f,'utf8'));const stripped=[];for(const k of ['key','update_url']){if(k in m){delete m[k];stripped.push(k);}}fs.writeFileSync(f,JSON.stringify(m,null,2)+'\n');console.log(stripped.length?('已从上传包移除: '+stripped.join(', ')):'manifest 无 key/update_url,跳过');" "$STAGE/manifest.json"
 
 # 5) 打包:进 staging 目录打,保证 manifest.json 落在 zip 根
-OUT="$DIST/htmlGenius-$VERSION.zip"
+OUT="$DIST/PageTack-$VERSION.zip"
 rm -f "$OUT"
 ( cd "$STAGE" && COPYFILE_DISABLE=1 zip -r -X "$OUT" . -x '*.DS_Store' -x '__MACOSX*' -x '*/.DS_Store' >/dev/null )
 

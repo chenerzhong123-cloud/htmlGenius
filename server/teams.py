@@ -91,6 +91,46 @@ def get_email_user(email: str) -> "dict | None":
     return {"user_id": r["user_id"], "name": r["name"], "password_hash": r["password_hash"]} if r else None
 
 
+def get_or_create_invite_email_user(email: str) -> dict:
+    """Resolve a verified email identity for passwordless invite entry.
+
+    Existing password-based email accounts keep their user id, so their own
+    earlier comments remain theirs. Google/Lark identities are not implicitly
+    linked by a matching string email; account linking needs a separate,
+    explicit flow.
+    """
+    normalized = email.strip().lower()
+    c = _connect()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            row = c.execute(
+                "SELECT user_id, name FROM users WHERE lower(email)=? "
+                "AND provider IN ('email','email_magic') AND email_verified=1 "
+                "ORDER BY CASE provider WHEN 'email' THEN 0 ELSE 1 END LIMIT 1",
+                (normalized,),
+            ).fetchone()
+            if row:
+                c.execute("UPDATE users SET last_seen=? WHERE user_id=?", (_now(), row["user_id"]))
+                result = {"user_id": row["user_id"], "name": row["name"] or normalized}
+            else:
+                user_id = "usr_" + secrets.token_hex(12)
+                now = _now()
+                c.execute(
+                    "INSERT INTO users(user_id, provider, subject, email, name, picture, "
+                    "password_hash, email_verified, first_seen, last_seen) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (user_id, "email_magic", normalized, normalized, normalized, "", None, 1, now, now),
+                )
+                result = {"user_id": user_id, "name": normalized}
+            c.execute("COMMIT")
+            return result
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+    finally:
+        c.close()
+
+
 class TeamLimitExceeded(Exception):
     """用户拥有的团队数已达 HG_MAX_TEAMS_PER_USER 上限。"""
 
@@ -194,6 +234,26 @@ def create_invite(team_id: str, creator_sub: str, max_uses: int = 50) -> str:
     return code
 
 
+def valid_invite(code: str) -> "dict | None":
+    """Read-only invite validation used before sending an email code."""
+    c = _connect()
+    try:
+        r = c.execute(
+            "SELECT i.team_id, i.max_uses, i.used_count, i.expires_at, t.name AS team_name "
+            "FROM invites i JOIN teams t ON t.team_id=i.team_id WHERE i.code=?",
+            (code,),
+        ).fetchone()
+    finally:
+        c.close()
+    if r is None:
+        return None
+    if r["max_uses"] is not None and r["used_count"] >= r["max_uses"]:
+        return None
+    if r["expires_at"] and datetime.now(timezone.utc) > datetime.fromisoformat(r["expires_at"]):
+        return None
+    return {"team_id": r["team_id"], "team_name": r["team_name"] or ""}
+
+
 def redeem_invite(code: str, sub: str) -> "str | None":
     """校验码(存在 + 未超额 + 未过期)→ 加 membership → 自增 used_count。失败返回 None。"""
     c = _connect()
@@ -230,25 +290,35 @@ def join_team(code: str, user_id: str) -> "str | None":
     """凭邀请码加入团队(幂等:已是成员直接返回 team_id,不消耗名额)。无效/过期/超额 → None。"""
     c = _connect()
     try:
-        row = c.execute(
-            "SELECT team_id, max_uses, used_count, expires_at FROM invites WHERE code=?", (code,)
-        ).fetchone()
-        if row is None:
-            return None
-        if c.execute(
-            "SELECT 1 FROM memberships WHERE user_id=? AND team_id=?", (user_id, row["team_id"])
-        ).fetchone():
-            return row["team_id"]  # 已是成员 → 幂等返回
-        if row["max_uses"] is not None and row["used_count"] >= row["max_uses"]:
-            return None
-        if row["expires_at"] and datetime.now(timezone.utc) > datetime.fromisoformat(row["expires_at"]):
-            return None
-        c.execute(
-            "INSERT OR IGNORE INTO memberships(user_id, team_id, joined_at) VALUES(?,?,?)",
-            (user_id, row["team_id"], _now()),
-        )
-        c.execute("UPDATE invites SET used_count=used_count+1 WHERE code=?", (code,))
-        return row["team_id"]
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            row = c.execute(
+                "SELECT team_id, max_uses, used_count, expires_at FROM invites WHERE code=?", (code,)
+            ).fetchone()
+            if row is None:
+                c.execute("ROLLBACK")
+                return None
+            if c.execute(
+                "SELECT 1 FROM memberships WHERE user_id=? AND team_id=?", (user_id, row["team_id"])
+            ).fetchone():
+                c.execute("COMMIT")
+                return row["team_id"]  # 已是成员 → 幂等返回
+            if row["max_uses"] is not None and row["used_count"] >= row["max_uses"]:
+                c.execute("ROLLBACK")
+                return None
+            if row["expires_at"] and datetime.now(timezone.utc) > datetime.fromisoformat(row["expires_at"]):
+                c.execute("ROLLBACK")
+                return None
+            c.execute(
+                "INSERT INTO memberships(user_id, team_id, joined_at) VALUES(?,?,?)",
+                (user_id, row["team_id"], _now()),
+            )
+            c.execute("UPDATE invites SET used_count=used_count+1 WHERE code=?", (code,))
+            c.execute("COMMIT")
+            return row["team_id"]
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
     finally:
         c.close()
 

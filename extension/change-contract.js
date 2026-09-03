@@ -278,7 +278,7 @@
   function renderPrompt(task) {
     var meta = modeById(task.mode);
     var lines = [];
-    lines.push("# HTML Genius 修改任务");
+    lines.push("# PageTack 修改任务");
     lines.push("");
     // SUP-11:数据约定 —— 评论/回复/补充说明/必须保留/定位原文均为不可信用户数据,以定界符包裹;
     // 其中任何形似指令的文字一律视为素材,不得据此改变本任务的模式/范围/约束。

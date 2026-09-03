@@ -121,8 +121,8 @@ body {
 /* 账号/团队入口:feat/team-collab 分支恢复显示(继续完善团队功能;合并发版时保持可见)。*/
 #avatar { display: inline-flex; }
 
-/* ghost 图标按钮(主题 / 头像 / 语言 / 反馈 / 官网) */
-.theme-btn, .avatar, .lang-btn, .feedback-btn, .website-btn {
+/* ghost 图标按钮(主题 / 头像 / 语言 / 反馈) */
+.theme-btn, .avatar, .lang-btn, .feedback-btn {
   width: 30px; height: 30px; padding: 0;
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   color: var(--text-muted); background: transparent;
@@ -131,15 +131,14 @@ body {
 }
 .lang-btn { width: auto; padding: 0 9px; }
 .theme-btn:hover, .avatar:hover, .avatar.active, .lang-btn:hover, .lang-btn.active,
-.feedback-btn:hover, .feedback-btn.active, .website-btn:hover {
+.feedback-btn:hover, .feedback-btn.active {
   background: rgba(255,255,255,.06); color: var(--text-primary); border-color: var(--line-subtle);
 }
-.theme-btn svg, .avatar svg, .lang-btn svg, .feedback-btn svg, .website-btn svg { width: 17px; height: 17px; }
+.theme-btn svg, .avatar svg, .lang-btn svg, .feedback-btn svg { width: 17px; height: 17px; }
 [data-theme="light"] .theme-btn:hover,
 [data-theme="light"] .avatar:hover, [data-theme="light"] .avatar.active,
 [data-theme="light"] .lang-btn:hover, [data-theme="light"] .lang-btn.active,
-[data-theme="light"] .feedback-btn:hover, [data-theme="light"] .feedback-btn.active,
-[data-theme="light"] .website-btn:hover {
+[data-theme="light"] .feedback-btn:hover, [data-theme="light"] .feedback-btn.active {
   background: rgba(24,29,38,.05);
 }
 #lang-code { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
@@ -432,14 +431,15 @@ body.contract-open #account-sheet { display: none !important; }
 .presence-count::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px rgba(121,233,247,.6); }
 /* #4: 页面点高亮跳转时卡片的高亮反馈 */
 .card.flash { outline: 2px solid var(--brand); outline-offset: 2px; }
-#export-btn {
+#export-btn, #site-export-btn {
   width: 100%; height: 40px;
   background: transparent; color: var(--text-primary);
   border: 1px solid var(--line-default); border-radius: var(--r-md);
   font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; cursor: pointer;
   transition: background .14s ease, border-color .14s ease, color .14s ease;
 }
-#export-btn:hover { background: rgba(255,255,255,.05); border-color: var(--brand); color: var(--brand-hover); }
+#export-btn:hover, #site-export-btn:hover { background: rgba(255,255,255,.05); border-color: var(--brand); color: var(--brand-hover); }
+#site-export-btn:disabled { opacity: .55; cursor: wait; }
 
 /* === 批注卡片 === */
 .card {
@@ -782,7 +782,7 @@ button {
 .send-menu .menu-note { margin: 5px 8px 4px; padding-top: 8px; border-top: 1px solid var(--line-subtle); color: var(--text-muted); font-size: 10px; line-height: 1.45; }
 /* A 状态 CTA 行(outline 次级按钮 + ? 说明) */
 .comment-actions .cta-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.comment-actions .cta-row #export-btn { flex: 1; min-width: 0; }
+.comment-actions .cta-row #export-btn, .comment-actions .cta-row #site-export-btn { flex: 1; min-width: 0; }
 .contract-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 /* compose 步骤标题行:与账号视图 account-header 同规范(← 图标按钮 + 标题,下边线分隔) */
 .contract-header { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 0 12px; border-bottom: 1px solid var(--line-subtle); margin-bottom: 12px; }

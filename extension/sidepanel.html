@@ -2,12 +2,9 @@
 <meta charset="UTF-8"><link rel="stylesheet" href="sidepanel.css">
 </head><body>
 <div id="header">
-  <!-- v0.9.9:去掉顶部品牌文案,图标组整体左对齐;报错反馈旁新增「前往官网」入口 -->
+  <!-- 顶部品牌文案已移除，保留反馈、主题、语言与账号入口。 -->
   <div class="header-actions">
     <button id="feedback-btn" class="feedback-btn" data-i18n-title="feedback.title" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="feedback-sheet"><svg viewBox="0 0 1024 1024" fill="currentColor" aria-hidden="true"><path d="M128 160.86c-8.837 0-16 7.293-16 16.288v556.034c0 8.995 7.163 16.287 16 16.287h277.555l94.486 108.203c7.934 7.329 18.047 6.723 23.918 0l94.486-108.203H896c8.837 0 16-7.292 16-16.287V177.148c0-8.995-7.163-16.287-16-16.287H128z m0-48.86h768c35.346 0 64 29.168 64 65.148v556.034c0 35.98-28.654 65.148-64 65.148H640l-80.166 91.803c-23.483 26.892-63.935 29.314-90.353 5.41a64.586 64.586 0 0 1-5.315-5.41L384 798.33H128c-35.346 0-64-29.168-64-65.148V177.148C64 141.168 92.654 112 128 112z m342.207 130h83.336c10.055 0 18.206 7.163 18.206 16 0 0.441-0.021 0.882-0.063 1.321l-31.118 330c-0.782 8.296-8.672 14.679-18.144 14.679h-21.099c-9.471 0-17.361-6.383-18.143-14.679l-31.119-330c-0.83-8.806 6.62-16.537 16.64-17.266 0.5-0.037 1.002-0.055 1.504-0.055z m32.999 386h18.206c10.055 0 18.206 7.163 18.206 16v38c0 8.837-8.151 16-18.206 16h-18.206C493.15 698 485 690.837 485 682v-38c0-8.837 8.151-16 18.206-16z"/></svg></button>
-    <button id="website-btn" class="website-btn" data-i18n-title="header.website" type="button">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>
-    </button>
     <button id="theme-btn" class="theme-btn" data-i18n-title="theme.title"></button>
     <button id="lang-btn" class="lang-btn" data-i18n-title="lang.title">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg><span id="lang-code">EN</span>
@@ -36,11 +33,11 @@
     <span data-i18n="sync.pausedBody">此页签的实时同步已暂停（省流模式）。切换到该页签后会自动恢复并同步最新评论。</span>
   </div>
   <div id="file-access-hint" class="file-access-hint" hidden>
-    <b data-i18n="fileAccess.title">允许 htmlGenius 访问本地文件</b>
+    <b data-i18n="fileAccess.title">允许 PageTack 访问本地文件</b>
     <span data-i18n="fileAccess.body">要编辑电脑中的网页文件，需要先打开一项权限。</span>
     <ol class="file-access-steps">
       <li data-i18n="fileAccess.step1">点击下方“复制设置地址”。</li>
-      <li data-i18n="fileAccess.step2">粘贴到浏览器地址栏并按回车，会直接打开 htmlGenius 的扩展详情页。</li>
+      <li data-i18n="fileAccess.step2">粘贴到浏览器地址栏并按回车，会直接打开 PageTack 的扩展详情页。</li>
       <li data-i18n="fileAccess.step3">打开“允许访问文件网址”开关。</li>
       <li data-i18n="fileAccess.step4">回到这里并刷新页面。</li>
     </ol>
@@ -48,8 +45,8 @@
     <span class="file-access-note" data-i18n="fileAccess.hint">复制后，请粘贴到浏览器顶部的地址栏。</span>
   </div>
   <div id="refresh-needed-hint" class="file-access-hint" hidden>
-    <b data-i18n="refreshNeeded.title">刷新页面以启用 htmlGenius</b>
-    <span data-i18n="refreshNeeded.body">此页面在安装 htmlGenius 前就已打开，刷新一下即可连接。</span>
+    <b data-i18n="refreshNeeded.title">刷新页面以启用 PageTack</b>
+    <span data-i18n="refreshNeeded.body">此页面在安装 PageTack 前就已打开，刷新一下即可连接。</span>
     <button id="refresh-now-btn" class="file-access-copy" type="button" data-i18n="refreshNeeded.btn">刷新页面</button>
   </div>
   <!-- P1-5:全站 host 权限改为按需申请(optional_host_permissions),未授权时引导用户开启 -->
@@ -150,6 +147,9 @@
     <!-- v0.7.2 状态 A 唯一任务入口:次级 outline CTA(spec §3.A) -->
     <div class="cta-row">
       <button id="export-btn" data-i18n="taskSelect.start">整理评论,创建编辑任务</button>
+    </div>
+    <div class="cta-row">
+      <button id="site-export-btn" data-i18n="siteExport.button" hidden>复制全站评论给 AI</button>
     </div>
   </div>
 </div>
@@ -283,7 +283,7 @@
                     <button id="conn-diag" class="conn-secondary" type="button" data-i18n="conn.copyDiag">复制诊断</button>
                   </div>
                   <div class="conn-repair-confirm" id="conn-repair-confirm" hidden>
-                    <p data-i18n="conn.repairConfirmText">安全修复会重写 HTML Genius 的 Chrome Host 注册文件；不会安装 Agent，也不会修改你的项目文件。</p>
+                    <p data-i18n="conn.repairConfirmText">安全修复会重写 PageTack 的 Chrome Host 注册文件；不会安装 Agent，也不会修改你的项目文件。</p>
                     <div class="conn-actions">
                       <button id="conn-repair-ok" class="conn-primary" type="button" data-i18n="conn.repairConfirmOk">确认修复</button>
                       <button id="conn-repair-cancel" class="conn-secondary" type="button" data-i18n="conn.cancel">取消</button>
@@ -372,6 +372,7 @@
 <script src="buildprompt.js"></script>
 <script src="change-contract.js"></script>
 <script src="login.js"></script>
+<script src="site-export.js"></script>
 <script src="i18n.js"></script>
 <script src="provider-metadata.js"></script>
 <script src="connection-center-state.js"></script>
