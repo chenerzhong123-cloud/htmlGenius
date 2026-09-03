@@ -148,8 +148,13 @@ def root():
 
 
 @app.get("/join")
+@app.get("/htmlgenius/join", include_in_schema=False)
 def join_page(code: str):
-    """加入链接落地页。扩展的 content-script 检测 ?code → 自动塞进侧边栏。"""
+    """加入链接落地页。扩展的 content-script 检测 ?code → 自动塞进侧边栏。
+
+    ``/htmlgenius/join`` 是 v1.0.3 已复制出去的旧链接，保留兼容入口，
+    避免已发送邀请在修正生成路径后立即失效。
+    """
     # BE-1:code 是无校验的 query 参数,必须 HTML 转义后再插入,否则反射型 XSS。
     safe_code = html.escape(code, quote=True)
     return HTMLResponse(
@@ -544,7 +549,7 @@ def team_rename(team_id: str, payload: TeamRenameIn, session: Session = Depends(
 def create_invite(session: Session = Depends(require_session)):
     """当前 session 的 team 生成邀请码(任意成员可生)。"""
     code = teams.create_invite(session.team_id, session.open_id)
-    return {"code": code, "team_id": session.team_id, "join_url": f"/htmlgenius/join?code={code}"}
+    return {"code": code, "team_id": session.team_id, "join_url": f"/join?code={code}"}
 
 
 # === 团队治理(owner 守卫;仅适用 Google 自建团队,Lark 团队无 membership 行) ===

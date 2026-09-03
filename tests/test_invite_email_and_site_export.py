@@ -47,6 +47,22 @@ def _annotation(token, document_id, comment, quote="target"):
     )
 
 
+def test_join_page_uses_root_path_and_keeps_legacy_links_working(tmp_path, monkeypatch):
+    _init(tmp_path, monkeypatch)
+    token = sessions.create_session("owner", "Owner", teams.create_team("Review team", "owner"))
+    created = client.post("/auth/invites", headers={"Authorization": f"Bearer {token}"})
+    assert created.status_code == 200
+    body = created.json()
+    assert body["join_url"] == f"/join?code={body['code']}"
+
+    current = client.get(body["join_url"])
+    legacy = client.get(f"/htmlgenius/join?code={body['code']}")
+    assert current.status_code == 200
+    assert legacy.status_code == 200
+    assert body["code"] in current.text
+    assert body["code"] in legacy.text
+
+
 def test_passwordless_invite_email_joins_and_issues_session(tmp_path, monkeypatch, sent_codes):
     _init(tmp_path, monkeypatch)
     team_id, invite_code = _invite()

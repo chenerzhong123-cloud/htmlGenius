@@ -2447,7 +2447,7 @@
       + '<button class="af-choice" data-action="go-create"><span class="af-choice-icon">＋</span><span class="af-choice-text"><b>' + t("ws.create.title") + '</b><span>' + t("ws.create.sub") + "</span></span></button></div>";
   }
   function viewJoin() {
-    const exampleUrl = new URL("/htmlgenius/join?code=inv_a1b2c3d4e5f6", BACKEND || "https://deuce.monster").href;
+    const exampleUrl = new URL("/join?code=inv_a1b2c3d4e5f6", BACKEND || "https://deuce.monster").href;
     const request = t("ws.join.request");
     return '<div class="af-page"><p class="af-eyebrow">' + t("ws.t.join") + '</p><h2 class="af-h2">' + t("ws.join.title") + '</h2><p class="af-copy">' + t("ws.join.copy") + "</p>"
       + '<input class="af-input" type="text" data-field="invite_code" placeholder="' + t("ws.join.ph") + '" value="' + esc(_pendingJoinCode) + '">'
