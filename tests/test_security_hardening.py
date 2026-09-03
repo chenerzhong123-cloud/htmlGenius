@@ -54,6 +54,30 @@ def test_security_headers_present(prod_env):
     assert r.headers.get("Referrer-Policy") == "no-referrer"
 
 
+def test_cors_allows_extension_requests_from_annotated_websites(prod_env):
+    """登录后的 RemoteStore 从 content-script 请求 API，Origin 是当前网页。"""
+    origin = "https://www.seozzr.com"
+    preflight = client.options(
+        "/api/annotations",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers.get("access-control-allow-origin") == origin
+
+    # CORS 只允许浏览器到达，不会绕过 Bearer 会话鉴权。
+    unauthenticated = client.get(
+        "/api/annotations",
+        params={"document_id": "https://www.seozzr.com/"},
+        headers={"Origin": origin},
+    )
+    assert unauthenticated.status_code == 401
+    assert unauthenticated.headers.get("access-control-allow-origin") == origin
+
+
 def test_annotation_control_chars_stripped(dev_env):
     h = _login_dev()
     payload = {

@@ -35,13 +35,14 @@ DB_PATH = Path(os.environ.get("HTMLEDITOR_DB", BASE / "annotations.db"))
 # BE-3 / BE-7: 环境判定统一在 envutil.is_dev_env(app/auth 共用,避免循环 import)。
 
 
-# BE-9: 显式 CORS origin 列表替代 allow_origins=["*"]。默认放:
+# BE-9: 显式扩展/官网 origin 列表，并允许 http(s) 宿主网页 origin。默认放:
 #   - 扩展 origin(chrome-extension://<扩展ID>,ID 由 manifest key 的 SHA256 推导)
 #   - 官网 https://www.deuce.monster
-# HG_CORS_ORIGINS(env,逗号分隔)可整体覆盖/追加。注意:content-script 在宿主页面
-# 发起的请求 Origin 是宿主页(如 https://open.feishu.cn)—— 若直接由 content-script
-# 跨域调后端,需把宿主 origin 也加入 HG_CORS_ORIGINS;推荐经 background SW 中转
-# (其 fetch 的 Origin 为扩展自身,已在默认列表内)。
+# content-script 在被标注网页中发起团队同步，Origin 是宿主网页（如
+# https://www.seozzr.com），而 PageTack 需要在任意 http(s) 站点工作，因此用严格
+# scheme 正则允许这些 origin。这不放宽鉴权：团队 API 仍必须携带 Bearer session，
+# allow_credentials=False 也不会带宿主 Cookie。HG_CORS_ORIGINS(env,逗号分隔)仍可整体覆盖
+# 显式列表，但 http(s) 宿主站点保持允许，否则登录后批注会全部被浏览器拦截。
 def _cors_origins() -> list[str]:
     env = os.environ.get("HG_CORS_ORIGINS", "").strip()
     if env:
@@ -76,6 +77,7 @@ if not is_dev_env() and not (
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
+    allow_origin_regex=r"^https?://[^/]+$",
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
