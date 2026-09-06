@@ -1926,14 +1926,36 @@
   document.getElementById("act-undo").addEventListener("click", () => sendToContent({ type: "undo" }));
   document.getElementById("act-redo").addEventListener("click", () => sendToContent({ type: "redo" }));
   document.getElementById("act-reset").addEventListener("click", () => sendToContent({ type: "reset-edit" }));
-  // v0.9.6: 下载统一走这里(content-script 只回传 HTML;下载需在 side panel 触发以保住用户手势)
+  // v1.0.3: 下载改走 chrome.downloads + saveAs:true,弹出系统「另存为」对话框。
+  // 旧方案 a.click()(及 downloads 的 saveAs:false)在 Edge「每次下载前询问保存位置」
+  // 开启时只会在下载气泡里挂一张不显眼的确认卡,用户侧表现为「点了另存为没反应」
+  // (Windows Edge 用户实测反馈)。saveAs:true 强制弹标准保存框:显眼、可选位置、
+  // 可直接覆盖原文件,且不受浏览器下载设置影响,Chrome/Edge 行为一致。
   function downloadHtml(html, filename) {
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename || "page.html";
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    // chrome.downloads 拒绝含路径分隔符的文件名;顺带清掉 Windows 保留字符
+    const safeName = (filename || "page.html").replace(/[\\/:*?"<>|]/g, "_");
+    chrome.downloads.download({ url, filename: safeName, saveAs: true }, (downloadId) => {
+      if (downloadId === undefined) {
+        // 极端兜底(downloads 被企业策略禁用等):回退 anchor 点击并给用户可见反馈
+        console.error("[hg] chrome.downloads failed:", chrome.runtime.lastError && chrome.runtime.lastError.message);
+        const a = document.createElement("a");
+        a.href = url; a.download = safeName;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        showToast(t("toast.saveFailed"));
+        return;
+      }
+      const onDelta = (delta) => {
+        if (delta.id !== downloadId || !delta.state) return;
+        if (delta.state.current === "complete" || delta.state.current === "interrupted") {
+          chrome.downloads.onChanged.removeListener(onDelta);
+          URL.revokeObjectURL(url);
+        }
+      };
+      chrome.downloads.onChanged.addListener(onDelta);
+    });
   }
   // v0.9.6: 保存按钮右上角的「未保存」微标(有未提交草稿时点亮)
   function setSaveDot(on) {
@@ -1947,6 +1969,10 @@
     if (r && r.html) {
       downloadHtml(r.html, r.name || "page.html");
       if (r.committed) setSaveDot(false);
+    } else {
+      // v1.0.3: 此前所有失败(页面不可达/快照失败)静默,用户只见「点了没反应」——Edge
+      // 用户实测反馈的病灶之一,补 toast 让失败可感知。
+      showToast(t(r && r.code === "SNAPSHOT_FAILED" ? "toast.saveSnapshotFailed" : "toast.saveNoPage"), 4000);
     }
   });
   // v0.9.9: 草稿恢复横幅迁入 Side Panel —— 恢复/丢弃回传 content-script 执行(逻辑同原页内横幅按钮)
