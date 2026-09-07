@@ -1347,6 +1347,29 @@
     const clone = document.documentElement.cloneNode(true);
     clone.querySelectorAll("#hg-toolbar, #hg-draft-banner, .hg-hl, .hg-inspect, .hg-select, .hg-tip, .hg-drop").forEach((e) => e.remove());
     clone.querySelectorAll('style[data-hg-injected="ui"]').forEach((e) => e.remove()); // 剥离扩展注入样式(用户行内样式/emoji 文本保留)
+    // v1.0.3 导出纯净性(用户反馈:另存的文件"没有编辑效果"):
+    // 1) Blob 恒为 UTF-8 字节。原文件 GBK 等编码时,克隆保留了原 <meta charset=gbk>,
+    //    浏览器打开保存副本时按旧编码解读 UTF-8 字节 → 整页中文乱码,编辑效果更是无从谈起。
+    //    统一改写(含老式 http-equiv 写法)/补写 charset=utf-8。
+    // 2) 剥离扩展编辑态痕迹:<html data-hg-theme>(主题)、<body contenteditable>(编辑中保存)、
+    //    body 的 user-select:none(元素模式),用户打开副本应得到普通页面而非"整页可编辑"。
+    clone.removeAttribute("data-hg-theme");
+    const body = clone.querySelector("body");
+    if (body) {
+      body.removeAttribute("contenteditable");
+      if (body.style.userSelect === "none") body.style.removeProperty("user-select");
+    }
+    const head = clone.querySelector("head");
+    if (head) {
+      const meta = head.querySelector('meta[charset], meta[http-equiv="Content-Type" i]');
+      if (meta && meta.hasAttribute("charset")) meta.setAttribute("charset", "utf-8");
+      else if (meta) meta.setAttribute("content", "text/html; charset=utf-8");
+      else {
+        const m = document.createElement("meta");
+        m.setAttribute("charset", "utf-8");
+        head.insertBefore(m, head.firstChild);
+      }
+    }
     return "<!doctype html>\n" + clone.outerHTML;
   }
   // v0.9.6: 导出文件名优先取 artifact 路径 basename(本地 file:// 即原文件名),兜底 document.title
